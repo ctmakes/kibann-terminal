@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Renderer harness</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; background: #111; color: #ccc; font: 13px system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; }
+      header { display: flex; gap: 12px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #333; }
+      header select { background: #222; color: #ddd; border: 1px solid #444; padding: 2px 4px; }
+      header .desc { color: #888; }
+      header .stats { margin-left: auto; font-variant-numeric: tabular-nums; color: #9c9; }
+      main { flex: 1; display: flex; min-height: 0; }
+      #term { flex: 1; min-width: 0; }
+      #log { width: 360px; overflow: auto; border-left: 1px solid #333; padding: 6px 8px; font: 11px ui-monospace, monospace; white-space: pre-wrap; }
+      #log div { border-bottom: 1px solid #222; padding: 2px 0; }
+      body.bare header, body.bare #log { display: none; }
+      body.fixed main { flex: none; }
+      body.fixed #term { flex: none; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <label>Fixture <select id="fixture"></select></label>
+      <span class="desc" id="desc"></span>
+      <span class="stats" id="stats"></span>
+    </header>
+    <main>
+      <div id="term"></div>
+      <aside id="log"></aside>
+    </main>
+    <script type="module" src="./harness.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "kibann-terminal-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
+    "bench": "BENCH=1 playwright test bench --project=chromium-1x --project=webkit-1x",
+    "gen:proto": "cd .. && cargo test -q -p proto",
+    "check:proto": "npm run gen:proto && git diff --exit-code -- src/proto/generated"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@tauri-apps/api": "^2.12.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}
