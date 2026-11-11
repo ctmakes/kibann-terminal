@@ -72,7 +72,7 @@ pub struct Frame {
 }
 
 /// Fully resolved cell style. Inverse is already applied and blink is dropped.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Style {
     /// Resolved foreground, never default.

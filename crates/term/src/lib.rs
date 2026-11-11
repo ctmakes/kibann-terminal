@@ -4,9 +4,19 @@
 
 pub use libghostty_vt as vt;
 
+pub mod emulator;
+pub mod frame;
+pub mod keymap;
+pub mod session;
+
+pub use emulator::Emulator;
+pub use session::{Event, Session, Spawn};
+
 /// Version string of the linked libghostty-vt.
 pub fn ghostty_version() -> String {
-    vt::build_info::version_string().to_string_lossy().into_owned()
+    vt::build_info::version_string()
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -16,8 +26,10 @@ mod tests {
     use vt::screen::CellWide;
     use vt::{RenderState, Terminal};
 
+    type Cells = Vec<(String, CellWide, Option<(u8, u8, u8)>)>;
+
     /// One row read back from the render state: (text, wide, fg) per cell.
-    fn read_row(terminal: &Terminal<'_, '_>, y: usize) -> Vec<(String, CellWide, Option<(u8, u8, u8)>)> {
+    fn read_row(terminal: &Terminal<'_, '_>, y: usize) -> Cells {
         let mut state = RenderState::new().unwrap();
         let mut rows = RowIterator::new().unwrap();
         let mut cells = CellIterator::new().unwrap();

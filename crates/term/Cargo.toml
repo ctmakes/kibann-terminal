@@ -6,6 +6,7 @@ license.workspace = true
 description = "Terminal session: PTY + libghostty-vt emulator + frame builder. No Tauri dependency."
 
 [dependencies]
+portable-pty = "0.9"
 proto = { path = "../proto" }
 # libghostty-vt 1.0.1 support is on main but not yet on crates.io (0.2.2 targets
 # a pre-1.0 commit). Pinned by commit; move to the crates.io release once it ships.
