@@ -326,6 +326,7 @@ fn set_badge(window: tauri::WebviewWindow, count: u32) {
 }
 
 /// End every shell and the daemon, then quit.
+#[cfg(target_os = "macos")]
 fn quit_ending_sessions(app: &AppHandle) {
     if let Some(t) = app.try_state::<Term>() {
         let _ = t.send(ClientMsg::Shutdown);
@@ -334,6 +335,7 @@ fn quit_ending_sessions(app: &AppHandle) {
 }
 
 /// Menu item id for [`quit_ending_sessions`].
+#[cfg(target_os = "macos")]
 const QUIT_END_SESSIONS: &str = "quit-end-sessions";
 
 /// The macOS menu bar: the standard menus plus the workspace actions with

@@ -229,6 +229,17 @@ fn tab_id(t: TabId) -> String {
     format!("t{t}")
 }
 
+/// The daemon runs inside the app there (no socket yet), so nothing can
+/// reach it from outside.
+#[cfg(not(unix))]
+fn connect() -> Result<Client, Fail> {
+    Err(error(
+        "unsupported",
+        "the kibann command needs the daemon's socket, which this platform doesn't have yet",
+    ))
+}
+
+#[cfg(unix)]
 fn connect() -> Result<Client, Fail> {
     let socket = crate::paths::socket_path(cfg!(debug_assertions));
     let client = Client::connect(&socket, |_| {}).map_err(|e| {
