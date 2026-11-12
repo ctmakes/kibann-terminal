@@ -6,7 +6,7 @@ import "@fontsource/jetbrains-mono/700-italic.css";
 import type { Cursor, Frame, InputEvent } from "./proto";
 import { CursorLayer } from "./cursor";
 import { Grid } from "./grid";
-import { attachPaste } from "./input/clipboard";
+import { attachCopy, attachPaste, copyNow } from "./input/clipboard";
 import { ImeInput } from "./input/ime";
 import { KeyboardInput, detectPlatform, type Platform } from "./input/keyboard";
 import { MouseInput } from "./input/mouse";
@@ -65,6 +65,8 @@ export class TerminalView {
   readonly gridCanvas: HTMLCanvasElement;
   readonly overlay: HTMLCanvasElement;
   readonly textarea: HTMLTextAreaElement;
+  /** Shows where the view is while scrolled back into history. */
+  readonly scrollbarEl: HTMLDivElement;
   readonly grid = new Grid();
   readonly painter: Painter;
   readonly cursor: CursorLayer;
@@ -149,8 +151,19 @@ export class TerminalView {
       zIndex: "-1",
     });
 
+    this.scrollbarEl = document.createElement("div");
+    this.scrollbarEl.className = "term-scrollbar";
+    Object.assign(this.scrollbarEl.style, {
+      position: "absolute",
+      right: "2px",
+      width: "4px",
+      borderRadius: "2px",
+      pointerEvents: "none",
+      display: "none",
+    });
+
     this.gridEl.append(this.gridCanvas, this.overlay, this.textarea);
-    this.root.append(this.gridEl);
+    this.root.append(this.gridEl, this.scrollbarEl);
     container.append(this.root);
 
     this.painter = new Painter(this.gridCanvas, this.m);
@@ -158,7 +171,7 @@ export class TerminalView {
 
     const send = (e: InputEvent) => this.transport.input(e);
     const platform = opts.platform ?? detectPlatform();
-    const kb = new KeyboardInput(this.textarea, { send, activity: () => this.cursor.resetBlink() }, platform);
+    const kb = new KeyboardInput(this.textarea, { send, activity: () => this.cursor.resetBlink(), copy: copyNow }, platform);
     const ime = new ImeInput(this.textarea, { send, preedit: (t) => this.cursor.setPreedit(t) });
     const mouse = new MouseInput(
       this.overlay,
@@ -174,6 +187,7 @@ export class TerminalView {
       () => ime.dispose(),
       () => mouse.dispose(),
       attachPaste(this.textarea, send),
+      attachCopy(this.textarea, () => this.grid.selectionText),
       watchSize(container, (w, h) => this.layout(w, h)),
     );
     if (!opts.dpr) this.cleanups.push(watchDpr(() => this.remeasure()));
@@ -195,6 +209,11 @@ export class TerminalView {
   }
 
   private readonly mouse: MouseInput;
+
+  /** The selected text, or "" when nothing is selected. */
+  get selectionText(): string {
+    return this.grid.selectionText;
+  }
 
   private measure(): Metrics {
     return computeMetrics(measureFont(this.fontSize), this.fontSize, deviceRatio(this.opts.dpr));
@@ -287,6 +306,7 @@ export class TerminalView {
     const ms = performance.now() - t0;
 
     this.root.style.background = css(this.grid.defaultBg);
+    this.updateScrollbar();
     this.mouse.setTracking(this.grid.mouseTracking);
     this.positionTextarea();
     this.transport.ack(ackSeq);
@@ -296,6 +316,27 @@ export class TerminalView {
       full,
       dirty: full ? null : [...dirty].sort((a, b) => a - b),
       seq: ackSeq,
+    });
+  }
+
+  /** Visible only while scrolled back, sized and placed like the viewport in the history. */
+  private updateScrollbar(): void {
+    const { total, offset, len } = this.grid.scrollbar;
+    const el = this.scrollbarEl;
+    if (total <= len || offset + len >= total) {
+      el.style.display = "none";
+      return;
+    }
+    const pad = this.m.pad / this.m.dpr;
+    const track = this.root.clientHeight - 2 * pad;
+    const h = Math.max(16, (len / total) * track);
+    const top = pad + (offset / Math.max(1, total - len)) * (track - h);
+    Object.assign(el.style, {
+      display: "block",
+      top: `${top}px`,
+      height: `${h}px`,
+      background: css(this.grid.defaultFg),
+      opacity: "0.35",
     });
   }
 

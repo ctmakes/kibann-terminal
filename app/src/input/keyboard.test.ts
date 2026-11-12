@@ -74,3 +74,33 @@ describe("decideKeyDown", () => {
     expect(keyUpEvent(key({ key: "a", code: "KeyA" }), sides())).toMatchObject({ action: "release", text: null });
   });
 });
+
+describe("scrollback shortcuts", () => {
+  const d = (over: Partial<KeyLike> & { key: string; code: string }, p: "mac" | "other") => decideKeyDown(key(over), sides(), p);
+
+  it("pages with Shift+PageUp/PageDown everywhere", () => {
+    for (const p of ["mac", "other"] as const) {
+      expect(d({ key: "PageUp", code: "PageUp", shiftKey: true }, p)).toEqual({ kind: "scroll", by: "pages", n: -1 });
+      expect(d({ key: "PageDown", code: "PageDown", shiftKey: true }, p)).toEqual({ kind: "scroll", by: "pages", n: 1 });
+    }
+    expect(d({ key: "PageUp", code: "PageUp", metaKey: true }, "mac")).toEqual({ kind: "scroll", by: "pages", n: -1 });
+  });
+
+  it("jumps with Cmd+Home/End on macOS and Shift+Home/End elsewhere", () => {
+    expect(d({ key: "Home", code: "Home", metaKey: true }, "mac")).toEqual({ kind: "scroll", by: "top", n: 0 });
+    expect(d({ key: "End", code: "End", metaKey: true }, "mac")).toEqual({ kind: "scroll", by: "bottom", n: 0 });
+    expect(d({ key: "Home", code: "Home", shiftKey: true }, "other")).toEqual({ kind: "scroll", by: "top", n: 0 });
+    expect(d({ key: "End", code: "End", shiftKey: true }, "other")).toEqual({ kind: "scroll", by: "bottom", n: 0 });
+  });
+
+  it("leaves plain and other modified keys to the program", () => {
+    expect(d({ key: "PageUp", code: "PageUp" }, "mac")).toMatchObject({ kind: "key" });
+    expect(d({ key: "Home", code: "Home", shiftKey: true }, "mac")).toMatchObject({ kind: "key" });
+    expect(d({ key: "PageUp", code: "PageUp", ctrlKey: true, shiftKey: true }, "other")).toMatchObject({ kind: "key" });
+  });
+
+  it("copies with Ctrl+Shift+C off macOS", () => {
+    expect(d({ key: "C", code: "KeyC", ctrlKey: true, shiftKey: true }, "other")).toBe("copy");
+    expect(d({ key: "c", code: "KeyC", metaKey: true }, "mac")).toBe("passthrough");
+  });
+});

@@ -12,6 +12,8 @@ export type { Resize } from "./generated/Resize";
 export type { InputEvent } from "./generated/InputEvent";
 export type { KeyAction } from "./generated/KeyAction";
 export type { MouseAction } from "./generated/MouseAction";
+export type { Scrollbar } from "./generated/Scrollbar";
+export type { ScrollBy } from "./generated/ScrollBy";
 
 export const Flag = {
   BOLD: 1 << 0,

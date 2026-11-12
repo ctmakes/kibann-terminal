@@ -1,7 +1,7 @@
 // A simple screen model for fixtures and tests, plus the diff/RLE that turns
 // screens into protocol frames the same way the backend's frame builder will.
 
-import type { Cursor, Frame, MouseTracking, Row, Run, Style } from "../proto";
+import type { Cursor, Frame, MouseTracking, Row, Run, Scrollbar, Style } from "../proto";
 import { graphemes, graphemeWidth } from "../wcwidth";
 
 export interface Cell {
@@ -23,6 +23,8 @@ export class Screen {
   cursor: Cursor = { x: 0, y: 0, in_viewport: true, visible: true, blinking: false, style: "block", wide: false, color: null };
   mouseTracking: MouseTracking = "none";
   focusReporting = false;
+  /** Null means no scrollback: the viewport is the whole screen. */
+  scrollbar: Scrollbar | null = null;
 
   constructor(
     readonly cols: number,
@@ -141,5 +143,6 @@ export function buildFrame(seq: number, next: Screen, prev: Screen | null): Fram
     cursor: { ...next.cursor },
     mouse_tracking: next.mouseTracking,
     focus_reporting: next.focusReporting,
+    scrollbar: next.scrollbar ?? { total: next.rows, offset: 0, len: next.rows },
   };
 }

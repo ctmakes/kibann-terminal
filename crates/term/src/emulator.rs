@@ -7,21 +7,23 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use proto::{Frame, InputEvent, KeyAction, MouseAction, Resize};
+use proto::{Frame, InputEvent, KeyAction, MouseAction, Resize, ScrollBy};
 
 use crate::frame::FrameBuilder;
 use crate::keymap::{key_from_code, unshifted_codepoint};
+use crate::selection::Selector;
 use crate::vt::error::{Error, Result};
 use crate::vt::key::{self, Mods};
 use crate::vt::mode::Mode;
 use crate::vt::screen::Screen;
+use crate::vt::terminal::ScrollViewport;
 use crate::vt::{Terminal, focus, mouse, paste};
 
 /// How long a program may hold rendering (mode 2026) before we end the hold.
 pub const HOLD_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub const TERMINFO_NAME: &str = "xterm-256color";
-pub const SCROLLBACK_LINES: usize = 1000;
+pub const SCROLLBACK_LINES: usize = 10_000;
 
 /// State the terminal's callbacks write to.
 struct Shared {
@@ -44,6 +46,28 @@ pub struct Emulator {
     /// Mouse buttons held, as a bitmask of `1 << button`.
     buttons: u32,
     size: Resize,
+    sel: Selector,
+}
+
+/// Keys that only change modifiers; pressing them isn't typing.
+fn is_modifier(code: &str) -> bool {
+    matches!(
+        code,
+        "ShiftLeft"
+            | "ShiftRight"
+            | "ControlLeft"
+            | "ControlRight"
+            | "AltLeft"
+            | "AltRight"
+            | "MetaLeft"
+            | "MetaRight"
+            | "OSLeft"
+            | "OSRight"
+            | "CapsLock"
+            | "NumLock"
+            | "Fn"
+            | "FnLock"
+    )
 }
 
 fn mods(bits: u16) -> Mods {
@@ -98,7 +122,7 @@ impl Emulator {
                 // keep that one: it is just as consistent.
                 if s.captured.borrow().is_none()
                     && let Ok(mut b) = s.builder.try_borrow_mut()
-                    && let Ok(Some(f)) = b.build(t, false)
+                    && let Ok(Some(f)) = b.build(t, false, None)
                 {
                     *s.captured.borrow_mut() = Some(f);
                 }
@@ -118,6 +142,7 @@ impl Emulator {
             mouse_ev: mouse::Event::new()?,
             buttons: 0,
             size,
+            sel: Selector::new()?,
         })
     }
 
@@ -181,10 +206,41 @@ impl Emulator {
 
     /// Build a frame of everything that changed since the last one.
     pub fn build_frame(&mut self, force_full: bool) -> Result<Option<Frame>> {
+        let mut text = self.sel.take_pending(&self.term);
+        // A requested full frame replaces frames the frontend dropped, which
+        // may have carried the text.
+        if force_full && text.is_none() {
+            text = Some(self.sel.sent_text().to_owned());
+        }
         self.shared
             .builder
             .borrow_mut()
-            .build(&self.term, force_full)
+            .build(&self.term, force_full, text)
+    }
+
+    /// A selection drag is held past an edge; call [`Self::autoscroll_tick`]
+    /// every [`crate::selection::AUTOSCROLL_INTERVAL`] until this turns false.
+    pub fn autoscrolling(&self) -> bool {
+        self.sel.autoscrolling(&self.term)
+    }
+
+    pub fn autoscroll_tick(&mut self) -> Result<()> {
+        self.sel.autoscroll_tick(&self.term, self.size)
+    }
+
+    /// The user typed: drop the selection and jump back to the bottom.
+    fn typed(&mut self) -> Result<()> {
+        self.sel.clear(&self.term)?;
+        self.term.scroll_viewport(ScrollViewport::Bottom);
+        Ok(())
+    }
+
+    /// Position clamped to the grid, for the mouse encoder.
+    fn clamp_to_grid(&self, x: f32, y: f32) -> (f32, f32) {
+        let s = self.size;
+        let w = f32::from(s.cols) * f32::from(s.cell_w.max(1)) - 1.0;
+        let h = f32::from(s.rows) * f32::from(s.cell_h.max(1)) - 1.0;
+        (x.clamp(0.0, w.max(0.0)), y.clamp(0.0, h.max(0.0)))
     }
 
     /// Resize the terminal. Returns false if the size didn't change.
@@ -223,6 +279,9 @@ impl Emulator {
                 mods: m,
                 composing,
             } => {
+                if *action != KeyAction::Release && !composing && !is_modifier(code) {
+                    self.typed()?;
+                }
                 let action = match action {
                     KeyAction::Press => key::Action::Press,
                     KeyAction::Repeat => key::Action::Repeat,
@@ -254,10 +313,12 @@ impl Emulator {
                 self.key_enc.encode_to_vec(&self.key_ev, out)
             }
             InputEvent::Text { data } => {
+                self.typed()?;
                 out.extend_from_slice(data.as_bytes());
                 Ok(())
             }
             InputEvent::Paste { data } => {
+                self.typed()?;
                 let bracketed = self.term.mode(Mode::BRACKETED_PASTE)?;
                 let mut buf = vec![0u8; data.len() * 2 + 16];
                 loop {
@@ -283,11 +344,34 @@ impl Emulator {
                 y,
                 mods: m,
             } => {
+                // Left-button gestures select text unless a program tracks
+                // the mouse; Shift takes the mouse back from the program.
+                let m = mods(*m);
+                let tracking = self.term.is_mouse_tracking()?;
+                match action {
+                    MouseAction::Press
+                        if *button == Some(1) && (!tracking || m.contains(Mods::SHIFT)) =>
+                    {
+                        return self.sel.press(&self.term, self.size, *x, *y);
+                    }
+                    MouseAction::Motion if self.sel.active() => {
+                        return self
+                            .sel
+                            .drag(&self.term, self.size, *x, *y, m.contains(Mods::ALT));
+                    }
+                    MouseAction::Release if *button == Some(1) && self.sel.active() => {
+                        return self.sel.release(&self.term, self.size, *x, *y);
+                    }
+                    _ if !tracking => return Ok(()),
+                    MouseAction::Press => self.sel.cancel(),
+                    _ => {}
+                }
                 let action = match action {
                     MouseAction::Press => mouse::Action::Press,
                     MouseAction::Release => mouse::Action::Release,
                     MouseAction::Motion => mouse::Action::Motion,
                 };
+                let (x, y) = self.clamp_to_grid(*x, *y);
                 if let Some(b) = button {
                     let bit = 1u32 << (*b).min(31);
                     match action {
@@ -300,8 +384,8 @@ impl Emulator {
                 self.mouse_ev
                     .set_action(action)
                     .set_button(button.map(mouse_button))
-                    .set_mods(mods(*m))
-                    .set_position(mouse::Position { x: *x, y: *y });
+                    .set_mods(m)
+                    .set_position(mouse::Position { x, y });
                 self.mouse_enc.encode_to_vec(&self.mouse_ev, out)
             }
             InputEvent::Wheel {
@@ -311,6 +395,16 @@ impl Emulator {
                 y,
                 mods: m,
             } => self.wheel(*dx_rows, *dy_rows, *x, *y, mods(*m), out),
+            InputEvent::Scroll { by, n } => {
+                let rows = isize::try_from(*n).unwrap_or(0);
+                self.term.scroll_viewport(match by {
+                    ScrollBy::Rows => ScrollViewport::Delta(rows),
+                    ScrollBy::Pages => ScrollViewport::Delta(rows * self.size.rows as isize),
+                    ScrollBy::Top => ScrollViewport::Top,
+                    ScrollBy::Bottom => ScrollViewport::Bottom,
+                });
+                Ok(())
+            }
             InputEvent::Focus { focused } => {
                 if !self.term.mode(Mode::FOCUS_EVENT)? {
                     return Ok(());
@@ -362,6 +456,7 @@ impl Emulator {
         out: &mut Vec<u8>,
     ) -> Result<()> {
         if self.term.is_mouse_tracking()? {
+            let (x, y) = self.clamp_to_grid(x, y);
             self.prepare_mouse()?;
             let steps = [
                 (dy, mouse::Button::Four, mouse::Button::Five),
@@ -381,12 +476,17 @@ impl Emulator {
             }
             return Ok(());
         }
-        // Alternate scroll: arrows on the alternate screen. Nothing on the
-        // primary screen until scrollback lands.
-        if dy == 0
-            || self.term.active_screen()? != Screen::Alternate
-            || !self.term.mode(Mode::ALT_SCROLL)?
-        {
+        if dy == 0 {
+            return Ok(());
+        }
+        // Primary screen: scroll through the scrollback.
+        if self.term.active_screen()? != Screen::Alternate {
+            self.term
+                .scroll_viewport(ScrollViewport::Delta(isize::from(dy)));
+            return Ok(());
+        }
+        // Alternate screen (no scrollback): arrows, if the program allows it.
+        if !self.term.mode(Mode::ALT_SCROLL)? {
             return Ok(());
         }
         let k = if dy < 0 {

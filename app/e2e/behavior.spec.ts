@@ -112,6 +112,25 @@ test.describe("mouse", () => {
     expect((await inputs(page)).filter((e) => e.action === "motion").length).toBeGreaterThan(1);
   });
 
+  test("a drag without tracking sends every move, past the edges too", async ({ page }) => {
+    await openFixture(page, "cursor");
+    const m = await metrics(page);
+    const box = (await page.locator(".term-overlay").boundingBox())!;
+    const cw = m.cellW / m.dpr;
+    await page.mouse.move(box.x + 2 * cw + 1, box.y + 10);
+    await page.mouse.down();
+    // Two moves inside one cell: both count, the selection's end depends on them.
+    await page.mouse.move(box.x + 4 * cw + 1, box.y + 10);
+    await page.mouse.move(box.x + 4 * cw + cw - 1, box.y + 10);
+    await page.mouse.move(box.x + 4 * cw, box.y - 30);
+    await page.mouse.up();
+    const motion = (await inputs(page)).filter((e) => e.action === "motion");
+    expect(motion.length).toBe(3);
+    expect(motion.every((e) => e.button === 1)).toBe(true);
+    expect(Math.floor(motion[0].x / m.cellW)).toBe(Math.floor(motion[1].x / m.cellW));
+    expect(motion[2].y).toBeLessThan(0);
+  });
+
   test("wheel scrolls in whole rows", async ({ page }) => {
     await openFixture(page, "cursor", { mouse: "normal" });
     const m = await metrics(page);
@@ -237,5 +256,72 @@ test.describe("clicks and the context menu", () => {
     await page.keyboard.up("Shift");
     expect(await menus(page)).toBe(1);
     expect((await right()).length).toBe(2);
+  });
+});
+
+test.describe("selection and scrollback", () => {
+  /** Apply a full frame of blank rows carrying extra fields. */
+  const frame = (page: Page, extra: Record<string, unknown>) =>
+    page.evaluate(async (extra) => {
+      const v = (window as any).__harness.view;
+      const g = v.grid;
+      v.enqueue({
+        seq: g.lastSeq + 1, full: true, cols: g.cols, rows_total: g.rows,
+        default_fg: g.defaultFg, default_bg: g.defaultBg, styles: [], rows: [],
+        cursor: g.cursor, mouse_tracking: "none", focus_reporting: false,
+        scrollbar: { total: g.rows, offset: 0, len: g.rows }, ...extra,
+      });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }, extra);
+
+  test("copy puts the selected text on the clipboard", async ({ page }) => {
+    await openFixture(page, "cursor");
+    await frame(page, { selection_text: "line 1\nline 2" });
+    // A frame without the field keeps the text.
+    await frame(page, {});
+    const copy = () =>
+      page.evaluate(() => {
+        const ta = document.querySelector(".term-input") as HTMLTextAreaElement;
+        ta.focus();
+        const before = new Event("beforecopy", { cancelable: true });
+        ta.dispatchEvent(before);
+        // Read what the terminal's handler put on the event, after it ran.
+        let copied: string | null = null;
+        const read = (e: ClipboardEvent) => (copied = e.defaultPrevented ? e.clipboardData!.getData("text/plain") : null);
+        document.addEventListener("copy", read);
+        document.execCommand("copy");
+        document.removeEventListener("copy", read);
+        return { enabled: before.defaultPrevented, copied };
+      });
+    expect(await copy()).toEqual({ enabled: true, copied: "line 1\nline 2" });
+
+    await frame(page, { selection_text: "" });
+    expect(await copy()).toEqual({ enabled: false, copied: null });
+  });
+
+  test("scroll shortcuts are sent as scroll events, not keys", async ({ page }) => {
+    await openFixture(page, "cursor", { platform: "other" });
+    await page.keyboard.press("Shift+PageUp");
+    await page.keyboard.press("Shift+End");
+    const es = (await inputs(page)).filter((e) => e.kind === "scroll" || (e.kind === "key" && /Page|End/.test(e.code)));
+    expect(es).toEqual([
+      { kind: "scroll", by: "pages", n: -1 },
+      { kind: "scroll", by: "bottom", n: 0 },
+    ]);
+  });
+
+  test("the scrollbar shows only while scrolled back", async ({ page }) => {
+    await openFixture(page, "cursor");
+    const bar = page.locator(".term-scrollbar");
+    await expect(bar).toBeHidden();
+    const rows = await page.evaluate(() => (window as any).__harness.view.grid.rows);
+    await frame(page, { scrollbar: { total: rows * 4, offset: rows * 3, len: rows } });
+    await expect(bar).toBeHidden();
+    await frame(page, { scrollbar: { total: rows * 4, offset: 0, len: rows } });
+    await expect(bar).toBeVisible();
+    const b = (await bar.boundingBox())!;
+    const t = (await page.locator(".term").boundingBox())!;
+    expect(b.y - t.y).toBeLessThan(20); // at the top of the history
+    expect(b.height).toBeLessThan(t.height / 3);
   });
 });

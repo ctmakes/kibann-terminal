@@ -9,6 +9,7 @@ pub mod emulator;
 pub mod frame;
 pub mod keymap;
 pub mod replay;
+pub mod selection;
 pub mod session;
 
 pub use emulator::Emulator;

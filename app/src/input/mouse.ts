@@ -50,7 +50,11 @@ export interface MouseState {
   rows: number;
 }
 
-/** Pointer and wheel events on the grid, sent in device px from the grid origin. */
+/**
+ * Pointer and wheel events on the grid, sent in device px from the grid origin.
+ * Positions are not clamped: a selection drag past an edge autoscrolls, and
+ * the backend clamps what it reports to programs.
+ */
 export class MouseInput {
   private wheel = new WheelAccumulator();
   private lastCell = -1;
@@ -85,11 +89,9 @@ export class MouseInput {
   }
 
   private pos(e: MouseEvent): { x: number; y: number } {
-    const { m, cols, rows } = this.state();
+    const { m } = this.state();
     const rect = this.target.getBoundingClientRect();
-    const x = Math.min(Math.max(0, (e.clientX - rect.left) * m.dpr), cols * m.cellW - 1);
-    const y = Math.min(Math.max(0, (e.clientY - rect.top) * m.dpr), rows * m.cellH - 1);
-    return { x, y };
+    return { x: (e.clientX - rect.left) * m.dpr, y: (e.clientY - rect.top) * m.dpr };
   }
 
   /** Shift+right-click opens the menu instead of reaching the program. */
@@ -119,11 +121,19 @@ export class MouseInput {
 
   private onMove(e: PointerEvent): void {
     const { tracking, m, cols } = this.state();
-    if (tracking !== "any" && !(tracking === "button" && e.buttons !== 0)) return;
+    // A drag the backend turns into a selection: every move counts, since
+    // the selection's end depends on where in the cell the pointer is.
+    const selecting = e.buttons & 1 && (tracking === "none" || e.shiftKey);
+    if (!selecting) {
+      if (tracking !== "any" && !(tracking === "button" && e.buttons !== 0)) return;
+    }
     const { x, y } = this.pos(e);
-    const cell = Math.floor(y / m.cellH) * cols + Math.floor(x / m.cellW);
-    if (cell === this.lastCell) return;
-    this.lastCell = cell;
+    if (!selecting) {
+      // Programs only see cells; skip moves within one.
+      const cell = Math.floor(y / m.cellH) * cols + Math.floor(x / m.cellW);
+      if (cell === this.lastCell) return;
+      this.lastCell = cell;
+    }
     const held = e.buttons & 1 ? 1 : e.buttons & 4 ? 3 : e.buttons & 2 ? 2 : null;
     this.send({ kind: "mouse", action: "motion", button: held, x, y, mods: modsOf(e) });
   }

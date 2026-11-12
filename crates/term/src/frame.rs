@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use proto::{Cursor, CursorStyle, Frame, MouseTracking, Row, Run, Style, flags};
+use proto::{Cursor, CursorStyle, Frame, MouseTracking, Row, Run, Scrollbar, Style, flags};
 
 use crate::vt::Terminal;
 use crate::vt::color::Rgb;
@@ -50,6 +50,7 @@ struct Meta {
     cursor: Cursor,
     mouse_tracking: MouseTracking,
     focus_reporting: bool,
+    scrollbar: Scrollbar,
 }
 
 pub fn mouse_tracking(term: &Terminal<'_, '_>) -> MouseTracking {
@@ -105,13 +106,22 @@ impl FrameBuilder {
     }
 
     /// Update from the terminal and build a frame of what changed, then mark
-    /// the render state clean. `None` when nothing changed.
+    /// the render state clean. `None` when nothing changed and there is no
+    /// `selection_text` to deliver.
     pub fn build(
         &mut self,
         term: &Terminal<'static, '_>,
         force_full: bool,
+        selection_text: Option<String>,
     ) -> Result<Option<Frame>> {
         let mouse_tracking = mouse_tracking(term);
+        let sb = term.scrollbar()?;
+        let clamp = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
+        let scrollbar = Scrollbar {
+            total: clamp(sb.total),
+            offset: clamp(sb.offset),
+            len: clamp(sb.len),
+        };
         let focus_reporting = term.mode(Mode::FOCUS_EVENT).unwrap_or(false);
 
         let snap = self.state.update(term)?;
@@ -167,6 +177,9 @@ impl FrameBuilder {
             if row_dirty || (is_cursor_row && !cursor_tail) {
                 self.row_cells.clear();
                 self.row_text.clear();
+                // Selected cells take the window's colors swapped, like
+                // Ghostty without selection colors configured.
+                let selected = row.selection()?.map(|r| r.start_x..=r.end_x);
                 let mut ci = self.cells.update(row)?;
                 let mut prev = default_style;
                 while let Some(cell) = ci.next() {
@@ -223,6 +236,15 @@ impl FrameBuilder {
                             }
                         }
                     };
+                    let x = self.row_cells.len() as u16;
+                    let style = match &selected {
+                        Some(r) if r.contains(&x) && wide != CellWide::SpacerTail => Style {
+                            fg: default_bg,
+                            bg: Some(default_fg),
+                            ..style
+                        },
+                        _ => style,
+                    };
                     prev = style;
                     let end = self.row_text.len() as u32;
                     self.row_cells.push(CellOut {
@@ -250,8 +272,13 @@ impl FrameBuilder {
             cursor: cursor.clone(),
             mouse_tracking,
             focus_reporting,
+            scrollbar,
         };
-        if !full && out_rows.is_empty() && self.last.as_ref() == Some(&meta) {
+        if !full
+            && out_rows.is_empty()
+            && selection_text.is_none()
+            && self.last.as_ref() == Some(&meta)
+        {
             snap.clean()?;
             return Ok(None);
         }
@@ -270,6 +297,8 @@ impl FrameBuilder {
             cursor,
             mouse_tracking,
             focus_reporting,
+            scrollbar,
+            selection_text,
         }))
     }
 }

@@ -69,6 +69,25 @@ pub struct Frame {
     pub cursor: Cursor,
     pub mouse_tracking: MouseTracking,
     pub focus_reporting: bool,
+    /// Where the viewport is in the scrollback.
+    pub scrollbar: Scrollbar,
+    /// Present only when the selected text changed: the new text, or "" when
+    /// the selection was cleared. The frontend keeps the last value for Copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub selection_text: Option<String>,
+}
+
+/// Scrollback position, in rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Scrollbar {
+    /// Rows in scrollback plus the screen.
+    pub total: u32,
+    /// First row of the viewport, counted from the top of the scrollback.
+    pub offset: u32,
+    /// Rows in the viewport.
+    pub len: u32,
 }
 
 /// Fully resolved cell style. Inverse is already applied and blink is dropped.
@@ -195,9 +214,13 @@ pub enum InputEvent {
         composing: bool,
     },
     /// Finished IME text, emoji picker or dictation output.
-    Text { data: String },
+    Text {
+        data: String,
+    },
     /// Clipboard paste; the backend applies bracketed paste.
-    Paste { data: String },
+    Paste {
+        data: String,
+    },
     Mouse {
         action: MouseAction,
         /// libghostty mouse button number (1 left, 2 right, 3 middle, 8 back, 9 forward).
@@ -215,7 +238,27 @@ pub enum InputEvent {
         y: f32,
         mods: u16,
     },
-    Focus { focused: bool },
+    Focus {
+        focused: bool,
+    },
+    /// Move the viewport through the scrollback.
+    Scroll {
+        by: ScrollBy,
+        n: i32,
+    },
+}
+
+/// Unit for [`InputEvent::Scroll`]. `n` is ignored for `top` and `bottom`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ScrollBy {
+    /// `n` rows; negative is up.
+    Rows,
+    /// `n` screens; negative is up.
+    Pages,
+    Top,
+    Bottom,
 }
 
 #[cfg(test)]
@@ -224,14 +267,26 @@ mod tests {
 
     #[test]
     fn run_omits_blank_fields() {
-        let run = Run { x: 0, len: 4, s: 0, text: None, wide: None };
-        assert_eq!(serde_json::to_string(&run).unwrap(), r#"{"x":0,"len":4,"s":0}"#);
+        let run = Run {
+            x: 0,
+            len: 4,
+            s: 0,
+            text: None,
+            wide: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&run).unwrap(),
+            r#"{"x":0,"len":4,"s":0}"#
+        );
     }
 
     #[test]
     fn input_event_is_tagged_by_kind() {
         let ev = InputEvent::Focus { focused: true };
-        assert_eq!(serde_json::to_string(&ev).unwrap(), r#"{"kind":"focus","focused":true}"#);
+        assert_eq!(
+            serde_json::to_string(&ev).unwrap(),
+            r#"{"kind":"focus","focused":true}"#
+        );
         let back: InputEvent = serde_json::from_str(r#"{"kind":"text","data":"é"}"#).unwrap();
         assert_eq!(back, InputEvent::Text { data: "é".into() });
     }

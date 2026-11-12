@@ -1,4 +1,4 @@
-import type { Cursor, Frame, MouseTracking, Row, Style } from "./proto";
+import type { Cursor, Frame, MouseTracking, Row, Scrollbar, Style } from "./proto";
 
 /** A run with its style resolved out of the frame's style table. */
 export interface GridRun {
@@ -45,6 +45,9 @@ export class Grid {
   };
   mouseTracking: MouseTracking = "none";
   focusReporting = false;
+  scrollbar: Scrollbar = { total: 0, offset: 0, len: 0 };
+  /** The selected text, for Copy; "" when nothing is selected. */
+  selectionText = "";
   lines: GridRow[] = [];
   lastSeq: number | null = null;
   awaitingFull = false;
@@ -80,6 +83,8 @@ export class Grid {
     this.cursor = frame.cursor;
     this.mouseTracking = frame.mouse_tracking;
     this.focusReporting = frame.focus_reporting;
+    if (frame.scrollbar) this.scrollbar = frame.scrollbar;
+    if (frame.selection_text !== undefined) this.selectionText = frame.selection_text;
     this.lastSeq = frame.seq;
 
     const dirty = new Set<number>();

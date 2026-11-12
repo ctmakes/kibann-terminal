@@ -21,6 +21,7 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_s
 use proto::{Frame, InputEvent, Resize};
 
 use crate::emulator::{Emulator, TERMINFO_NAME};
+use crate::selection::AUTOSCROLL_INTERVAL;
 
 /// Minimum time between frames.
 pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -318,12 +319,14 @@ fn run(
     let mut exit: Option<(Option<u32>, Instant)> = None;
     let mut exit_sent = false;
     let mut deadline: Option<Instant> = None;
+    // Next autoscroll step while a selection drag is held past an edge.
+    let mut autoscroll: Option<Instant> = None;
 
     loop {
         let exit_wait = exit
             .filter(|_| !output_done && !exit_sent)
             .map(|(_, t)| t + EXIT_GRACE);
-        let wake = [deadline, emu.hold_deadline(), exit_wait]
+        let wake = [deadline, emu.hold_deadline(), exit_wait, autoscroll]
             .into_iter()
             .flatten()
             .min();
@@ -352,6 +355,8 @@ fn run(
                 Msg::ChildExited(code) => exit = Some((code, Instant::now())),
                 Msg::Input(e) => {
                     let _ = emu.input(&e);
+                    // Selection and scrolling change the screen with no output.
+                    p.dirty = true;
                 }
                 Msg::Resize(s) => {
                     if let Ok(true) = emu.resize(s) {
@@ -388,6 +393,16 @@ fn run(
         let now = Instant::now();
         if emu.expire_hold(now) {
             p.dirty = true;
+        }
+        if emu.autoscrolling() {
+            let due = *autoscroll.get_or_insert(now + AUTOSCROLL_INTERVAL);
+            if now >= due {
+                let _ = emu.autoscroll_tick();
+                p.dirty = true;
+                autoscroll = Some(now + AUTOSCROLL_INTERVAL);
+            }
+        } else {
+            autoscroll = None;
         }
         deadline = p.tick(&mut emu, now);
 

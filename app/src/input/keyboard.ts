@@ -77,12 +77,38 @@ export function isPassthrough(e: KeyLike, platform: Platform): boolean {
   return false;
 }
 
-export type KeyDecision = "ime" | "passthrough" | InputEvent;
+/**
+ * Scrollback shortcuts, as in Ghostty: Shift+PageUp/PageDown by a page, and
+ * Cmd+Home/End (Shift+Home/End elsewhere) to the top or bottom. On macOS
+ * Cmd+PageUp/PageDown also page.
+ */
+export function scrollFor(e: KeyLike, platform: Platform): InputEvent | null {
+  if (e.ctrlKey || e.altKey) return null;
+  const jump = platform === "mac" ? e.metaKey && !e.shiftKey : e.shiftKey && !e.metaKey;
+  const page = (e.shiftKey && !e.metaKey) || (platform === "mac" && e.metaKey && !e.shiftKey);
+  switch (e.code) {
+    case "PageUp": return page ? { kind: "scroll", by: "pages", n: -1 } : null;
+    case "PageDown": return page ? { kind: "scroll", by: "pages", n: 1 } : null;
+    case "Home": return jump ? { kind: "scroll", by: "top", n: 0 } : null;
+    case "End": return jump ? { kind: "scroll", by: "bottom", n: 0 } : null;
+    default: return null;
+  }
+}
+
+/** Ctrl+Shift+C off macOS; macOS copies through the menu's Cmd+C. */
+export function isCopyShortcut(e: KeyLike, platform: Platform): boolean {
+  return platform !== "mac" && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyC";
+}
+
+export type KeyDecision = "ime" | "passthrough" | "copy" | InputEvent;
 
 /** What to do with a keydown. */
 export function decideKeyDown(e: KeyLike, sides: ModSides, platform: Platform): KeyDecision {
   if (e.isComposing || e.keyCode === 229 || e.key === "Dead" || e.key === "Process") return "ime";
+  if (isCopyShortcut(e, platform)) return "copy";
   if (isPassthrough(e, platform)) return "passthrough";
+  const scroll = scrollFor(e, platform);
+  if (scroll) return scroll;
   const printable = e.key !== "Unidentified" && graphemes(e.key).length === 1;
   const text = printable && !e.ctrlKey && !e.metaKey ? e.key : null;
   return {
@@ -104,6 +130,8 @@ export interface KeyboardSink {
   send(e: InputEvent): void;
   /** Called on any keyboard activity (restarts cursor blink). */
   activity(): void;
+  /** Copy the selection (a shortcut with no native menu item behind it). */
+  copy?(): void;
 }
 
 /** Listens on the hidden textarea and turns keys into input events. */
@@ -134,6 +162,14 @@ export class KeyboardInput {
     const d = decideKeyDown(e, this.sides, this.platform);
     if (d === "ime" || d === "passthrough") return;
     e.preventDefault();
+    if (d === "copy") {
+      this.sink.copy?.();
+      return;
+    }
+    if (d.kind === "scroll") {
+      this.sink.send(d);
+      return;
+    }
     this.pressed.add(e.code);
     this.sink.send(d);
     this.sink.activity();

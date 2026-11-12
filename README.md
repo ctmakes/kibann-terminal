@@ -23,6 +23,20 @@ KIBANN_COMMAND="htop" npm run tauri dev   # run a program instead of the login s
 
 The window closes when its shell exits.
 
+Selection and scrollback work like Ghostty's:
+
+- **Selecting text:** drag to select. Double-click selects a word, triple-click a line, and Alt-drag selects a rectangle.
+- **Autoscroll:** dragging past the top or bottom edge scrolls the view.
+- **Programs that use the mouse:** when a program tracks the mouse (vim, htop), hold Shift to select instead.
+- **Copy and Paste:**
+  - Cmd+C / Cmd+V on macOS; Ctrl+Shift+C / Ctrl+Shift+V elsewhere.
+  - The right-click menu offers Copy when something is selected, and always Paste.
+- **Scrollback:**
+  - Holds 10,000 lines.
+  - Move through it with the wheel or Shift+PageUp / Shift+PageDown.
+  - Jump to the top or bottom with Cmd+Home / Cmd+End on macOS, or Shift+Home / Shift+End elsewhere.
+  - Typing returns the view to the bottom and clears the selection.
+
 ## Renderer
 
 ```sh

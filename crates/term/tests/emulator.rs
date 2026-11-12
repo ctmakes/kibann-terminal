@@ -414,3 +414,278 @@ fn wheel_by_mode() {
         "one press per row"
     );
 }
+
+// ---- selection and scrollback -------------------------------------------
+
+fn mouse(action: MouseAction, col: f32, row: f32, mods: u16) -> InputEvent {
+    // Middle of the cell, with SIZE's 10×20 px cells.
+    InputEvent::Mouse {
+        action,
+        button: Some(1),
+        x: col * 10.0 + 5.0,
+        y: row * 20.0 + 10.0,
+        mods,
+    }
+}
+
+fn click(e: &mut Emulator, col: f32, row: f32) {
+    e.input(&mouse(MouseAction::Press, col, row, 0)).unwrap();
+    e.input(&mouse(MouseAction::Release, col, row, 0)).unwrap();
+}
+
+/// Drag from the left part of one cell to the right part of another; a cell
+/// is included once the pointer passes its middle, as in Ghostty.
+fn drag(e: &mut Emulator, from: (f32, f32), to: (f32, f32), mods: u16) {
+    e.input(&mouse(MouseAction::Press, from.0 - 0.3, from.1, mods))
+        .unwrap();
+    e.input(&mouse(MouseAction::Motion, to.0 + 0.3, to.1, mods))
+        .unwrap();
+    e.input(&mouse(MouseAction::Release, to.0 + 0.3, to.1, mods))
+        .unwrap();
+}
+
+fn style_at(f: &Frame, x: u16, y: u16) -> proto::Style {
+    let row = f.rows.iter().find(|r| r.y == y).expect("row in frame");
+    let run = row
+        .runs
+        .iter()
+        .find(|r| x >= r.x && x < r.x + r.len)
+        .unwrap();
+    f.styles[run.s as usize]
+}
+
+#[test]
+fn drag_selects_and_reports_text() {
+    let mut e = emu();
+    e.write(b"hello world");
+    e.build_frame(false).unwrap();
+    drag(&mut e, (0.0, 0.0), (4.0, 0.0), 0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("hello"));
+    let sel = style_at(&f, 0, 0);
+    assert_eq!(
+        (sel.fg, sel.bg),
+        (f.default_bg, Some(f.default_fg)),
+        "selection swaps the window colors"
+    );
+    assert_eq!(style_at(&f, 4, 0), sel);
+    assert_eq!(style_at(&f, 6, 0).bg, None, "outside the selection");
+    // Nothing changed: no text resent.
+    assert!(e.build_frame(false).unwrap().is_none());
+}
+
+#[test]
+fn double_and_triple_click() {
+    let mut e = emu();
+    e.write(b"hello world");
+    click(&mut e, 7.0, 0.0);
+    click(&mut e, 7.0, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("world"));
+    click(&mut e, 7.0, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("hello world"));
+}
+
+#[test]
+fn wrapped_lines_copy_as_one() {
+    let mut e = emu();
+    e.write(b"0123456789abcdefghijKLMNO\r\nnext");
+    drag(&mut e, (0.0, 0.0), (4.0, 1.0), 0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(
+        f.selection_text.as_deref(),
+        Some("0123456789abcdefghijKLMNO")
+    );
+}
+
+#[test]
+fn rectangle_with_alt() {
+    let mut e = emu();
+    e.write(b"abcdef\r\nghijkl\r\nmnopqr");
+    drag(&mut e, (1.0, 0.0), (2.0, 2.0), proto::mods::ALT);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("bc\nhi\nno"));
+}
+
+#[test]
+fn click_and_typing_clear_the_selection() {
+    let mut e = emu();
+    e.write(b"hello world");
+    drag(&mut e, (0.0, 0.0), (4.0, 0.0), 0);
+    e.build_frame(false).unwrap();
+    click(&mut e, 8.0, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some(""));
+    assert_eq!(style_at(&f, 0, 0).bg, None);
+
+    drag(&mut e, (0.0, 0.0), (4.0, 0.0), 0);
+    e.build_frame(false).unwrap();
+    assert_eq!(encode(&mut e, key("KeyX", Some("x"), 0)), b"x");
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some(""));
+}
+
+#[test]
+fn modifier_keys_keep_the_selection() {
+    let mut e = emu();
+    e.write(b"hello");
+    drag(&mut e, (0.0, 0.0), (4.0, 0.0), 0);
+    e.build_frame(false).unwrap();
+    encode(&mut e, key("MetaLeft", None, proto::mods::SUPER));
+    assert!(
+        e.build_frame(false).unwrap().is_none(),
+        "selection unchanged"
+    );
+}
+
+#[test]
+fn tracking_programs_get_clicks_unless_shift() {
+    let mut e = emu();
+    e.write(b"hello\x1b[?1000h\x1b[?1006h");
+    e.build_frame(false).unwrap();
+    assert_eq!(
+        encode(&mut e, mouse(MouseAction::Press, 1.0, 0.0, 0)),
+        b"\x1b[<0;2;1M"
+    );
+    assert_eq!(
+        encode(&mut e, mouse(MouseAction::Release, 1.0, 0.0, 0)),
+        b"\x1b[<0;2;1m"
+    );
+    assert!(e.build_frame(false).unwrap().is_none(), "no selection");
+
+    let shift = proto::mods::SHIFT;
+    assert_eq!(
+        encode(&mut e, mouse(MouseAction::Press, -0.3, 0.0, shift)),
+        b""
+    );
+    assert_eq!(
+        encode(&mut e, mouse(MouseAction::Motion, 4.3, 0.0, shift)),
+        b""
+    );
+    assert_eq!(
+        encode(&mut e, mouse(MouseAction::Release, 4.3, 0.0, shift)),
+        b""
+    );
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("hello"));
+}
+
+/// 30 numbered lines on a 5-row screen: 26 go to scrollback.
+fn with_history() -> Emulator {
+    let mut e = emu();
+    for i in 1..=30 {
+        e.write(format!("line {i}\r\n").as_bytes());
+    }
+    e
+}
+
+#[test]
+fn wheel_and_scroll_move_through_scrollback() {
+    let mut e = with_history();
+    let f = e.build_frame(false).unwrap().unwrap();
+    let bottom = f.scrollbar;
+    assert_eq!(bottom.len, 5);
+    assert_eq!(
+        bottom.offset + bottom.len,
+        bottom.total,
+        "starts at the bottom"
+    );
+    assert_eq!(row_text(&f, 3), "line 30");
+
+    let wheel = InputEvent::Wheel {
+        dx_rows: 0,
+        dy_rows: -3,
+        x: 5.0,
+        y: 5.0,
+        mods: 0,
+    };
+    assert_eq!(encode(&mut e, wheel), b"");
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.scrollbar.offset, bottom.offset - 3);
+    assert_eq!(row_text(&f, 3), "line 27");
+
+    e.input(&InputEvent::Scroll {
+        by: proto::ScrollBy::Top,
+        n: 0,
+    })
+    .unwrap();
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.scrollbar.offset, 0);
+    assert_eq!(row_text(&f, 0), "line 1");
+
+    e.input(&InputEvent::Scroll {
+        by: proto::ScrollBy::Pages,
+        n: 1,
+    })
+    .unwrap();
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(row_text(&f, 0), "line 6");
+
+    // Typing jumps back to the bottom.
+    encode(&mut e, key("KeyA", Some("a"), 0));
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.scrollbar, bottom);
+}
+
+#[test]
+fn scrolled_back_view_stays_put_while_output_arrives() {
+    let mut e = with_history();
+    e.input(&InputEvent::Scroll {
+        by: proto::ScrollBy::Top,
+        n: 0,
+    })
+    .unwrap();
+    e.build_frame(false).unwrap();
+    e.write(b"more output\r\n");
+    if let Some(f) = e.build_frame(false).unwrap() {
+        assert!(f.rows.iter().all(|r| r.y != 0) || row_text(&f, 0) == "line 1");
+        assert_eq!(f.scrollbar.offset, 0, "still at the top");
+    }
+}
+
+#[test]
+fn selection_in_scrollback_copies_history() {
+    let mut e = with_history();
+    e.input(&InputEvent::Scroll {
+        by: proto::ScrollBy::Top,
+        n: 0,
+    })
+    .unwrap();
+    drag(&mut e, (0.0, 0.0), (5.0, 1.0), 0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("line 1\nline 2"));
+}
+
+#[test]
+fn dragging_past_the_top_autoscrolls() {
+    let mut e = with_history();
+    e.build_frame(false).unwrap();
+    let start = e.terminal().scrollbar().unwrap().offset;
+    e.input(&mouse(MouseAction::Press, 3.0, 2.0, 0)).unwrap();
+    e.input(&InputEvent::Mouse {
+        action: MouseAction::Motion,
+        button: Some(1),
+        x: 30.0,
+        y: -15.0,
+        mods: 0,
+    })
+    .unwrap();
+    assert!(e.autoscrolling());
+    for _ in 0..4 {
+        e.autoscroll_tick().unwrap();
+    }
+    assert_eq!(e.terminal().scrollbar().unwrap().offset, start - 4);
+    e.input(&InputEvent::Mouse {
+        action: MouseAction::Release,
+        button: Some(1),
+        x: 30.0,
+        y: -15.0,
+        mods: 0,
+    })
+    .unwrap();
+    assert!(!e.autoscrolling());
+    let f = e.build_frame(false).unwrap().unwrap();
+    let text = f.selection_text.unwrap();
+    assert!(text.lines().count() >= 6, "selection grew upward: {text:?}");
+}

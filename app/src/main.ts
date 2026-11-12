@@ -2,17 +2,21 @@ import { Menu, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { TerminalView } from "./terminal";
 import { TauriTransport, inTauri } from "./transport/tauri";
 
-/** Native right-click menu. Paste goes through the webview, so it arrives as a
- * DOM paste event and takes the same path as Cmd+V. */
-async function showContextMenu(): Promise<void> {
-  const menu = await Menu.new({ items: [await PredefinedMenuItem.new({ item: "Paste" })] });
+/** Native right-click menu. Copy and Paste go through the webview, so they
+ * arrive as DOM copy and paste events and take the same path as Cmd+C/V. */
+async function showContextMenu(view: TerminalView | null): Promise<void> {
+  const items = [];
+  if (view?.selectionText) items.push(await PredefinedMenuItem.new({ item: "Copy" }));
+  items.push(await PredefinedMenuItem.new({ item: "Paste" }));
+  const menu = await Menu.new({ items });
   await menu.popup();
 }
 
 const el = document.getElementById("term")!;
 
 if (inTauri()) {
-  await TerminalView.create(el, new TauriTransport(), { onContextMenu: () => void showContextMenu() });
+  let view: TerminalView | null = null;
+  view = await TerminalView.create(el, new TauriTransport(), { onContextMenu: () => void showContextMenu(view) });
 } else {
   el.innerHTML =
     '<p class="notice">No backend here: this page runs inside the Tauri app. ' +

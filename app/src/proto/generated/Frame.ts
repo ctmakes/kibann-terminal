@@ -2,6 +2,7 @@
 import type { Cursor } from "./Cursor";
 import type { MouseTracking } from "./MouseTracking";
 import type { Row } from "./Row";
+import type { Scrollbar } from "./Scrollbar";
 import type { Style } from "./Style";
 
 /**
@@ -23,4 +24,13 @@ styles: Array<Style>,
 /**
  * Changed rows only, unless `full`.
  */
-rows: Array<Row>, cursor: Cursor, mouse_tracking: MouseTracking, focus_reporting: boolean, };
+rows: Array<Row>, cursor: Cursor, mouse_tracking: MouseTracking, focus_reporting: boolean, 
+/**
+ * Where the viewport is in the scrollback.
+ */
+scrollbar: Scrollbar, 
+/**
+ * Present only when the selected text changed: the new text, or "" when
+ * the selection was cleared. The frontend keeps the last value for Copy.
+ */
+selection_text?: string, };
