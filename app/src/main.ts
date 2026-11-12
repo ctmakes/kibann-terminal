@@ -36,6 +36,7 @@ async function start(): Promise<void> {
     onTitle: (title) => void win.setTitle(title),
     onEmpty: () => void invoke("app_quit"),
     onContextMenu: (pane) => void showContextMenu(ws, pane),
+    view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
   // Menu bar items (macOS) carry the action as JSON in their id.

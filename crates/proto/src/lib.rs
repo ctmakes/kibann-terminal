@@ -81,6 +81,33 @@ pub struct Frame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub title: Option<String>,
+    /// Present only when the link under the pointer changed while the link
+    /// modifier is held. `uri: ""` means there is none any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub link: Option<Link>,
+}
+
+/// A link under the pointer: an OSC 8 hyperlink, or a URL or existing file
+/// path found in the text.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Link {
+    /// What was found: the hyperlink's address, or the URL or path as printed.
+    pub uri: String,
+    /// What opens: a URL, or an absolute path.
+    pub target: String,
+    /// The link's cells, per viewport row, so a wrapped link underlines on
+    /// every row it covers.
+    pub spans: Vec<LinkSpan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LinkSpan {
+    pub y: u16,
+    pub x: u16,
+    pub len: u16,
 }
 
 /// Scrollback position, in rows.
@@ -245,6 +272,14 @@ pub enum InputEvent {
     },
     Focus {
         focused: bool,
+    },
+    /// The pointer is at `x`, `y` with the link modifier held (`on`), or the
+    /// modifier was released or the pointer left (`!on`). Never reaches the
+    /// program; it drives [`Frame::link`].
+    Hover {
+        x: f32,
+        y: f32,
+        on: bool,
     },
     /// Move the viewport through the scrollback.
     Scroll {

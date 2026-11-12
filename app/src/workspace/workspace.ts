@@ -64,7 +64,7 @@ export interface WorkspaceOptions {
   transport(near: Transport | null): Transport;
   platform?: Platform;
   /** Passed to every TerminalView. */
-  view?: Pick<TerminalOptions, "fontSize" | "dpr" | "onPaint">;
+  view?: Pick<TerminalOptions, "fontSize" | "dpr" | "onPaint" | "onOpenLink">;
   /** The window's title should change (the active tab's title). */
   onTitle?(title: string): void;
   /** The last pane closed. */

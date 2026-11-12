@@ -8,6 +8,7 @@ pub mod cast;
 pub mod emulator;
 pub mod frame;
 pub mod keymap;
+pub mod links;
 pub mod process;
 pub mod replay;
 pub mod selection;

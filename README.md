@@ -56,6 +56,13 @@ Selection and scrollback work like Ghostty's:
   - Jump to the top or bottom with Cmd+Home / Cmd+End on macOS, or Shift+Home / Shift+End elsewhere.
   - Typing returns the view to the bottom and clears the selection.
 
+Links (Cmd on macOS, Ctrl elsewhere):
+
+- **Hover with Cmd held** to underline the link under the pointer and see where it goes in the bottom-left corner. **Cmd+click** opens it.
+- **What counts:** hidden links that programs print (OSC 8, as from `ls --hyperlink`, `gcc` or `delta`), URLs (`http`, `https`, `file`, `mailto`, `ftp`, `ssh`, `git`), and file paths that exist, relative to the pane's directory. A `:line:col` suffix is allowed (`src/main.ts:12:3`) but the file opens at the top. Links that wrap onto the next row, or start in scrollback, work as one link.
+- **Opening:** URLs go to the default browser or mail app; files open in their default app and directories in Finder. Apps, scripts and other files that could run something when opened are shown in Finder instead.
+- Try it: `echo https://github.com`, `printf '\e]8;;https://example.com\e\\click me\e]8;;\e\\\n'`, or `ls`.
+
 ## Renderer
 
 ```sh

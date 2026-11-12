@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { openFixture } from "./harness";
 
-// Paint-time budget from plans/renderer.md: full 240×70 repaint < 6 ms and a
+// Paint-time budget from plans/done/renderer.md: full 240×70 repaint < 6 ms and a
 // 3-row partial < 1 ms on an M-series Mac. Only runs with BENCH=1, since
 // timings on shared CI machines are noise.
 test.skip(!process.env.BENCH, "set BENCH=1 to run");

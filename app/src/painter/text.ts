@@ -7,7 +7,7 @@ import { boxOps, drawBoxOps, isBoxChar } from "./boxdraw";
  * measurements, and per-cell glyph drawing.
  *
  * A glyph atlas (drawImage from cached glyphs) and run batching with
- * letterSpacing were both measured and rejected; see plans/renderer.md.
+ * letterSpacing were both measured and rejected; see plans/done/renderer.md.
  */
 export class TextContext {
   private font = "";

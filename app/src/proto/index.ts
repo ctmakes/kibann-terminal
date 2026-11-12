@@ -14,6 +14,8 @@ export type { KeyAction } from "./generated/KeyAction";
 export type { MouseAction } from "./generated/MouseAction";
 export type { Scrollbar } from "./generated/Scrollbar";
 export type { ScrollBy } from "./generated/ScrollBy";
+export type { Link } from "./generated/Link";
+export type { LinkSpan } from "./generated/LinkSpan";
 
 export const Flag = {
   BOLD: 1 << 0,

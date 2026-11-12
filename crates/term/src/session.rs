@@ -7,7 +7,7 @@
 //!   stops reading input can't stall the emulator.
 //! - **waiter**: reports the child's exit status.
 //!
-//! Pacing (see `plans/renderer.md`): a frame goes out right away if none went
+//! Pacing (see `plans/done/renderer.md`): a frame goes out right away if none went
 //! out in the last 16 ms, otherwise at the 16 ms mark. Nothing is built while
 //! more than one frame is unacknowledged; changes keep accumulating and the
 //! next frame carries all of them.
@@ -37,6 +37,9 @@ const QUEUE: usize = 256;
 const EXIT_GRACE: Duration = Duration::from_millis(200);
 
 /// What a session reports to its frontend.
+// Nearly every event is a frame, moved straight into the sink; boxing it
+// would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Event {
     Frame(Frame),
@@ -460,7 +463,7 @@ fn run(
                             InputEvent::Mouse {
                                 action: MouseAction::Motion,
                                 ..
-                            }
+                            } | InputEvent::Hover { .. }
                         )
                     {
                         let _ = r.marker(&serde_json::to_string(&e).unwrap_or_default());
@@ -511,6 +514,14 @@ fn run(
             && let Some(m) = &master
         {
             emu.set_program_name(m.foreground_pid().and_then(crate::process::name));
+        }
+        // Paths in links are relative to the shell's directory. Only looked
+        // up while hovering, and only when the shell doesn't report it.
+        if emu.hovering()
+            && emu.reported_dir().is_none()
+            && let Some(m) = &master
+        {
+            emu.set_cwd(m.cwd());
         }
 
         let out = emu.take_outbox();

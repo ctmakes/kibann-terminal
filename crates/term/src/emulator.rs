@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use proto::{Frame, InputEvent, KeyAction, MouseAction, Resize, ScrollBy};
 
-use crate::frame::FrameBuilder;
+use crate::frame::{Extra, FrameBuilder};
 use crate::keymap::{key_from_code, unshifted_codepoint};
 use crate::selection::Selector;
 use crate::vt::error::{Error, Result};
@@ -51,6 +51,12 @@ pub struct Emulator {
     program_name: Option<String>,
     /// The title the frontend last received.
     sent_title: String,
+    /// Pointer position while the link modifier is held.
+    hover: Option<(f32, f32)>,
+    /// The pane's directory for relative paths, from the session.
+    cwd: Option<std::path::PathBuf>,
+    /// The link the frontend last received (`None`: none).
+    sent_link: Option<proto::Link>,
 }
 
 /// Keys that only change modifiers; pressing them isn't typing.
@@ -126,7 +132,7 @@ impl Emulator {
                 // keep that one: it is just as consistent.
                 if s.captured.borrow().is_none()
                     && let Ok(mut b) = s.builder.try_borrow_mut()
-                    && let Ok(Some(f)) = b.build(t, false, None, None)
+                    && let Ok(Some(f)) = b.build(t, false, Extra::default())
                 {
                     *s.captured.borrow_mut() = Some(f);
                 }
@@ -149,6 +155,9 @@ impl Emulator {
             sel: Selector::new()?,
             program_name: None,
             sent_title: String::new(),
+            hover: None,
+            cwd: None,
+            sent_link: None,
         })
     }
 
@@ -228,10 +237,40 @@ impl Emulator {
             self.sent_title.clone_from(&title);
             title
         });
+        // Output and scrolling move text under a still pointer, so the link
+        // is looked up again on every frame while hovering.
+        let link = self.hover.and_then(|(x, y)| {
+            let cwd = self.reported_dir().or_else(|| self.cwd.clone());
+            crate::links::at(&self.term, self.size, x, y, cwd.as_deref())
+        });
+        let link = if link != self.sent_link {
+            self.sent_link.clone_from(&link);
+            Some(link.unwrap_or_default())
+        } else if force_full {
+            link
+        } else {
+            None
+        };
+        let extra = Extra {
+            selection_text: text,
+            title,
+            link,
+        };
         self.shared
             .builder
             .borrow_mut()
-            .build(&self.term, force_full, text, title)
+            .build(&self.term, force_full, extra)
+    }
+
+    /// The pointer is over the grid with the link modifier held.
+    pub fn hovering(&self) -> bool {
+        self.hover.is_some()
+    }
+
+    /// The pane's directory, for relative paths in links. The program's own
+    /// report (OSC 7) wins over this.
+    pub fn set_cwd(&mut self, cwd: Option<std::path::PathBuf>) {
+        self.cwd = cwd;
     }
 
     /// The program's title (OSC 0/2) if it set one, else the foreground
@@ -433,6 +472,10 @@ impl Emulator {
                     ScrollBy::Top => ScrollViewport::Top,
                     ScrollBy::Bottom => ScrollViewport::Bottom,
                 });
+                Ok(())
+            }
+            InputEvent::Hover { x, y, on } => {
+                self.hover = on.then_some((*x, *y));
                 Ok(())
             }
             InputEvent::Focus { focused } => {

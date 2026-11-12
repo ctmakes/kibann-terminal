@@ -1,7 +1,8 @@
 // Tabs and splits in a browser, with fake transports: each pane shows its
 // number and logs its input. Playwright drives it through `window.__ws`.
 //
-// Params: w, h (CSS px), platform=mac|other, dpr.
+// Params: w, h (CSS px), platform=mac|other, dpr, links=1 (each pane shows a
+// link the fake backend reports on hover).
 
 import "@fontsource/jetbrains-mono/400.css";
 import type { InputEvent } from "../proto";
@@ -21,6 +22,8 @@ const transports: ReplayTransport[] = [];
 const inputs: Array<{ n: number; e: InputEvent }> = [];
 let titles: string[] = [];
 let quit = false;
+/** Targets opened with Cmd+click. */
+const opened: string[] = [];
 
 function transport(near: Transport | null): Transport {
   const n = ++made;
@@ -30,9 +33,24 @@ function transport(near: Transport | null): Transport {
       const s = new Screen(cols, rows);
       s.write(0, 0, `pane ${n}${from ? ` from ${from}` : ""}`);
       s.write(0, 1, `${cols}x${rows}`);
+      if (params.links) {
+        // A link wrapped over two rows, as the backend would report it.
+        s.write(0, 2, "see https://example.com/very/");
+        s.write(0, 3, "long/path ok");
+      }
       return s;
     },
   });
+  if (params.links) t.links = [
+    {
+      uri: "https://example.com/very/long/path",
+      target: "https://example.com/very/long/path",
+      spans: [
+        { y: 2, x: 4, len: 25 },
+        { y: 3, x: 0, len: 9 },
+      ],
+    },
+  ];
   t.onInput = (e) => inputs.push({ n, e });
   transports.push(t);
   return t;
@@ -41,7 +59,7 @@ function transport(near: Transport | null): Transport {
 const ws = new Workspace(root, {
   transport,
   platform: params.platform === "mac" || params.platform === "other" ? params.platform : undefined,
-  view: { dpr: params.dpr ? Number(params.dpr) : undefined },
+  view: { dpr: params.dpr ? Number(params.dpr) : undefined, onOpenLink: (t) => opened.push(t) },
   onTitle: (t) => titles.push(t),
   onEmpty: () => (quit = true),
 });
@@ -51,6 +69,7 @@ ws.newTab(transport(null));
   ws,
   transports,
   inputs,
+  opened,
   get titles() {
     return titles;
   },

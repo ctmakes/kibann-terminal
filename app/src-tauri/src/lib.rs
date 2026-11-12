@@ -4,6 +4,8 @@
 //! turns the frontend's commands into session calls, and frames and exits
 //! into channel messages and events.
 
+mod open;
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -139,6 +141,21 @@ fn dev_layout() -> Option<String> {
     std::env::var("KIBANN_LAYOUT").ok()
 }
 
+/// Cmd+click on a link. `target` is a URL or an absolute path; see
+/// [`open::plan`] for what is opened, revealed or ignored.
+#[tauri::command]
+fn open_link(app: AppHandle, target: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let opener = app.opener();
+    let r = match open::plan(&target) {
+        open::Open::Url(u) => opener.open_url(u, None::<&str>),
+        open::Open::Path(p) => opener.open_path(p.to_string_lossy(), None::<&str>),
+        open::Open::Reveal(p) => opener.reveal_item_in_dir(p),
+        open::Open::Ignore => Ok(()),
+    };
+    r.map_err(|e| e.to_string())
+}
+
 /// The last pane closed.
 #[tauri::command]
 fn app_quit(app: AppHandle) {
@@ -238,6 +255,7 @@ pub fn run() {
         }
     });
     builder
+        .plugin(tauri_plugin_opener::init())
         .manage(Term::default())
         .invoke_handler(tauri::generate_handler![
             term_spawn,
@@ -249,6 +267,7 @@ pub fn run() {
             term_ack,
             term_request_full,
             app_quit,
+            open_link,
             dev_layout
         ])
         .build(tauri::generate_context!())

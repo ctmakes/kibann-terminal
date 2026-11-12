@@ -10,6 +10,7 @@ import { attachCopy, attachPaste, copyNow } from "./input/clipboard";
 import { ImeInput } from "./input/ime";
 import { KeyboardInput, detectPlatform, type Platform } from "./input/keyboard";
 import { MouseInput } from "./input/mouse";
+import { LinkLayer } from "./links";
 import {
   DEFAULT_FONT_SIZE,
   computeMetrics,
@@ -48,6 +49,8 @@ export interface TerminalOptions {
   onFocusChange?: (focused: boolean) => void;
   /** The title changed (see `Grid.title`). */
   onTitle?: (title: string) => void;
+  /** Cmd+click (Ctrl+click) on a link: open `target`, a URL or an absolute path. */
+  onOpenLink?: (target: string) => void;
 }
 
 function sameCursor(a: Cursor, b: Cursor): boolean {
@@ -76,6 +79,7 @@ export class TerminalView {
   readonly grid = new Grid();
   readonly painter: Painter;
   readonly cursor: CursorLayer;
+  readonly links: LinkLayer;
   m: Metrics;
 
   private pending: Frame[] = [];
@@ -185,6 +189,7 @@ export class TerminalView {
 
     this.painter = new Painter(this.gridCanvas, this.m);
     this.cursor = new CursorLayer(this.overlay, this.m);
+    this.links = new LinkLayer(this.gridEl, this.root);
 
     const send = (e: InputEvent) => this.transport.input(e);
     const platform = opts.platform ?? detectPlatform();
@@ -192,10 +197,15 @@ export class TerminalView {
     const ime = new ImeInput(this.textarea, { send, preedit: (t) => this.cursor.setPreedit(t) });
     const mouse = new MouseInput(
       this.overlay,
-      () => ({ tracking: this.grid.mouseTracking, m: this.m, cols: this.painter.cols, rows: this.painter.rows }),
-      send,
-      () => this.focus(),
-      opts.onContextMenu,
+      () => ({
+        tracking: this.grid.mouseTracking,
+        m: this.m,
+        cols: this.painter.cols,
+        rows: this.painter.rows,
+        link: this.links.link,
+      }),
+      { send, focus: () => this.focus(), contextMenu: opts.onContextMenu, openLink: opts.onOpenLink },
+      platform,
     );
     mouse.setTracking("none");
     this.mouse = mouse;
@@ -258,6 +268,7 @@ export class TerminalView {
     this.m = this.measure();
     this.painter.setMetrics(this.m);
     this.cursor.setMetrics(this.m);
+    this.links.update(this.grid, this.m, true);
     this.painter.cols = -1; // force the layout pass to resize the canvases
     this.layout(this.container.clientWidth, this.container.clientHeight);
   }
@@ -334,6 +345,8 @@ export class TerminalView {
     this.updateScrollbar();
     if (this.grid.title !== prevTitle) this.opts.onTitle?.(this.grid.title);
     this.mouse.setTracking(this.grid.mouseTracking);
+    this.links.update(this.grid, this.m);
+    this.mouse.setLinkShown(this.links.link !== null);
     this.positionTextarea();
     this.transport.ack(ackSeq);
     this.opts.onPaint?.({

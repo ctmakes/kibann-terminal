@@ -1,4 +1,4 @@
-import type { Cursor, Frame, MouseTracking, Row, Scrollbar, Style } from "./proto";
+import type { Cursor, Frame, Link, MouseTracking, Row, Scrollbar, Style } from "./proto";
 
 /** A run with its style resolved out of the frame's style table. */
 export interface GridRun {
@@ -50,6 +50,8 @@ export class Grid {
   selectionText = "";
   /** The program's title, or the foreground program's name. */
   title = "";
+  /** The link under the pointer while the link modifier is held. */
+  link: Link | null = null;
   lines: GridRow[] = [];
   lastSeq: number | null = null;
   awaitingFull = false;
@@ -88,6 +90,7 @@ export class Grid {
     if (frame.scrollbar) this.scrollbar = frame.scrollbar;
     if (frame.selection_text !== undefined) this.selectionText = frame.selection_text;
     if (frame.title !== undefined) this.title = frame.title;
+    if (frame.link !== undefined) this.link = frame.link.uri ? frame.link : null;
     this.lastSeq = frame.seq;
 
     const dirty = new Set<number>();

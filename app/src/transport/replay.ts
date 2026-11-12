@@ -1,4 +1,5 @@
-import type { Frame, InputEvent, Resize } from "../proto";
+import type { Frame, InputEvent, Link, Resize } from "../proto";
+import { linkCovers } from "../links";
 import { buildFrame, Screen } from "../dev/screen";
 import type { Transport } from "./types";
 
@@ -26,6 +27,10 @@ export class ReplayTransport implements Transport {
   /** Sent with the next frame when it changes. */
   title = "";
   private sentTitle = "";
+  /** Test hook: links on the screen. A hover over one sends it, as the
+   * backend would. */
+  links: Link[] = [];
+  private sentLink: Link | null = null;
   private onFrame: ((f: Frame) => void) | null = null;
   private seq = 0;
   private acked = 0;
@@ -55,6 +60,15 @@ export class ReplayTransport implements Transport {
   input(e: InputEvent): void {
     this.inputs.push(e);
     this.onInput?.(e);
+    if (e.kind === "hover") {
+      const x = Math.floor(e.x / this.size.cell_w);
+      const y = Math.floor(e.y / this.size.cell_h);
+      const link = (e.on && this.links.find((l) => linkCovers(l, x, y))) || null;
+      if (link !== this.sentLink) {
+        this.sentLink = link;
+        this.send(false, link ?? { uri: "", target: "", spans: [] });
+      }
+    }
   }
 
   resize(size: Resize): void {
@@ -76,10 +90,11 @@ export class ReplayTransport implements Transport {
     this.send(true);
   }
 
-  private send(full: boolean): void {
+  private send(full: boolean, link?: Link): void {
     if (!this.onFrame) return;
     const next = this.source.build(this.size.cols, this.size.rows, this.tick);
     const frame = buildFrame(++this.seq, next, full ? null : this.last);
+    if (link) frame.link = link;
     this.last = next;
     if (full || this.title !== this.sentTitle) {
       frame.title = this.title;

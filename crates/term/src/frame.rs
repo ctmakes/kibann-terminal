@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use proto::{Cursor, CursorStyle, Frame, MouseTracking, Row, Run, Scrollbar, Style, flags};
+use proto::{Cursor, CursorStyle, Frame, Link, MouseTracking, Row, Run, Scrollbar, Style, flags};
 
 use crate::vt::Terminal;
 use crate::vt::color::Rgb;
@@ -106,15 +106,19 @@ impl FrameBuilder {
     }
 
     /// Update from the terminal and build a frame of what changed, then mark
-    /// the render state clean. `None` when nothing changed and there is no
-    /// `selection_text` or `title` to deliver.
+    /// the render state clean. `None` when nothing changed and there is
+    /// nothing in `extra` to deliver.
     pub fn build(
         &mut self,
         term: &Terminal<'static, '_>,
         force_full: bool,
-        selection_text: Option<String>,
-        title: Option<String>,
+        extra: Extra,
     ) -> Result<Option<Frame>> {
+        let Extra {
+            selection_text,
+            title,
+            link,
+        } = extra;
         let mouse_tracking = mouse_tracking(term);
         let sb = term.scrollbar()?;
         let clamp = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
@@ -279,6 +283,7 @@ impl FrameBuilder {
             && out_rows.is_empty()
             && selection_text.is_none()
             && title.is_none()
+            && link.is_none()
             && self.last.as_ref() == Some(&meta)
         {
             snap.clean()?;
@@ -302,8 +307,18 @@ impl FrameBuilder {
             scrollbar,
             selection_text,
             title,
+            link,
         }))
     }
+}
+
+/// Changes that go out with the next frame even when the screen didn't
+/// change. See the fields of the same names on [`Frame`].
+#[derive(Debug, Default)]
+pub struct Extra {
+    pub selection_text: Option<String>,
+    pub title: Option<String>,
+    pub link: Option<Link>,
 }
 
 /// Split a row into runs of one style each.

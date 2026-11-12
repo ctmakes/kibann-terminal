@@ -689,3 +689,114 @@ fn dragging_past_the_top_autoscrolls() {
     let text = f.selection_text.unwrap();
     assert!(text.lines().count() >= 6, "selection grew upward: {text:?}");
 }
+
+// ---- links --------------------------------------------------------------
+
+fn hover(e: &mut Emulator, col: f32, row: f32, on: bool) -> Option<proto::Link> {
+    e.input(&InputEvent::Hover {
+        x: col * 10.0 + 5.0,
+        y: row * 20.0 + 10.0,
+        on,
+    })
+    .unwrap();
+    e.build_frame(false).unwrap().and_then(|f| f.link)
+}
+
+fn span(y: u16, x: u16, len: u16) -> proto::LinkSpan {
+    proto::LinkSpan { y, x, len }
+}
+
+#[test]
+fn a_wrapped_url_is_one_link_on_every_row() {
+    let mut e = emu();
+    // 20 columns: the URL runs over rows 0, 1 and 2.
+    e.write(b"go https://example.com/a/b/c/d/e/f/g/h/i/j. ok");
+    e.build_frame(false).unwrap();
+    let link = hover(&mut e, 5.0, 1.0, true).expect("link");
+    assert_eq!(link.uri, "https://example.com/a/b/c/d/e/f/g/h/i/j");
+    assert_eq!(link.target, link.uri);
+    assert_eq!(
+        link.spans,
+        vec![span(0, 3, 17), span(1, 0, 20), span(2, 0, 2)]
+    );
+
+    // Same link: nothing new to send.
+    assert_eq!(hover(&mut e, 6.0, 1.0, true), None);
+    // Off the link, then the modifier released: cleared once.
+    assert_eq!(
+        hover(&mut e, 4.0, 2.0, true).map(|l| l.uri),
+        Some(String::new())
+    );
+    hover(&mut e, 5.0, 1.0, true).expect("link again");
+    assert_eq!(
+        hover(&mut e, 5.0, 1.0, false).map(|l| l.uri),
+        Some(String::new())
+    );
+}
+
+#[test]
+fn hidden_links_open_their_address() {
+    let mut e = emu();
+    e.write(b"see \x1b]8;;https://a.example/x\x1b\\the docs\x1b]8;;\x1b\\ now");
+    e.build_frame(false).unwrap();
+    let link = hover(&mut e, 9.0, 0.0, true).expect("link");
+    assert_eq!(link.uri, "https://a.example/x");
+    assert_eq!(link.target, "https://a.example/x");
+    assert_eq!(link.spans, vec![span(0, 4, 8)]);
+    // "now" is plain text.
+    assert_eq!(
+        hover(&mut e, 14.0, 0.0, true).map(|l| l.uri),
+        Some(String::new())
+    );
+}
+
+#[test]
+fn paths_resolve_from_the_pane_directory() {
+    let dir = std::env::temp_dir().join(format!("kibann-emu-links-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("notes.md"), "").unwrap();
+    let mut e = emu();
+    e.set_cwd(Some(dir.clone()));
+    e.write(b"at notes.md:3: no\r\nmissing.md");
+    e.build_frame(false).unwrap();
+    let link = hover(&mut e, 4.0, 0.0, true).expect("link");
+    assert_eq!(link.uri, "notes.md:3");
+    assert_eq!(link.target, dir.join("notes.md").to_string_lossy());
+    assert_eq!(link.spans, vec![span(0, 3, 10)]);
+    // A name that doesn't exist isn't a link.
+    assert_eq!(
+        hover(&mut e, 2.0, 1.0, true).map(|l| l.uri),
+        Some(String::new())
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_url_starting_in_scrollback_keeps_its_start() {
+    let mut e = emu();
+    // 50 characters over three rows, then two more lines push the first
+    // URL row above the 5-row viewport.
+    e.write(b"https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n1\r\n2\r\n3");
+    e.build_frame(false).unwrap();
+    let link = hover(&mut e, 2.0, 1.0, true).expect("link");
+    assert_eq!(
+        link.uri,
+        "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    assert_eq!(link.spans, vec![span(0, 0, 20), span(1, 0, 11)]);
+}
+
+#[test]
+fn hovering_never_reaches_the_program() {
+    let mut e = emu();
+    e.write(b"\x1b[?1003h\x1b[?1006hhttps://x.example");
+    let out = encode(
+        &mut e,
+        InputEvent::Hover {
+            x: 15.0,
+            y: 10.0,
+            on: true,
+        },
+    );
+    assert!(out.is_empty());
+}

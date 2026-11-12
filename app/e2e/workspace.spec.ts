@@ -233,3 +233,98 @@ test.describe("tabs", () => {
     expect(after[after.length - 1]).toBe("vim");
   });
 });
+
+test.describe("links", () => {
+  /** CSS position of the middle of cell (`x`, `y`) in the first pane. */
+  const cell = (page: Page, x: number, y: number) =>
+    page.evaluate(
+      ([x, y]) => {
+        const v = (window as any).__ws.ws.panes.get(1).view;
+        const r = v.gridEl.getBoundingClientRect();
+        return { x: r.x + ((x + 0.5) * v.m.cellW) / v.m.dpr, y: r.y + ((y + 0.5) * v.m.cellH) / v.m.dpr };
+      },
+      [x, y],
+    );
+
+  const underlines = (page: Page) => page.locator(".term-link-underline");
+  const preview = (page: Page) => page.locator(".term-link-preview");
+
+  async function hoverAt(page: Page, x: number, y: number): Promise<void> {
+    const p = await cell(page, x, y);
+    await page.mouse.move(p.x, p.y);
+    await settle(page);
+  }
+
+  test("Cmd shows the link under the pointer; releasing it hides the link", async ({ page }) => {
+    await open(page, { links: "1" });
+    await hoverAt(page, 10, 2);
+    await expect(underlines(page)).toHaveCount(0);
+
+    await page.keyboard.down("Meta");
+    await hoverAt(page, 11, 2);
+    await expect(underlines(page)).toHaveCount(2);
+    await expect(preview(page)).toHaveText("https://example.com/very/long/path");
+    expect(await page.locator(".term-overlay").evaluate((e) => getComputedStyle(e).cursor)).toBe("pointer");
+
+    // Off the link, then back on: the second row of the link counts too.
+    await hoverAt(page, 11, 3);
+    await expect(underlines(page)).toHaveCount(0);
+    await hoverAt(page, 2, 3);
+    await expect(underlines(page)).toHaveCount(2);
+
+    // Releasing Cmd with the pointer still.
+    await page.keyboard.up("Meta");
+    await settle(page);
+    await expect(underlines(page)).toHaveCount(0);
+    await expect(preview(page)).toBeHidden();
+    expect(await page.locator(".term-overlay").evaluate((e) => getComputedStyle(e).cursor)).toBe("text");
+
+    // Pressing Cmd with the pointer still.
+    await page.keyboard.down("Meta");
+    await settle(page);
+    await expect(underlines(page)).toHaveCount(2);
+    await page.keyboard.up("Meta");
+  });
+
+  test("Cmd+click opens the link and doesn't reach the terminal", async ({ page }) => {
+    await open(page, { links: "1" });
+    const presses = () =>
+      page.evaluate(() => (window as any).__ws.inputs.filter(({ e }: any) => e.kind === "mouse" && e.action !== "motion").length);
+
+    // A plain click is a click.
+    const p = await cell(page, 11, 2);
+    await page.mouse.click(p.x, p.y);
+    await settle(page);
+    expect(await page.evaluate(() => (window as any).__ws.opened)).toEqual([]);
+    expect(await presses()).toBe(2);
+
+    await page.keyboard.down("Meta");
+    await hoverAt(page, 12, 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.keyboard.up("Meta");
+    await settle(page);
+    expect(await page.evaluate(() => (window as any).__ws.opened)).toEqual(["https://example.com/very/long/path"]);
+    expect(await presses()).toBe(2);
+  });
+
+  test("Ctrl on Linux and Windows", async ({ page }) => {
+    await open(page, { links: "1", platform: "other" });
+    await page.keyboard.down("Control");
+    await hoverAt(page, 11, 2);
+    await expect(underlines(page)).toHaveCount(2);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    expect(await page.evaluate(() => (window as any).__ws.opened)).toEqual(["https://example.com/very/long/path"]);
+  });
+
+  test("a hovered wrapped link looks right", async ({ page }) => {
+    await open(page, { links: "1", w: "400", h: "160" });
+    await page.keyboard.down("Meta");
+    await hoverAt(page, 11, 2);
+    await expect(underlines(page)).toHaveCount(2);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-link-hover.png");
+    await page.keyboard.up("Meta");
+  });
+});
