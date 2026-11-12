@@ -15,8 +15,13 @@ pub fn tmp() -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    // Resolve /tmp → /private/tmp, as git reports it.
-    d.canonicalize().unwrap()
+    // Resolve /tmp → /private/tmp, as git reports it. On Windows that
+    // gives a `\\?\` path, which git doesn't take: drop the prefix.
+    let d = d.canonicalize().unwrap();
+    match d.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(plain) => PathBuf::from(plain),
+        None => d,
+    }
 }
 
 /// Run git in `dir` with no user or system config (hooks, signing).

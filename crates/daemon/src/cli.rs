@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use proto::layout::{Action, Dir, Layout, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
-use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply};
+#[cfg(unix)]
+use proto::wire::PROTOCOL_VERSION;
+use proto::wire::{ClientMsg, ReadSource, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
