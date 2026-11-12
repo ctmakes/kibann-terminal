@@ -1,0 +1,12 @@
+# vim with syntax highlighting, a vertical split, a visual selection and a search.
+sleep 1200
+send 6j
+sleep 300
+send /counts\r
+sleep 400
+send :vsplit\r
+sleep 400
+send \x17lG
+sleep 300
+send Vkk
+sleep 600

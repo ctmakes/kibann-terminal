@@ -3,8 +3,12 @@
 //
 // Query params: fixture, w, h (CSS px of the terminal), font, dpr, bare=1
 // (no header or input log), platform=mac|other, plus fixture params (style, wide…).
+// replay=NAME plays app/src/dev/recordings/NAME.jsonl instead of a fixture
+// (frames from the real emulator; see crates/term/recordings), with at=end|MS
+// to jump to a point and speed=N for real-time play.
 
 import { TerminalView, type PaintInfo } from "../terminal";
+import { RecordingTransport, parseFrames } from "../transport/recording";
 import { ReplayTransport } from "../transport/replay";
 import { FIXTURES, fixture as findFixture, type Params } from "./fixtures";
 
@@ -24,14 +28,36 @@ if (params.w || params.h) {
   termEl.style.height = `${Number(params.h ?? 480)}px`;
 }
 
-for (const f of FIXTURES) select.add(new Option(f.name, f.name, false, f === fx));
+const recordings = import.meta.glob<string>("./recordings/*.jsonl", { query: "?raw", import: "default" });
+const recordingName = (path: string) => path.replace(/^.*\/|\.jsonl$/g, "");
+const replayLoader = params.replay
+  ? Object.entries(recordings).find(([path]) => recordingName(path) === params.replay)?.[1]
+  : undefined;
+if (params.replay && !replayLoader) throw new Error(`no recording ${params.replay}`);
+
+for (const f of FIXTURES) select.add(new Option(f.name, f.name, false, !replayLoader && f === fx));
+const group = document.createElement("optgroup");
+group.label = "Recordings";
+for (const path of Object.keys(recordings)) {
+  const name = recordingName(path);
+  group.append(new Option(name, `replay:${name}`, false, name === params.replay));
+}
+select.append(group);
 select.addEventListener("change", () => {
-  q.set("fixture", select.value);
+  q.delete("fixture");
+  q.delete("replay");
+  if (select.value.startsWith("replay:")) q.set("replay", select.value.slice(7));
+  else q.set("fixture", select.value);
   location.search = q.toString();
 });
-document.getElementById("desc")!.textContent = fx.description;
+document.getElementById("desc")!.textContent = replayLoader ? `recording: ${params.replay}` : fx.description;
 
-const transport = new ReplayTransport({
+const transport = replayLoader
+  ? new RecordingTransport(parseFrames(await replayLoader()), {
+      until: params.at === undefined ? undefined : params.at === "end" ? Infinity : Number(params.at),
+      speed: params.speed ? Number(params.speed) : undefined,
+    })
+  : new ReplayTransport({
   interval: params.still === "1" ? undefined : fx.interval,
   build: (cols, rows, tick) => {
     const screen = fx.build(cols, rows, tick, params);

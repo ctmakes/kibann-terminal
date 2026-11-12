@@ -1,0 +1,6 @@
+# man ls in less: bold and underlined text, then a highlighted search.
+sleep 1500
+send \x20
+sleep 600
+send /-G\r
+sleep 800

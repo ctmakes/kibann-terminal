@@ -156,13 +156,18 @@ impl Emulator {
     pub fn expire_hold(&mut self, now: Instant) -> bool {
         match self.hold_deadline() {
             Some(d) if now >= d => {
-                let _ = self.term.set_mode(Mode::SYNC_OUTPUT, false);
-                self.shared.held.set(false);
-                self.shared.hold_since.set(None);
+                self.end_hold();
                 true
             }
             _ => false,
         }
+    }
+
+    /// End the current hold now (turn mode 2026 off).
+    pub fn end_hold(&mut self) {
+        let _ = self.term.set_mode(Mode::SYNC_OUTPUT, false);
+        self.shared.held.set(false);
+        self.shared.hold_since.set(None);
     }
 
     /// The frame captured at the start of a hold, if one is waiting.

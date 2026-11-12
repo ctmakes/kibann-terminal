@@ -273,9 +273,12 @@ dependencies = [
 name = "term"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "libghostty-vt",
  "portable-pty",
  "proto",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

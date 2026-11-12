@@ -4,9 +4,11 @@
 
 pub use libghostty_vt as vt;
 
+pub mod cast;
 pub mod emulator;
 pub mod frame;
 pub mod keymap;
+pub mod replay;
 pub mod session;
 
 pub use emulator::Emulator;

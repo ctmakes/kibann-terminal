@@ -1,0 +1,2 @@
+# The program draws six held frames and then idles.
+sleep 2000
