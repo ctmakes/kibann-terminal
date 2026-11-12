@@ -191,3 +191,51 @@ test.describe("frames", () => {
     expect(sent).toEqual([true, true, false]);
   });
 });
+
+test.describe("clicks and the context menu", () => {
+  const menus = (page: Page) => page.evaluate(() => (window as any).__harness.contextMenus as number);
+
+  test("clicks keep focus on the terminal and never select the page", async ({ page }) => {
+    await openFixture(page, "cursor");
+    const box = (await page.locator("#term").boundingBox())!;
+    const state = () =>
+      page.evaluate(() => {
+        const sel = window.getSelection();
+        return { active: document.activeElement?.tagName, selected: !!sel && sel.rangeCount > 0 && !sel.isCollapsed };
+      });
+    // In the padding outside the grid, then on the grid.
+    for (const [x, y] of [[box.x + 1, box.y + 1], [box.x + 100, box.y + 100]]) {
+      for (const clickCount of [1, 2, 3]) {
+        await page.mouse.click(x, y, { clickCount });
+        expect(await state()).toEqual({ active: "TEXTAREA", selected: false });
+      }
+    }
+    // Select All used to select the whole page (and tint the canvas blue) once
+    // a click in the padding had moved focus to the body.
+    await page.keyboard.press("ControlOrMeta+a");
+    expect((await state()).selected).toBe(false);
+    await page.keyboard.type("ok");
+    const keys = (await inputs(page)).filter((e) => e.kind === "key" && e.action === "press" && e.text).map((e) => e.text);
+    expect(keys).toEqual(["ok"].flatMap((s) => [...s]));
+  });
+
+  test("right-click opens the menu when no program tracks the mouse", async ({ page }) => {
+    await openFixture(page, "cursor");
+    await page.mouse.click(120, 120, { button: "right" });
+    expect(await menus(page)).toBe(1);
+  });
+
+  test("right-click goes to a program that tracks the mouse; Shift opens the menu instead", async ({ page }) => {
+    await openFixture(page, "cursor", { mouse: "normal" });
+    await page.mouse.click(120, 120, { button: "right" });
+    expect(await menus(page)).toBe(0);
+    const right = () => inputs(page).then((es) => es.filter((e) => e.kind === "mouse" && e.button === 2));
+    expect((await right()).map((e) => e.action)).toEqual(["press", "release"]);
+
+    await page.keyboard.down("Shift");
+    await page.mouse.click(120, 120, { button: "right" });
+    await page.keyboard.up("Shift");
+    expect(await menus(page)).toBe(1);
+    expect((await right()).length).toBe(2);
+  });
+});

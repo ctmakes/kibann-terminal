@@ -42,6 +42,8 @@ export interface TerminalOptions {
   autofocus?: boolean;
   /** Called after each paint with how long painting took. */
   onPaint?: (info: PaintInfo) => void;
+  /** Right-click menu; see `MouseInput`. Without it, right-click does nothing. */
+  onContextMenu?: (e: MouseEvent) => void;
 }
 
 function sameCursor(a: Cursor, b: Cursor): boolean {
@@ -102,6 +104,10 @@ export class TerminalView {
       height: "100%",
       overflow: "hidden",
       background: css(this.grid.defaultBg),
+      // Nothing here is selectable page content; without this a click in the
+      // padding starts a WebKit selection that tints the whole canvas blue.
+      userSelect: "none",
+      webkitUserSelect: "none",
     });
 
     this.gridEl = document.createElement("div");
@@ -134,6 +140,10 @@ export class TerminalView {
       overflow: "hidden",
       whiteSpace: "nowrap",
       caretColor: "transparent",
+      // The root disables selection; WebKit can then refuse typing into a
+      // textarea that inherits it.
+      userSelect: "text",
+      webkitUserSelect: "text",
       color: "transparent",
       background: "transparent",
       zIndex: "-1",
@@ -155,6 +165,7 @@ export class TerminalView {
       () => ({ tracking: this.grid.mouseTracking, m: this.m, cols: this.painter.cols, rows: this.painter.rows }),
       send,
       () => this.focus(),
+      opts.onContextMenu,
     );
     mouse.setTracking("none");
     this.mouse = mouse;
@@ -171,7 +182,10 @@ export class TerminalView {
     const onBlur = () => this.setFocused(false);
     this.textarea.addEventListener("focus", onFocus);
     this.textarea.addEventListener("blur", onBlur);
-    const onRootDown = () => this.focus();
+    const onRootDown = (e: MouseEvent) => {
+      e.preventDefault(); // no selection, and focus stays on the textarea
+      this.focus();
+    };
     this.root.addEventListener("mousedown", onRootDown);
     this.cleanups.push(() => {
       this.textarea.removeEventListener("focus", onFocus);

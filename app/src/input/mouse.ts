@@ -61,6 +61,9 @@ export class MouseInput {
     private readonly state: () => MouseState,
     private readonly send: (e: InputEvent) => void,
     private readonly focus: () => void,
+    /** Show the app's context menu. Called on right-click when no program is
+     * tracking the mouse, or with Shift held (which keeps the click from the program). */
+    private readonly contextMenu?: (e: MouseEvent) => void,
   ) {
     const on = <K extends keyof HTMLElementEventMap>(type: K, fn: (e: HTMLElementEventMap[K]) => void, opts?: AddEventListenerOptions) => {
       target.addEventListener(type, fn, opts);
@@ -70,7 +73,10 @@ export class MouseInput {
     on("pointerup", (e) => this.onUp(e));
     on("pointermove", (e) => this.onMove(e));
     on("wheel", (e) => this.onWheel(e), { passive: false });
-    on("contextmenu", (e) => e.preventDefault());
+    on("contextmenu", (e) => {
+      e.preventDefault();
+      if (this.contextMenu && (this.state().tracking === "none" || e.shiftKey)) this.contextMenu(e);
+    });
     on("mousedown", (e) => e.preventDefault()); // keep focus on the textarea
   }
 
@@ -86,10 +92,15 @@ export class MouseInput {
     return { x, y };
   }
 
+  /** Shift+right-click opens the menu instead of reaching the program. */
+  private forMenu(e: PointerEvent): boolean {
+    return !!this.contextMenu && e.button === 2 && e.shiftKey;
+  }
+
   private onDown(e: PointerEvent): void {
     this.focus();
     const button = buttonOf(e.button);
-    if (button === null) return;
+    if (button === null || this.forMenu(e)) return;
     try {
       this.target.setPointerCapture(e.pointerId);
     } catch {
@@ -101,7 +112,7 @@ export class MouseInput {
 
   private onUp(e: PointerEvent): void {
     const button = buttonOf(e.button);
-    if (button === null) return;
+    if (button === null || this.forMenu(e)) return;
     const { x, y } = this.pos(e);
     this.send({ kind: "mouse", action: "release", button, x, y, mods: modsOf(e) });
   }

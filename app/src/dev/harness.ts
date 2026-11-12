@@ -74,6 +74,7 @@ transport.onInput = (e) => {
 };
 
 let paints = 0;
+let contextMenus = 0;
 let paintMs = 0;
 const paintLog: PaintInfo[] = [];
 let resolveReady: () => void;
@@ -83,6 +84,7 @@ const view = await TerminalView.create(termEl, transport, {
   fontSize: params.font ? Number(params.font) : undefined,
   dpr: params.dpr ? Number(params.dpr) : undefined,
   platform: params.platform === "mac" || params.platform === "other" ? params.platform : undefined,
+  onContextMenu: () => contextMenus++,
   onPaint: (info) => {
     paints++;
     paintMs = info.ms;
@@ -103,6 +105,10 @@ const harness = {
   ready: false,
   view,
   transport,
+  /** Times the right-click menu would have opened. */
+  get contextMenus() {
+    return contextMenus;
+  },
   get paints() {
     return paints;
   },
