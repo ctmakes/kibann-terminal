@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TauriTransport, inTauri, liveSessions } from "./transport/tauri";
 import type { Transport } from "./transport/types";
 import type { Action } from "./workspace/keymap";
+import { EMPTY, parseSaved, prune } from "./workspace/snapshot";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -31,28 +32,44 @@ async function start(): Promise<void> {
   const win = getCurrentWindow();
   const cwdFrom = (near: Transport | null) =>
     near instanceof TauriTransport && near.id !== null ? near.id : undefined;
+  const sessionOf = (t: Transport) => (t instanceof TauriTransport ? t.id : null);
+  // The daemon keeps the layout while the app is closed; save it shortly
+  // after each change.
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const save = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void invoke("layout_set", { layout: JSON.stringify(ws.snapshot(sessionOf)) });
+    }, 500);
+  };
   const ws = new Workspace(el, {
     transport: (near) => new TauriTransport({ cwdFrom: cwdFrom(near) }),
     onTitle: (title) => void win.setTitle(title),
     onEmpty: () => void invoke("app_quit"),
     onContextMenu: (pane) => void showContextMenu(ws, pane),
+    onChange: save,
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
   // Menu bar items (macOS) carry the action as JSON in their id.
   await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));
 
-  // After a page reload the shells are still running: one tab each.
+  // Shells still running (the app was closed, or the page reloaded) come
+  // back in their saved layout; any the layout doesn't know get a tab each.
   const live = await liveSessions();
-  if (live.length === 0) ws.newTab(new TauriTransport());
-  for (const id of live) ws.newTab(new TauriTransport({ id }));
+  const stored = parseSaved(await invoke<string | null>("layout_get"));
+  const { saved, extra } = prune(stored ?? EMPTY, live);
+  ws.restore(saved, (id) => new TauriTransport({ id }));
+  for (const id of extra) ws.newTab(new TauriTransport({ id }));
 
-  const steps: Record<string, Action> = {
-    right: { kind: "split", dir: "row" },
-    down: { kind: "split", dir: "column" },
-    tab: { kind: "newTab" },
-  };
-  if (live.length === 0) {
+  if (ws.tabs.length === 0) {
+    ws.newTab(new TauriTransport());
+    const steps: Record<string, Action> = {
+      right: { kind: "split", dir: "row" },
+      down: { kind: "split", dir: "column" },
+      tab: { kind: "newTab" },
+    };
     for (const s of ((await invoke<string | null>("dev_layout")) ?? "").split(",")) {
       if (steps[s.trim()]) ws.run(steps[s.trim()]);
     }

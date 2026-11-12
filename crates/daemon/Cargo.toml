@@ -1,0 +1,18 @@
+[package]
+name = "daemon"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "kibannd: owns the terminal sessions so they outlive the app; plus the client the app uses"
+
+[[bin]]
+name = "kibannd"
+path = "src/bin/kibannd.rs"
+
+[dependencies]
+proto = { path = "../proto" }
+term = { path = "../term" }
+serde_json = { version = "1", features = ["raw_value"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

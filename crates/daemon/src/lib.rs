@@ -1,0 +1,79 @@
+//! The daemon owns the terminal sessions so they outlive the app, and the
+//! client is how the app (and later the CLI) talks to it.
+//!
+//! The server core ([`server::Daemon`]) serves any byte stream. On Unix it
+//! listens on a socket ([`server::serve_socket`]) and runs as `kibannd`; where
+//! there is no socket support yet (Windows), the app runs the same core in its
+//! own process over in-memory pipes ([`client::Client::in_process`]).
+
+pub mod client;
+pub mod outbox;
+pub mod paths;
+pub mod pipe;
+pub mod server;
+
+/// Identifies a daemon's executable: its size and modification time. The
+/// app compares it with the executable it would start, so a rebuilt or
+/// upgraded binary is noticed.
+pub fn build_id(path: &std::path::Path) -> std::io::Result<String> {
+    let meta = std::fs::metadata(path)?;
+    let modified = meta
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(format!("{}-{}", meta.len(), modified.as_nanos()))
+}
+
+/// The daemon's `main`, shared by `kibannd` and the app's `--daemon` mode
+/// (used by dev builds). `args` are the arguments after the program name.
+/// Returns the exit code.
+#[cfg(unix)]
+pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
+    use std::time::Duration;
+
+    let mut socket = None;
+    let mut idle = 10u64;
+    let mut args = args;
+    while let Some(a) = args.next() {
+        match a.to_str() {
+            Some("--socket") => socket = args.next().map(std::path::PathBuf::from),
+            Some("--idle-exit") => {
+                idle = args
+                    .next()
+                    .and_then(|v| v.to_str()?.parse().ok())
+                    .unwrap_or(idle);
+            }
+            _ => {
+                eprintln!("usage: kibannd [--socket PATH] [--idle-exit SECONDS]");
+                return 2;
+            }
+        }
+    }
+    let socket = socket.unwrap_or_else(|| paths::socket_path(cfg!(debug_assertions)));
+    // Read at start: the file may be rebuilt while we run.
+    let build = std::env::current_exe()
+        .and_then(|p| build_id(&p))
+        .unwrap_or_else(|_| "unknown".into());
+    let d = server::Daemon::new(build);
+    let cfg = server::SocketConfig {
+        socket,
+        idle_exit: Duration::from_secs(idle),
+    };
+    let pid = std::process::id();
+    eprintln!("kibannd {pid} listening on {}", cfg.socket.display());
+    match server::serve_socket(&d, &cfg) {
+        Ok(()) => {
+            eprintln!("kibannd {pid} exiting");
+            0
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Another daemon won the race to start; clients use that one.
+            eprintln!("kibannd {pid}: {e}");
+            0
+        }
+        Err(e) => {
+            eprintln!("kibannd {pid}: {e}");
+            1
+        }
+    }
+}

@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod wire;
+
 /// Bits of [`Style::flags`].
 pub mod flags {
     pub const BOLD: u16 = 1 << 0;

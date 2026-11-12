@@ -1,0 +1,434 @@
+//! The daemon with real shells, over a real socket.
+
+#![cfg(unix)]
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use daemon::client::{Client, ClientEvent};
+use daemon::server::{Daemon, SocketConfig, serve_socket};
+use proto::wire::{ClientMsg, PROTOCOL_VERSION, SessionId};
+use proto::{Frame, InputEvent, Resize};
+
+const SIZE: Resize = Resize {
+    cols: 60,
+    rows: 10,
+    cell_w: 8,
+    cell_h: 16,
+};
+
+/// A short socket path (macOS caps them at 104 bytes) in a fresh directory.
+fn socket() -> PathBuf {
+    static N: AtomicU32 = AtomicU32::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir()
+        .join(format!("kd{}-{n}", std::process::id()))
+        .join("s.sock")
+}
+
+fn start(socket: &Path, idle: Duration) -> (Arc<Daemon>, JoinHandle<std::io::Result<()>>) {
+    let d = Daemon::new("test-build");
+    let cfg = SocketConfig {
+        socket: socket.to_path_buf(),
+        idle_exit: idle,
+    };
+    let dd = d.clone();
+    let h = thread::spawn(move || serve_socket(&dd, &cfg));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !socket.exists() {
+        assert!(Instant::now() < deadline, "daemon didn't start");
+        thread::sleep(Duration::from_millis(10));
+    }
+    (d, h)
+}
+
+#[derive(Debug)]
+enum Ev {
+    Frame(SessionId, Box<Frame>),
+    Exited(SessionId, Option<u32>),
+    Disconnected,
+}
+
+fn events() -> (impl FnMut(ClientEvent<'_>) + Send + 'static, Receiver<Ev>) {
+    let (tx, rx) = channel();
+    let f = move |e: ClientEvent<'_>| {
+        let _ = tx.send(match e {
+            ClientEvent::Frame { session, json } => Ev::Frame(
+                session,
+                Box::new(serde_json::from_str(json).expect("frame json")),
+            ),
+            ClientEvent::Exited { session, code } => Ev::Exited(session, code),
+            ClientEvent::Disconnected => Ev::Disconnected,
+        });
+    };
+    (f, rx)
+}
+
+fn sh(c: &Client, script: Option<&str>) -> SessionId {
+    let argv = match script {
+        Some(s) => vec!["/bin/sh".into(), "-c".into(), s.into()],
+        None => vec!["/bin/sh".into()],
+    };
+    c.spawn(SIZE, None, Some(argv)).expect("spawn")
+}
+
+fn type_text(c: &Client, session: SessionId, text: &str) {
+    c.send(&ClientMsg::Input {
+        session,
+        event: InputEvent::Text { data: text.into() },
+    })
+    .unwrap();
+}
+
+/// The session's screen as the frames describe it, one string per row.
+#[derive(Default)]
+struct Screen(BTreeMap<u16, String>);
+
+impl Screen {
+    fn apply(&mut self, f: &Frame) {
+        if f.full {
+            self.0.clear();
+        }
+        for row in &f.rows {
+            let mut s = String::new();
+            for run in &row.runs {
+                match &run.text {
+                    Some(t) => t
+                        .iter()
+                        .for_each(|c| s.push_str(if c.is_empty() { " " } else { c })),
+                    None => s.push_str(&" ".repeat(run.len as usize)),
+                }
+            }
+            self.0.insert(row.y, s);
+        }
+    }
+
+    fn contains(&self, needle: &str) -> bool {
+        self.0.values().any(|r| r.contains(needle))
+    }
+}
+
+/// Apply frames for `session` (acking them, as the app does) until the
+/// screen shows `needle`.
+fn wait_for(c: &Client, rx: &Receiver<Ev>, session: SessionId, needle: &str) -> Screen {
+    let mut screen = Screen::default();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(Ev::Frame(s, f)) if s == session => {
+                screen.apply(&f);
+                c.send(&ClientMsg::Ack {
+                    session,
+                    seq: f.seq,
+                })
+                .unwrap();
+                if screen.contains(needle) {
+                    return screen;
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("never saw {needle:?}; screen: {:#?}", screen.0);
+}
+
+#[test]
+fn spawn_type_and_see_the_output() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    assert_eq!(c.hello().unwrap(), (PROTOCOL_VERSION, "test-build".into()));
+    let s = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(&c, s, "echo hi-$((40+2))\r");
+    wait_for(&c, &rx, s, "hi-42");
+    d.shutdown();
+    h.join().unwrap().unwrap();
+    assert!(!path.exists(), "socket removed on exit");
+}
+
+#[test]
+fn sessions_keep_running_while_detached() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let s = {
+        let (f, rx) = events();
+        let c = Client::connect(&path, f).unwrap();
+        let s = sh(&c, None);
+        c.send(&ClientMsg::Attach { session: s }).unwrap();
+        c.send(&ClientMsg::LayoutSet {
+            layout: "{\"tabs\":1}".into(),
+        })
+        .unwrap();
+        type_text(&c, s, "sleep 0.3; echo later-$((1+1))\r");
+        wait_for(&c, &rx, s, "sleep 0.3");
+        s
+        // The client goes away here, before the output.
+    };
+    thread::sleep(Duration::from_millis(700));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    assert_eq!(c.list().unwrap(), vec![s]);
+    assert_eq!(c.layout().unwrap().as_deref(), Some("{\"tabs\":1}"));
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    wait_for(&c, &rx, s, "later-2");
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn a_second_client_takes_the_session_over() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f1, rx1) = events();
+    let c1 = Client::connect(&path, f1).unwrap();
+    let s = sh(&c1, None);
+    c1.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(&c1, s, "echo one\r");
+    wait_for(&c1, &rx1, s, "one");
+
+    let (f2, rx2) = events();
+    let c2 = Client::connect(&path, f2).unwrap();
+    c2.send(&ClientMsg::Attach { session: s }).unwrap();
+    wait_for(&c2, &rx2, s, "one"); // the full frame on attach
+    while rx1.recv_timeout(Duration::from_millis(200)).is_ok() {}
+    type_text(&c2, s, "echo two-$((1+1))\r");
+    wait_for(&c2, &rx2, s, "two-2");
+    assert!(
+        !rx1.try_iter().any(|e| matches!(e, Ev::Frame(..))),
+        "the first client no longer gets frames"
+    );
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn an_exit_while_detached_is_reported_on_attach() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let s = sh(&c, Some("exit 3"));
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(d.live_sessions(), 0);
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(Ev::Exited(id, code)) => {
+                assert_eq!((id, code), (s, Some(3)));
+                break;
+            }
+            Ok(Ev::Frame(_, f)) => c
+                .send(&ClientMsg::Ack {
+                    session: s,
+                    seq: f.seq,
+                })
+                .unwrap(),
+            _ => assert!(Instant::now() < deadline, "no exit reported"),
+        }
+    }
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn the_daemon_exits_when_nothing_is_left() {
+    let path = socket();
+    let (_d, h) = start(&path, Duration::from_millis(300));
+    {
+        let (f, _rx) = events();
+        let c = Client::connect(&path, f).unwrap();
+        let s = sh(&c, None);
+        c.send(&ClientMsg::Close { session: s }).unwrap();
+        c.list().unwrap(); // the close is handled before this reply
+    }
+    let start = Instant::now();
+    h.join().unwrap().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(3));
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_client_that_stops_reading_stalls_nobody() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    // This client's callback blocks on its first frame, so it stops reading.
+    let gate = Arc::new(Mutex::new(()));
+    let held = gate.lock().unwrap();
+    let g = gate.clone();
+    let stuck = Client::connect(&path, move |_e: ClientEvent<'_>| {
+        drop(g.lock());
+    })
+    .unwrap();
+    let flood = sh(
+        &stuck,
+        Some("while :; do echo flood flood flood flood; done"),
+    );
+    stuck.send(&ClientMsg::Attach { session: flood }).unwrap();
+    // Acks keep the flood's frames coming, to fill the socket and the outbox.
+    for seq in 1..200 {
+        stuck
+            .send(&ClientMsg::Ack {
+                session: flood,
+                seq,
+            })
+            .unwrap();
+    }
+
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let s = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(&c, s, "echo fine-$((2+3))\r");
+    wait_for(&c, &rx, s, "fine-5");
+    drop(held);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn stale_sockets_are_replaced_and_live_ones_kept() {
+    let path = socket();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // Left behind by a daemon that died.
+    drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+    let (d, h) = start(&path, Duration::from_secs(60));
+    // The old file was already there, so wait until the new daemon answers.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let c = loop {
+        let (f, _rx) = events();
+        match Client::connect(&path, f) {
+            Ok(c) => break c,
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Err(e) => panic!("{e}"),
+        }
+    };
+    c.hello().unwrap();
+
+    // A second daemon on the same socket refuses to start.
+    let other = Daemon::new("other");
+    let cfg = SocketConfig {
+        socket: path.clone(),
+        idle_exit: Duration::from_secs(1),
+    };
+    let e = serve_socket(&other, &cfg).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse);
+    assert!(path.exists());
+
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn clients_racing_to_start_share_one_daemon() {
+    let path = socket();
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_kibannd"));
+    let command = vec![exe.clone().into_os_string()];
+    let clients: Vec<_> = (0..3)
+        .map(|_| {
+            let (path, command) = (path.clone(), command.clone());
+            thread::spawn(move || {
+                let (f, rx) = events();
+                (Client::connect_or_start(&path, &command, f).unwrap(), rx)
+            })
+        })
+        .collect();
+    let clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
+    let builds: Vec<_> = clients.iter().map(|(c, _)| c.hello().unwrap().1).collect();
+    assert_eq!(builds[0], daemon::build_id(&exe).unwrap());
+    assert!(builds.iter().all(|b| *b == builds[0]));
+
+    let s = sh(&clients[0].0, None);
+    for (c, _) in &clients {
+        assert_eq!(c.list().unwrap(), vec![s]);
+    }
+    clients[0].0.send(&ClientMsg::Shutdown).unwrap();
+    // Every client sees the daemon go.
+    for (_, rx) in &clients {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(Ev::Disconnected) => break,
+                _ => assert!(Instant::now() < deadline, "still connected"),
+            }
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while path.exists() {
+        assert!(Instant::now() < deadline, "socket left behind");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn the_daemon_can_run_in_process() {
+    let (f, rx) = events();
+    let c = Client::in_process(f).unwrap();
+    let s = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(&c, s, "echo inproc-$((3*3))\r");
+    wait_for(&c, &rx, s, "inproc-9");
+}
+
+/// Median time from a typed character to the frame that shows it.
+fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: SessionId) -> Duration {
+    c.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(c, s, "stty -icanon; echo ready\r");
+    let mut screen = wait_for(c, rx, s, "ready");
+    let mut times = Vec::new();
+    for i in 0..30 {
+        thread::sleep(Duration::from_millis(30)); // past the frame throttle
+        while rx.try_recv().is_ok() {}
+        let ch = char::from(b'a' + (i % 26) as u8).to_string();
+        let marker = format!("{ch}{ch}");
+        let t = Instant::now();
+        type_text(c, s, &ch);
+        type_text(c, s, &ch);
+        loop {
+            match rx.recv_timeout(Duration::from_secs(2)).expect("echo") {
+                Ev::Frame(id, f) if id == s => {
+                    c.send(&ClientMsg::Ack { session: s, seq: f.seq }).unwrap();
+                    screen.apply(&f);
+                    if screen.0.values().any(|r| r.trim_end().ends_with(&marker)) {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        times.push(t.elapsed());
+        type_text(c, s, "\r");
+    }
+    times.sort();
+    times[times.len() / 2]
+}
+
+#[test]
+fn the_socket_adds_little_latency() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let s = sh(&c, None);
+    let socket = echo_latency(&c, &rx, s);
+
+    let (f, rx) = events();
+    let local = Client::in_process(f).unwrap();
+    let s = sh(&local, None);
+    let in_process = echo_latency(&local, &rx, s);
+
+    eprintln!("echo latency: socket {socket:?}, in process {in_process:?}");
+    assert!(
+        socket < in_process + Duration::from_millis(2),
+        "socket {socket:?} vs in process {in_process:?}"
+    );
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

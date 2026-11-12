@@ -8,6 +8,7 @@ import { detectPlatform, type Platform } from "../input/keyboard";
 import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
 import { actionFor, type Action } from "./keymap";
+import { mapLeaves, type Saved, type SessionId } from "./snapshot";
 import {
   cycle,
   dividers,
@@ -71,6 +72,8 @@ export interface WorkspaceOptions {
   onEmpty?(): void;
   /** Right-click in a pane with no program taking the mouse. */
   onContextMenu?(pane: Pane, e: MouseEvent): void;
+  /** Tabs, splits, sizes or focus changed (to save the layout). */
+  onChange?(): void;
 }
 
 export class Workspace {
@@ -207,20 +210,70 @@ export class Workspace {
   // ---- tabs ----
 
   newTab(transport: Transport): Tab {
+    const id = this.nextPane++;
+    return this.openTab(leaf(id), new Map([[id, transport]]), id, null);
+  }
+
+  /** Open a tab with this split tree, one transport per pane. */
+  private openTab(tree: Tree, transports: Map<PaneId, Transport>, focused: PaneId, zoomed: PaneId | null): Tab {
     const el = document.createElement("div");
     el.className = "tab-stage";
     Object.assign(el.style, { position: "absolute", inset: "0", display: "none" });
     this.stage.append(el);
     const button = document.createElement("div");
-    const id = this.nextTab++;
-    const paneId = this.nextPane++;
-    const tab: Tab = { id, tree: leaf(paneId), focused: paneId, zoomed: null, el, button };
+    const tab: Tab = { id: this.nextTab++, tree, focused, zoomed, el, button };
     this.makeTabButton(tab);
     this.tabs.push(tab);
-    this.addPane(tab, paneId, transport);
+    for (const [paneId, t] of transports) this.addPane(tab, paneId, t);
     this.activate(tab);
     this.updateBar();
+    this.changed();
     return tab;
+  }
+
+  /** The layout as data, with each pane named by `key` (its session).
+   * Panes without one yet (still starting) are left out. */
+  snapshot(key: (t: Transport) => SessionId | null): Saved {
+    const sessionOf = (id: PaneId) => {
+      const p = this.panes.get(id);
+      return p ? key(p.transport) : null;
+    };
+    const tabs: Saved["tabs"] = [];
+    let active = 0;
+    for (const tab of this.tabs) {
+      const tree = mapLeaves(tab.tree, sessionOf);
+      if (!tree) continue;
+      if (tab === this.active) active = tabs.length;
+      const focused = sessionOf(tab.focused);
+      const zoomed = tab.zoomed === null ? null : sessionOf(tab.zoomed);
+      tabs.push({ tree, focused: focused ?? (tree.kind === "leaf" ? tree.pane : panes(tree)[0]), zoomed });
+    }
+    return { version: 1, tabs, active };
+  }
+
+  /** Open the tabs of a saved layout, reattaching each pane with
+   * `transport(session)`. */
+  restore(saved: Saved, transport: (session: SessionId) => Transport): void {
+    const opened: Tab[] = [];
+    for (const t of saved.tabs) {
+      const ids = new Map<SessionId, PaneId>();
+      const tree = mapLeaves(t.tree, (session) => {
+        const id = this.nextPane++;
+        ids.set(session, id);
+        return id;
+      });
+      if (!tree) continue;
+      const transports = new Map([...ids].map(([session, id]) => [id, transport(session)]));
+      const focused = ids.get(t.focused) ?? panes(tree)[0];
+      const zoomed = t.zoomed === null ? null : (ids.get(t.zoomed) ?? null);
+      opened.push(this.openTab(tree, transports, focused, zoomed));
+    }
+    const active = opened[saved.active] ?? opened[0];
+    if (active) this.activate(active);
+  }
+
+  private changed(): void {
+    this.opts.onChange?.();
   }
 
   activate(tab: Tab): void {
@@ -235,6 +288,7 @@ export class Workspace {
     this.focusPane(tab.focused);
     this.updateBar();
     this.emitTitle();
+    this.changed();
   }
 
   private closeTab(tab: Tab): void {
@@ -248,6 +302,7 @@ export class Workspace {
       if (next) this.activate(next);
     }
     this.updateBar();
+    this.changed();
     if (this.tabs.length === 0) this.opts.onEmpty?.();
   }
 
@@ -334,6 +389,8 @@ export class Workspace {
         return;
       }
       pane.view = view;
+      // A new pane's session exists now, so it can be saved.
+      this.changed();
       view.setActive(pane.tab.focused === pane.id);
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
     });
@@ -399,6 +456,7 @@ export class Workspace {
   }
 
   private updateActive(tab: Tab): void {
+    this.changed();
     for (const id of panes(tab.tree)) this.panes.get(id)?.view?.setActive(id === tab.focused);
     if (tab === this.active) {
       this.updateBar();
@@ -414,6 +472,7 @@ export class Workspace {
 
   /** Position a tab's panes and dividers in the stage. */
   layout(tab: Tab): void {
+    this.changed();
     this.place(tab);
     for (const d of tab.el.querySelectorAll(".divider")) d.remove();
     if (tab.zoomed !== null) return;

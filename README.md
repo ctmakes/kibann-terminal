@@ -7,8 +7,9 @@ An agent-first terminal (Tauri 2 + libghostty-vt). Work in progress.
 ```
 crates/proto/   message types shared by the backend and the web renderer (source of truth)
 crates/term/    terminal session: PTY, libghostty-vt emulator, frame builder, input encoders
+crates/daemon/  the daemon that owns the sessions (kibannd), and the client the app uses
 app/            web frontend: canvas renderer, input handling, browser harness, tests
-app/src-tauri/  Tauri shell: one window, one session; turns commands into session calls
+app/src-tauri/  Tauri shell: one window; turns commands into daemon requests
 ```
 
 ## App
@@ -39,6 +40,10 @@ Tabs and splits use Ghostty's default shortcuts:
 | Tab 1–8, last tab | Cmd+1–8, Cmd+9 | Alt+1–8, Alt+9 |
 
 Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
+
+Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon; opening the app again brings back the tabs, splits and focus, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells.
+
+The daemon is the app's own executable run with `--daemon`, listening on a socket only your user can open (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux; its log is beside it). Dev builds use `daemon-dev.sock` and replace a daemon from an earlier build, which ends dev sessions after a Rust rebuild. On Windows (not yet supported by the daemon) sessions run inside the app and end with it.
 
 New panes and tabs start in the focused pane's directory. A pane closes when its shell exits, and the app quits when the last pane closes. The shell doesn't inherit variables describing the terminal the app was started from (`TERM_PROGRAM`, `TMUX`, `GHOSTTY_*` and the like); it gets `TERM_PROGRAM=kibann`.
 

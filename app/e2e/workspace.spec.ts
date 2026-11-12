@@ -328,3 +328,37 @@ test.describe("links", () => {
     await page.keyboard.up("Meta");
   });
 });
+
+test.describe("restore", () => {
+  test("a saved layout comes back the same", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+d");
+    await press(page, "Meta+Shift+d"); // 1 | (2 over 3)
+    await press(page, "Meta+Control+ArrowUp"); // pane 3 grows
+    await press(page, "Meta+t");
+    await press(page, "Meta+d");
+    await press(page, "Meta+Shift+Enter"); // tab 2 zoomed on its second pane
+    await press(page, "Meta+1");
+    await press(page, "Meta+Alt+ArrowLeft"); // focus pane 1
+
+    const before = await state(page);
+    const saved = await page.evaluate(() => (window as any).__ws.snapshot());
+    expect(saved.tabs).toHaveLength(2);
+    expect(saved.active).toBe(0);
+    expect(saved.tabs[1].zoomed).toBe(saved.tabs[1].focused);
+
+    await open(page, { saved: JSON.stringify(saved) });
+    const after = await state(page);
+    const shape = (s: State) => ({
+      tabs: s.tabs,
+      active: s.active,
+      focusedAt: s.panes.findIndex((p) => p.id === s.focused),
+      rects: s.panes.map(({ x, y, w, h }) => ({ x, y, w, h })),
+    });
+    expect(shape(after)).toEqual(shape(before));
+    await press(page, "Meta+2");
+    const tab2 = await state(page);
+    expect(tab2.zoomed).not.toBeNull();
+    expect(tab2.panes).toHaveLength(1);
+  });
+});

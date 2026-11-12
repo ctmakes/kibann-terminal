@@ -1,7 +1,8 @@
 // Tabs and splits in a browser, with fake transports: each pane shows its
 // number and logs its input. Playwright drives it through `window.__ws`.
 //
-// Params: w, h (CSS px), platform=mac|other, dpr, links=1 (each pane shows a
+// Params: w, h (CSS px), platform=mac|other, dpr, saved (a layout to
+// restore), links=1 (each pane shows a
 // link the fake backend reports on hover).
 
 import "@fontsource/jetbrains-mono/400.css";
@@ -63,7 +64,9 @@ const ws = new Workspace(root, {
   onTitle: (t) => titles.push(t),
   onEmpty: () => (quit = true),
 });
-ws.newTab(transport(null));
+// `saved`: a layout from `__ws.snapshot()` to restore, keyed by transport number.
+if (params.saved) ws.restore(JSON.parse(params.saved), () => transport(null));
+else ws.newTab(transport(null));
 
 (window as any).__ws = {
   ws,
@@ -90,6 +93,10 @@ ws.newTab(transport(null));
         return { id: Number(e.dataset.pane), x: r.x, y: r.y, w: r.width, h: r.height };
       }),
     };
+  },
+  /** The layout with each pane named by its transport number. */
+  snapshot() {
+    return ws.snapshot((t) => transports.indexOf(t as ReplayTransport) + 1);
   },
   /** Every pane's view is created. */
   ready() {
