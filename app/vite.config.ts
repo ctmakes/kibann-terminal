@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   // Tauri expects a fixed port and no clearing of its log output.
-  server: { port: 5173, strictPort: true },
+  server: { port: 1420, strictPort: true, host: "127.0.0.1" },
   clearScreen: false,
   build: {
     target: "es2022",

@@ -16,7 +16,7 @@ export default defineConfig({
     // Text antialiasing differs slightly between machines and GPU paths.
     toHaveScreenshot: { maxDiffPixelRatio: 0.002, threshold: 0.15 },
   },
-  use: { baseURL: "http://localhost:5173" },
+  use: { baseURL: "http://127.0.0.1:1420" },
   projects: engines.flatMap(([name, device]) =>
     [1, 2].map((dpr) => ({
       name: `${name}-${dpr}x`,
@@ -24,8 +24,8 @@ export default defineConfig({
     })),
   ),
   webServer: {
-    command: "npx vite --port 5173 --strictPort",
-    url: "http://localhost:5173/src/dev/harness.html",
+    command: "npx vite --port 1420 --host 127.0.0.1 --strictPort",
+    url: "http://127.0.0.1:1420/src/dev/harness.html",
     reuseExistingServer: true,
   },
 });

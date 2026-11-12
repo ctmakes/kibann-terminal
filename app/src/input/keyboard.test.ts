@@ -104,3 +104,21 @@ describe("scrollback shortcuts", () => {
     expect(d({ key: "c", code: "KeyC", metaKey: true }, "mac")).toBe("passthrough");
   });
 });
+
+describe("macOS text editing", () => {
+  const d = (over: Partial<KeyLike> & { key: string; code: string }, p: "mac" | "other" = "mac") => decideKeyDown(key(over), sides(), p);
+
+  it("maps Cmd and Option shortcuts to what shells understand", () => {
+    expect(d({ key: "Backspace", code: "Backspace", metaKey: true })).toEqual({ kind: "text", data: "\x15" });
+    expect(d({ key: "ArrowLeft", code: "ArrowLeft", metaKey: true })).toEqual({ kind: "text", data: "\x01" });
+    expect(d({ key: "ArrowRight", code: "ArrowRight", metaKey: true })).toEqual({ kind: "text", data: "\x05" });
+    expect(d({ key: "ArrowLeft", code: "ArrowLeft", altKey: true })).toEqual({ kind: "text", data: "\x1bb" });
+    expect(d({ key: "ArrowRight", code: "ArrowRight", altKey: true })).toEqual({ kind: "text", data: "\x1bf" });
+  });
+
+  it("leaves Option+Backspace, other platforms and extra modifiers to the encoder", () => {
+    expect(d({ key: "Backspace", code: "Backspace", altKey: true })).toMatchObject({ kind: "key", mods: Mods.ALT });
+    expect(d({ key: "Backspace", code: "Backspace", metaKey: true }, "other")).toMatchObject({ kind: "key" });
+    expect(d({ key: "ArrowLeft", code: "ArrowLeft", metaKey: true, shiftKey: true })).toMatchObject({ kind: "key" });
+  });
+});

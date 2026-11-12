@@ -95,6 +95,26 @@ export function scrollFor(e: KeyLike, platform: Platform): InputEvent | null {
   }
 }
 
+/**
+ * macOS text editing, as Ghostty does it by default: Cmd+Backspace deletes
+ * the line (^U), Cmd+Left/Right go to the start/end (^A/^E), and
+ * Option+Left/Right move by word (ESC b / ESC f). Shells' line editors
+ * understand these; the plain key codes alone don't mean that.
+ */
+export function macTextEditing(e: KeyLike, platform: Platform): InputEvent | null {
+  if (platform !== "mac" || e.ctrlKey || e.shiftKey) return null;
+  let data: string | null = null;
+  if (e.metaKey && !e.altKey) {
+    if (e.code === "Backspace") data = "\x15";
+    else if (e.code === "ArrowLeft") data = "\x01";
+    else if (e.code === "ArrowRight") data = "\x05";
+  } else if (e.altKey && !e.metaKey) {
+    if (e.code === "ArrowLeft") data = "\x1bb";
+    else if (e.code === "ArrowRight") data = "\x1bf";
+  }
+  return data === null ? null : { kind: "text", data };
+}
+
 /** Ctrl+Shift+C off macOS; macOS copies through the menu's Cmd+C. */
 export function isCopyShortcut(e: KeyLike, platform: Platform): boolean {
   return platform !== "mac" && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyC";
@@ -109,6 +129,8 @@ export function decideKeyDown(e: KeyLike, sides: ModSides, platform: Platform): 
   if (isPassthrough(e, platform)) return "passthrough";
   const scroll = scrollFor(e, platform);
   if (scroll) return scroll;
+  const edit = macTextEditing(e, platform);
+  if (edit) return edit;
   const printable = e.key !== "Unidentified" && graphemes(e.key).length === 1;
   const text = printable && !e.ctrlKey && !e.metaKey ? e.key : null;
   return {
@@ -166,8 +188,10 @@ export class KeyboardInput {
       this.sink.copy?.();
       return;
     }
-    if (d.kind === "scroll") {
+    if (d.kind === "scroll" || d.kind === "text") {
+      // No key release follows: the program never saw a press.
       this.sink.send(d);
+      this.sink.activity();
       return;
     }
     this.pressed.add(e.code);

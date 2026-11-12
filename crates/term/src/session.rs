@@ -18,8 +18,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use proto::{Frame, InputEvent, Resize};
+use proto::{Frame, InputEvent, MouseAction, Resize};
 
+use crate::cast::{CastWriter, Header};
 use crate::emulator::{Emulator, TERMINFO_NAME};
 use crate::selection::AUTOSCROLL_INTERVAL;
 
@@ -118,7 +119,14 @@ impl Session {
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
-                run(rx, size, pty_writer, Some(master), true);
+                run(
+                    rx,
+                    size,
+                    pty_writer,
+                    Some(master),
+                    true,
+                    debug_recorder(size),
+                );
             })?;
         Ok(Self {
             tx,
@@ -140,7 +148,7 @@ impl Session {
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
-                run(rx, size, pty_writer, None, false);
+                run(rx, size, pty_writer, None, false, None);
             })?;
         Ok(Self {
             tx,
@@ -296,12 +304,27 @@ impl Pacer {
     }
 }
 
+type Recorder = CastWriter<std::fs::File>;
+
+/// `KIBANN_RECORD=path.cast` records the session for debugging: program
+/// output, the bytes sent to it, and each input event as a marker.
+fn debug_recorder(size: Resize) -> Option<Recorder> {
+    let path = std::env::var_os("KIBANN_RECORD")?;
+    let file = std::fs::File::create(&path).ok()?;
+    let header = Header {
+        width: size.cols,
+        height: size.rows,
+    };
+    CastWriter::new(file, header, None).ok()
+}
+
 fn run(
     rx: Receiver<Msg>,
     size: Resize,
     pty: Sender<Vec<u8>>,
     master: Option<Box<dyn MasterPty + Send>>,
     report_exit: bool,
+    mut rec: Option<Recorder>,
 ) {
     let Ok(mut emu) = Emulator::new(size) else {
         return;
@@ -350,15 +373,32 @@ fn run(
                     budget = budget.saturating_sub(data.len());
                     emu.write(&data);
                     p.dirty = true;
+                    if let Some(r) = &mut rec {
+                        let _ = r.output(&data);
+                    }
                 }
                 Msg::OutputEnd => output_done = true,
                 Msg::ChildExited(code) => exit = Some((code, Instant::now())),
                 Msg::Input(e) => {
+                    if let Some(r) = &mut rec
+                        && !matches!(
+                            e,
+                            InputEvent::Mouse {
+                                action: MouseAction::Motion,
+                                ..
+                            }
+                        )
+                    {
+                        let _ = r.marker(&serde_json::to_string(&e).unwrap_or_default());
+                    }
                     let _ = emu.input(&e);
                     // Selection and scrolling change the screen with no output.
                     p.dirty = true;
                 }
                 Msg::Resize(s) => {
+                    if let Some(r) = &mut rec {
+                        let _ = r.resize(s.cols, s.rows);
+                    }
                     if let Ok(true) = emu.resize(s) {
                         if let Some(m) = &master {
                             let _ = m.resize(pty_size(s));
@@ -387,6 +427,10 @@ fn run(
 
         let out = emu.take_outbox();
         if !out.is_empty() {
+            if let Some(r) = &mut rec {
+                let _ = r.input(&out);
+                let _ = r.flush();
+            }
             let _ = pty.send(out);
         }
 

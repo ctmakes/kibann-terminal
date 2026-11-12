@@ -42,7 +42,7 @@ Selection and scrollback work like Ghostty's:
 ```sh
 cd app
 npm install
-npm run dev            # then open http://localhost:5173/src/dev/harness.html
+npm run dev            # then open http://127.0.0.1:1420/src/dev/harness.html
 npm test               # unit tests (Vitest)
 npx playwright install chromium webkit
 npm run test:e2e       # screenshots, pixel joins, input, frames in Chromium + WebKit at 1x/2x

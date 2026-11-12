@@ -156,6 +156,16 @@ impl<W: Write> CastWriter<W> {
         }
     }
 
+    /// Bytes sent to the program (keys, paste, device responses).
+    pub fn input(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.event("i", &String::from_utf8_lossy(bytes))
+    }
+
+    /// A note for whoever reads the recording; players skip markers.
+    pub fn marker(&mut self, label: &str) -> io::Result<()> {
+        self.event("m", label)
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         self.event("r", &format!("{cols}x{rows}"))
     }
