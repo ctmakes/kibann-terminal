@@ -8,7 +8,20 @@ An agent-first terminal (Tauri 2 + libghostty-vt). Work in progress.
 crates/proto/   message types shared by the backend and the web renderer (source of truth)
 crates/term/    terminal session: PTY, libghostty-vt emulator, frame builder, input encoders
 app/            web frontend: canvas renderer, input handling, browser harness, tests
+app/src-tauri/  Tauri shell: one window, one session; turns commands into session calls
 ```
+
+## App
+
+```sh
+cd app
+npm install
+npm run tauri dev      # needs Zig 0.17 on PATH (libghostty-vt builds from source)
+npm run tauri build -- --bundles app   # macOS .app in target/release/bundle
+KIBANN_COMMAND="htop" npm run tauri dev   # run a program instead of the login shell
+```
+
+The window closes when its shell exits.
 
 ## Renderer
 

@@ -1,0 +1,18 @@
+[package]
+name = "kibann"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Kibann Terminal: Tauri shell around the term session and the web renderer"
+
+[lib]
+name = "kibann_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+proto = { path = "../../crates/proto" }
+term = { path = "../../crates/term" }
