@@ -11,6 +11,7 @@ export type Direction = "left" | "right" | "up" | "down";
 export type Tree =
   | { kind: "leaf"; pane: PaneId }
   | { kind: "split"; dir: Dir; ratio: number; a: Tree; b: Tree };
+// Same shape as the daemon's (`proto/generated/Tree`).
 
 /** Steps from the root to a node. */
 export type Path = Array<"a" | "b">;
@@ -83,8 +84,21 @@ export function setRatio(t: Tree, path: Path, ratio: number): Tree {
  * the tree unchanged when there is no divider that way.
  */
 export function resize(t: Tree, box: Rect, pane: PaneId, toward: Direction, delta: number): Tree {
+  const r = resizeTarget(t, box, pane, toward, delta);
+  return r ? setRatio(t, r.path, r.ratio) : t;
+}
+
+/** The split [`resize`] would change and its new ratio (unclamped), or
+ * null when there is no divider that way. */
+export function resizeTarget(
+  t: Tree,
+  box: Rect,
+  pane: PaneId,
+  toward: Direction,
+  delta: number,
+): { path: Path; ratio: number } | null {
   const path = pathOf(t, pane);
-  if (!path) return t;
+  if (!path) return null;
   const dir: Dir = toward === "left" || toward === "right" ? "row" : "column";
   const sign = toward === "left" || toward === "up" ? -1 : 1;
   // Nearest ancestor split in that orientation.
@@ -94,10 +108,10 @@ export function resize(t: Tree, box: Rect, pane: PaneId, toward: Direction, delt
     if (n.kind !== "split" || n.dir !== dir) continue;
     const r = boxOf(t, box, p);
     const size = (dir === "row" ? r.w : r.h) - DIVIDER;
-    if (size <= 0) return t;
-    return setRatio(t, p, n.ratio + (sign * delta) / size);
+    if (size <= 0) return null;
+    return { path: p, ratio: clampRatio(n.ratio + (sign * delta) / size) };
   }
-  return t;
+  return null;
 }
 
 /** Give every pane in a run of same-direction splits an equal share. */

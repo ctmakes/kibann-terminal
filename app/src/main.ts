@@ -2,10 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { TauriTransport, inTauri, liveSessions } from "./transport/tauri";
-import type { Transport } from "./transport/types";
+import type { Layout, LayoutAction } from "./proto";
+import { TauriTransport, inTauri } from "./transport/tauri";
+import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
-import { EMPTY, parseSaved, prune } from "./workspace/snapshot";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -30,48 +30,41 @@ async function showContextMenu(ws: Workspace, pane: Pane): Promise<void> {
 
 async function start(): Promise<void> {
   const win = getCurrentWindow();
-  const cwdFrom = (near: Transport | null) =>
-    near instanceof TauriTransport && near.id !== null ? near.id : undefined;
-  const sessionOf = (t: Transport) => (t instanceof TauriTransport ? t.id : null);
-  // The daemon keeps the layout while the app is closed; save it shortly
-  // after each change.
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  const save = () => {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      saveTimer = null;
-      void invoke("layout_set", { layout: JSON.stringify(ws.snapshot(sessionOf)) });
-    }, 500);
+  const backend: LayoutBackend = {
+    act: (action: LayoutAction) => invoke<Acted>("layout_act", { action }),
   };
   const ws = new Workspace(el, {
-    transport: (near) => new TauriTransport({ cwdFrom: cwdFrom(near) }),
+    backend,
+    transport: (pane) => new TauriTransport(pane),
     onTitle: (title) => void win.setTitle(title),
     onEmpty: () => void invoke("app_quit"),
     onContextMenu: (pane) => void showContextMenu(ws, pane),
-    onChange: save,
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
   // Menu bar items (macOS) carry the action as JSON in their id.
   await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));
 
-  // Shells still running (the app was closed, or the page reloaded) come
-  // back in their saved layout; any the layout doesn't know get a tab each.
-  const live = await liveSessions();
-  const stored = parseSaved(await invoke<string | null>("layout_get"));
-  const { saved, extra } = prune(stored ?? EMPTY, live);
-  ws.restore(saved, (id) => new TauriTransport({ id }));
-  for (const id of extra) ws.newTab(new TauriTransport({ id }));
+  // The daemon owns the layout and sends it now and whenever it changes (an
+  // agent split a pane, a shell exited), all as "layout" events, in order.
+  // Panes still running from before (the app was closed, or the page
+  // reloaded) come back as they were.
+  await listen<Layout>("layout", (e) => ws.apply(e.payload));
+  const layout = await invoke<Layout>("layout_watch");
 
-  if (ws.tabs.length === 0) {
-    ws.newTab(new TauriTransport());
-    const steps: Record<string, Action> = {
-      right: { kind: "split", dir: "row" },
-      down: { kind: "split", dir: "column" },
-      tab: { kind: "newTab" },
-    };
-    for (const s of ((await invoke<string | null>("dev_layout")) ?? "").split(",")) {
-      if (steps[s.trim()]) ws.run(steps[s.trim()]);
+  if (layout.tabs.length === 0) {
+    const first = await backend.act({ t: "new_tab", focus: true });
+    // KIBANN_LAYOUT: splits and tabs to start with.
+    let last = first.pane;
+    for (const s of ((await invoke<string | null>("dev_layout")) ?? "").split(",").map((s) => s.trim())) {
+      if (last === null) break;
+      const a: LayoutAction | null =
+        s === "right" || s === "down"
+          ? { t: "split", pane: last, dir: s === "right" ? "row" : "column", focus: true }
+          : s === "tab"
+            ? { t: "new_tab", near: last, focus: true }
+            : null;
+      if (a) last = (await backend.act(a)).pane;
     }
   }
 }

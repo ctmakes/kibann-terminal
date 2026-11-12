@@ -6,7 +6,9 @@
 //! there is no socket support yet (Windows), the app runs the same core in its
 //! own process over in-memory pipes ([`client::Client::in_process`]).
 
+pub mod cli;
 pub mod client;
+pub mod layout;
 pub mod outbox;
 pub mod paths;
 pub mod pipe;
@@ -22,6 +24,39 @@ pub fn build_id(path: &std::path::Path) -> std::io::Result<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     Ok(format!("{}-{}", meta.len(), modified.as_nanos()))
+}
+
+/// What shells learn about this daemon: its socket, and a `kibann` link to
+/// this executable on `PATH` (in `<socket>.bin/` beside the socket, so a dev
+/// and an installed copy each find their own).
+#[cfg(unix)]
+fn pane_env(socket: &std::path::Path) -> server::PaneEnv {
+    let bin = std::env::current_exe().ok();
+    let path_dir = bin.as_ref().and_then(|exe| {
+        let dir = socket.with_extension("bin");
+        std::fs::create_dir_all(&dir).ok()?;
+        let link = dir.join("kibann");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(exe, &link).ok()?;
+        Some(dir)
+    });
+    server::PaneEnv {
+        socket: Some(socket.to_owned()),
+        bin,
+        path_dir,
+    }
+}
+
+/// `main` for the executables that hold the daemon and the CLI (`kibannd`;
+/// the app has its own and calls the same pieces): `pane ...`, `tab ...` and
+/// `skill ...` are CLI commands, anything else runs the daemon.
+#[cfg(unix)]
+pub fn main(args: Vec<std::ffi::OsString>) -> i32 {
+    if cli::is_command(args.first()) {
+        cli::run(args)
+    } else {
+        run_daemon(args.into_iter())
+    }
 }
 
 /// The daemon's `main`, shared by `kibannd` and the app's `--daemon` mode
@@ -55,6 +90,7 @@ pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
         .and_then(|p| build_id(&p))
         .unwrap_or_else(|_| "unknown".into());
     let d = server::Daemon::new(build);
+    d.set_pane_env(pane_env(&socket));
     let cfg = server::SocketConfig {
         socket,
         idle_exit: Duration::from_secs(idle),

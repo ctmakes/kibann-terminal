@@ -160,6 +160,16 @@ test.describe("splits", () => {
     s = await state(page);
     expect(s.zoomed).toBeNull();
     expect(s.panes).toHaveLength(2);
+
+    // The menu item firing too, before or after the key, zooms only once.
+    const menu = () => page.evaluate(() => (window as any).__ws.ws.runFromMenu({ kind: "zoom" }));
+    await menu();
+    await press(page, "Meta+Shift+Enter");
+    expect((await state(page)).zoomed).toBe(2);
+    await press(page, "Meta+Shift+Enter");
+    await menu();
+    await settle(page);
+    expect((await state(page)).zoomed).toBeNull();
   });
 
   test("Linux and Windows shortcuts", async ({ page }) => {
@@ -329,6 +339,48 @@ test.describe("links", () => {
   });
 });
 
+test.describe("agents", () => {
+  test("a pane an agent opens appears without taking focus", async ({ page }) => {
+    await open(page);
+    await page.keyboard.type("a");
+    // As `kibann pane split --direction down` from pane 1 would.
+    const made = await page.evaluate(() =>
+      (window as any).__ws.agent({ t: "split", pane: 1, dir: "column", focus: false }),
+    );
+    expect(made.pane).toBe(2);
+    await settle(page);
+    let s = await state(page);
+    expect(s.panes.map((p) => p.id)).toEqual([1, 2]);
+    expect(s.panes[1].y).toBeGreaterThan(s.panes[0].y);
+    expect(s.focused).toBe(1);
+    await page.keyboard.type("b");
+    expect(await typed(page)).toEqual({ 1: "ab" });
+
+    // A new tab in the background leaves the tab shown.
+    await page.evaluate(() => (window as any).__ws.agent({ t: "new_tab", near: 2, focus: false }));
+    await settle(page);
+    s = await state(page);
+    expect(s.tabs).toBe(2);
+    expect(s.active).toBe(0);
+
+    // Asked to, it focuses: the tab switches and typing goes there.
+    await page.evaluate(() => (window as any).__ws.agent({ t: "focus", pane: 3 }));
+    await settle(page);
+    s = await state(page);
+    expect(s.active).toBe(1);
+    expect(s.focused).toBe(3);
+    await page.keyboard.type("c");
+    expect(await typed(page)).toEqual({ 1: "ab", 3: "c" });
+
+    // An agent closing a pane gives its space back.
+    await page.evaluate(() => (window as any).__ws.agent({ t: "close", pane: 3 }));
+    await settle(page);
+    s = await state(page);
+    expect(s.tabs).toBe(1);
+    expect(s.focused).toBe(1);
+  });
+});
+
 test.describe("restore", () => {
   test("a saved layout comes back the same", async ({ page }) => {
     await open(page);
@@ -344,7 +396,7 @@ test.describe("restore", () => {
     const before = await state(page);
     const saved = await page.evaluate(() => (window as any).__ws.snapshot());
     expect(saved.tabs).toHaveLength(2);
-    expect(saved.active).toBe(0);
+    expect(saved.active).toBe(saved.tabs[0].id);
     expect(saved.tabs[1].zoomed).toBe(saved.tabs[1].focused);
 
     await open(page, { saved: JSON.stringify(saved) });

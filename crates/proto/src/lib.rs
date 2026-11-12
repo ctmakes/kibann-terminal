@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod layout;
 pub mod wire;
 
 /// Bits of [`Style::flags`].

@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::wire::{
     ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, SessionId, read_msg,
     write_msg,
@@ -27,10 +28,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum ClientEvent<'a> {
     /// A frame for `session`, as JSON (a [`proto::Frame`]).
     Frame { session: SessionId, json: &'a str },
-    Exited {
-        session: SessionId,
-        code: Option<u32>,
-    },
+    /// The layout changed (after [`Client::watch`]).
+    Layout(Layout),
     /// The connection closed: the daemon exited or crashed.
     Disconnected,
 }
@@ -81,9 +80,7 @@ impl Client {
                                 session,
                                 json: frame.get(),
                             }),
-                            ServerMsg::Exited { session, code } => {
-                                on_event(ClientEvent::Exited { session, code });
-                            }
+                            ServerMsg::Layout { layout } => on_event(ClientEvent::Layout(layout)),
                         }
                     }
                     // Requests still waiting fail now rather than time out.
@@ -147,39 +144,33 @@ impl Client {
         }
     }
 
-    pub fn spawn(
-        &self,
-        size: proto::Resize,
-        cwd_from: Option<SessionId>,
-        argv: Option<Vec<String>>,
-    ) -> io::Result<SessionId> {
-        match self.request(|req| ClientMsg::Spawn {
-            req,
-            size,
-            cwd_from,
-            argv,
-        })? {
-            Reply::Spawned { session } => Ok(session),
-            other => Err(unexpected(other)),
-        }
-    }
-
-    pub fn list(&self) -> io::Result<Vec<SessionId>> {
-        match self.request(|req| ClientMsg::List { req })? {
-            Reply::Sessions { ids } => Ok(ids),
-            other => Err(unexpected(other)),
-        }
-    }
-
-    pub fn layout(&self) -> io::Result<Option<String>> {
-        match self.request(|req| ClientMsg::LayoutGet { req })? {
+    /// The layout now, and every change from then on as
+    /// [`ClientEvent::Layout`].
+    pub fn watch(&self) -> io::Result<Layout> {
+        match self.request(|req| ClientMsg::Watch { req })? {
             Reply::Layout { layout } => Ok(layout),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    pub fn layout(&self) -> io::Result<Layout> {
+        match self.request(|req| ClientMsg::GetLayout { req })? {
+            Reply::Layout { layout } => Ok(layout),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// Change the layout; returns the pane and tab made or acted on.
+    pub fn act(&self, action: Action) -> io::Result<(Option<PaneId>, Option<TabId>)> {
+        match self.request(|req| ClientMsg::Act { req, action })? {
+            Reply::Acted { pane, tab } => Ok((pane, tab)),
             other => Err(unexpected(other)),
         }
     }
 }
 
-fn unexpected(reply: Reply) -> io::Error {
+/// A reply that isn't the one asked for, as an error.
+pub fn unexpected(reply: Reply) -> io::Error {
     match reply {
         Reply::Error { message } => io::Error::other(message),
         other => io::Error::other(format!("unexpected reply: {other:?}")),

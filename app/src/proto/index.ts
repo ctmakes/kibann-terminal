@@ -16,6 +16,9 @@ export type { Scrollbar } from "./generated/Scrollbar";
 export type { ScrollBy } from "./generated/ScrollBy";
 export type { Link } from "./generated/Link";
 export type { LinkSpan } from "./generated/LinkSpan";
+export type { Layout } from "./generated/Layout";
+export type { LayoutTab } from "./generated/LayoutTab";
+export type { LayoutAction } from "./generated/LayoutAction";
 
 export const Flag = {
   BOLD: 1 << 0,

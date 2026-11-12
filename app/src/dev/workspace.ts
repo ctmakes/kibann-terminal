@@ -1,14 +1,15 @@
-// Tabs and splits in a browser, with fake transports: each pane shows its
-// number and logs its input. Playwright drives it through `window.__ws`.
+// Tabs and splits in a browser, with fake transports and a fake backend in
+// place of the daemon: each pane shows its number and logs its input.
+// Playwright drives it through `window.__ws`.
 //
-// Params: w, h (CSS px), platform=mac|other, dpr, saved (a layout to
-// restore), links=1 (each pane shows a
-// link the fake backend reports on hover).
+// Params: w, h (CSS px), platform=mac|other, dpr, saved (a layout to start
+// from, as the daemon would have it), links=1 (each pane shows a link the
+// fake backend reports on hover).
 
 import "@fontsource/jetbrains-mono/400.css";
 import type { InputEvent } from "../proto";
 import { ReplayTransport } from "../transport/replay";
-import type { Transport } from "../transport/types";
+import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
 import { Screen } from "./screen";
 
@@ -17,7 +18,7 @@ const root = document.getElementById("ws")!;
 if (params.w) root.style.setProperty("--w", `${params.w}px`);
 if (params.h) root.style.setProperty("--h", `${params.h}px`);
 
-let made = 0;
+const backend = new FakeBackend(params.saved ? JSON.parse(params.saved) : undefined);
 const transports: ReplayTransport[] = [];
 /** Input per transport number, in order. */
 const inputs: Array<{ n: number; e: InputEvent }> = [];
@@ -26,9 +27,8 @@ let quit = false;
 /** Targets opened with Cmd+click. */
 const opened: string[] = [];
 
-function transport(near: Transport | null): Transport {
-  const n = ++made;
-  const from = near ? transports.indexOf(near as ReplayTransport) + 1 : 0;
+function transport(n: number): ReplayTransport {
+  const from = backend.origin.get(n) ?? 0;
   const t = new ReplayTransport({
     build: (cols, rows) => {
       const s = new Screen(cols, rows);
@@ -53,20 +53,23 @@ function transport(near: Transport | null): Transport {
     },
   ];
   t.onInput = (e) => inputs.push({ n, e });
+  t.onExit = () => backend.exited(n);
   transports.push(t);
   return t;
 }
 
 const ws = new Workspace(root, {
+  backend,
   transport,
   platform: params.platform === "mac" || params.platform === "other" ? params.platform : undefined,
   view: { dpr: params.dpr ? Number(params.dpr) : undefined, onOpenLink: (t) => opened.push(t) },
   onTitle: (t) => titles.push(t),
   onEmpty: () => (quit = true),
 });
-// `saved`: a layout from `__ws.snapshot()` to restore, keyed by transport number.
-if (params.saved) ws.restore(JSON.parse(params.saved), () => transport(null));
-else ws.newTab(transport(null));
+backend.onLayout = (l) => ws.apply(l);
+// `saved`: a layout from `__ws.snapshot()`, as if the daemon kept it.
+if (params.saved) ws.apply(backend.layout);
+else void backend.act({ t: "new_tab", focus: true });
 
 (window as any).__ws = {
   ws,
@@ -94,9 +97,13 @@ else ws.newTab(transport(null));
       }),
     };
   },
-  /** The layout with each pane named by its transport number. */
+  /** The layout as the backend keeps it. */
   snapshot() {
-    return ws.snapshot((t) => transports.indexOf(t as ReplayTransport) + 1);
+    return backend.layout;
+  },
+  /** An action from an agent (the CLI), not the app. */
+  agent(action: unknown) {
+    return backend.external(action as never);
   },
   /** Every pane's view is created. */
   ready() {

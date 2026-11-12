@@ -7,7 +7,8 @@ An agent-first terminal (Tauri 2 + libghostty-vt). Work in progress.
 ```
 crates/proto/   message types shared by the backend and the web renderer (source of truth)
 crates/term/    terminal session: PTY, libghostty-vt emulator, frame builder, input encoders
-crates/daemon/  the daemon that owns the sessions (kibannd), and the client the app uses
+crates/daemon/  the daemon that owns the sessions and the layout (kibannd), its client, and the kibann CLI
+skills/kibann/  the guide that teaches agents the CLI
 app/            web frontend: canvas renderer, input handling, browser harness, tests
 app/src-tauri/  Tauri shell: one window; turns commands into daemon requests
 ```
@@ -41,11 +42,26 @@ Tabs and splits use Ghostty's default shortcuts:
 
 Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
 
-Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon; opening the app again brings back the tabs, splits and focus, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells.
+Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon, which also owns the tabs and splits; opening the app again brings them back, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells.
 
 The daemon is the app's own executable run with `--daemon`, listening on a socket only your user can open (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux; its log is beside it). Dev builds use `daemon-dev.sock` and replace a daemon from an earlier build, which ends dev sessions after a Rust rebuild. On Windows (not yet supported by the daemon) sessions run inside the app and end with it.
 
 New panes and tabs start in the focused pane's directory. A pane closes when its shell exits, and the app quits when the last pane closes. The shell doesn't inherit variables describing the terminal the app was started from (`TERM_PROGRAM`, `TMUX`, `GHOSTTY_*` and the like); it gets `TERM_PROGRAM=kibann`.
+
+### Agents drive panes
+
+Every shell in Kibann can run `kibann`, a command line for opening panes and tabs, typing into them, reading them and waiting on them. An agent (Claude Code, or a script) running in a pane uses it to work beside you where you can watch, and you can click into any pane it opens and take over. Its panes don't take your focus unless asked to, and they persist like your own.
+
+```sh
+p=$(kibann pane split --direction right | jq -r .pane.id)   # {"pane":{"id":"p4","tab":"t1"}}
+kibann pane run "$p" "npm test" --wait                       # {"exit_code":0}
+kibann pane read "$p" --source recent --lines 40
+kibann pane wait "$p" --regex '^ready' --timeout 30000
+kibann pane list        # also: tab new, pane send / keys / focus / close / current
+kibann skill install    # the guide for Claude Code, to ~/.claude/skills/kibann
+```
+
+Each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH` (a link to the app beside the socket). Output is JSON; errors are JSON on stderr with exit code 1, and a bad command line exits 2. `kibann help` lists everything; `skills/kibann/SKILL.md` is the guide agents read. Anything that can open the socket can type into every pane, so only your own user can.
 
 Selection and scrollback work like Ghostty's:
 

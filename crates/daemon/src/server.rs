@@ -1,35 +1,69 @@
-//! The daemon: owns the sessions and serves clients over byte streams.
+//! The daemon: owns the sessions and the layout, and serves clients over
+//! byte streams.
 //!
 //! Each connection gets a reader thread (decodes requests and acts on them)
 //! and a writer thread (drains the connection's [`Outbox`]). Sessions send
 //! frames from their own threads into their viewer's outbox, so a slow client
 //! never stalls a session or other clients.
 //!
-//! A session always has a sink. With no viewer it only notes the exit; frames
-//! stop after two unacked ones (the session's own pacing), so a detached
-//! session costs nothing but its emulator keeps up with the output.
+//! A session always has a sink. With no viewer it only reports the exit;
+//! frames stop after two unacked ones (the session's own pacing), so a
+//! detached session costs nothing but its emulator keeps up with the output.
+//!
+//! Every session is a pane in the layout ([`crate::layout::Model`]). Actions
+//! from the app or the CLI change it, and each change goes to the
+//! connections watching it. A shell that exits takes its pane with it.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 
-use proto::Frame;
+use proto::layout::{Action, Dir, PaneId, TabId};
 use proto::wire::{
-    ClientMsg, PROTOCOL_VERSION, Reply, ReqId, ServerMsg, SessionId, read_msg, write_msg,
+    ClientMsg, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, read_msg, write_msg,
 };
+use proto::{Frame, Resize};
 use term::{Event, Session, Spawn};
 
+use crate::layout::Model;
 use crate::outbox::Outbox;
 
 type ConnId = u64;
+
+/// Size of a pane started with nothing to size it after. The app resizes
+/// it as soon as it shows it.
+const DEFAULT_SIZE: Resize = Resize {
+    cols: 80,
+    rows: 24,
+    cell_w: 8,
+    cell_h: 16,
+};
+
+/// How many ended panes to remember, for `kibann pane wait --exit`.
+const MAX_ENDED: usize = 256;
 
 struct Entry {
     session: Arc<Session>,
     /// The connection the frames go to.
     viewer: Option<ConnId>,
     exited: Arc<AtomicBool>,
+    /// Last size the app gave it, to size panes split from it.
+    size: Resize,
+}
+
+/// What every shell is told about where it runs, so `kibann` in it can
+/// find the daemon and its own pane.
+#[derive(Debug, Clone, Default)]
+pub struct PaneEnv {
+    /// The daemon's socket (`KIBANN_SOCKET`).
+    pub socket: Option<PathBuf>,
+    /// The `kibann` executable (`KIBANN_BIN`).
+    pub bin: Option<PathBuf>,
+    /// A directory holding a `kibann` link, put first on `PATH`.
+    pub path_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -38,13 +72,43 @@ struct State {
     next_session: SessionId,
     conns: HashMap<ConnId, Arc<Outbox>>,
     next_conn: ConnId,
-    layout: Option<String>,
+    /// Connections that get every layout change.
+    watchers: HashSet<ConnId>,
+    model: Model,
+    /// Panes whose shell ended, with the exit code, newest last.
+    ended: VecDeque<(PaneId, Option<u32>)>,
+    env: PaneEnv,
     shutdown: bool,
+}
+
+impl State {
+    /// Send the layout to every watcher but `skip`. Done under the lock, so
+    /// changes reach each connection in order.
+    fn broadcast(&self, skip: Option<ConnId>) {
+        let msg = encode(&ServerMsg::Layout {
+            layout: self.model.layout().clone(),
+        });
+        for c in &self.watchers {
+            if Some(*c) != skip
+                && let Some(out) = self.conns.get(c)
+            {
+                out.push(msg.clone());
+            }
+        }
+    }
+
+    fn note_ended(&mut self, pane: PaneId, code: Option<u32>) {
+        if self.ended.len() == MAX_ENDED {
+            self.ended.pop_front();
+        }
+        self.ended.push_back((pane, code));
+    }
 }
 
 pub struct Daemon {
     state: Mutex<State>,
     build: String,
+    me: Weak<Daemon>,
 }
 
 /// One message, framed, ready for an outbox.
@@ -55,11 +119,13 @@ fn encode(msg: &ServerMsg) -> Vec<u8> {
     buf
 }
 
-/// Where a session's events go: its viewer's outbox, if any.
+/// Where a session's events go: frames to its viewer's outbox, if any; the
+/// exit to the daemon, which closes the pane.
 fn sink(
     id: SessionId,
     out: Option<Arc<Outbox>>,
     exited: Arc<AtomicBool>,
+    daemon: Weak<Daemon>,
 ) -> impl FnMut(Event) + Send + 'static {
     move |event| match event {
         Event::Frame(frame) => {
@@ -68,21 +134,56 @@ fn sink(
             }
         }
         Event::Exited(code) => {
-            exited.store(true, Ordering::SeqCst);
-            if let Some(o) = &out {
-                o.push(encode(&ServerMsg::<Frame>::Exited { session: id, code }));
+            if exited.swap(true, Ordering::SeqCst) {
+                return;
             }
+            // Not on this thread: closing the session joins it.
+            let daemon = daemon.clone();
+            let _ = thread::Builder::new()
+                .name("daemon-exit".into())
+                .spawn(move || {
+                    if let Some(d) = daemon.upgrade() {
+                        d.pane_ended(id, code);
+                    }
+                });
         }
     }
 }
 
+/// Half of `size` along `dir`, for a pane split from one this size.
+fn half(size: Resize, dir: Dir) -> Resize {
+    match dir {
+        Dir::Row => Resize {
+            cols: (size.cols.saturating_sub(1) / 2).max(1),
+            ..size
+        },
+        Dir::Column => Resize {
+            rows: (size.rows.saturating_sub(1) / 2).max(1),
+            ..size
+        },
+    }
+}
+
+fn err(message: impl Into<String>) -> Reply {
+    Reply::Error {
+        message: message.into(),
+    }
+}
+
 impl Daemon {
-    /// `build` identifies this daemon's binary; see [`crate::file_fingerprint`].
+    /// `build` identifies this daemon's binary; see [`crate::build_id`].
     pub fn new(build: impl Into<String>) -> Arc<Self> {
-        Arc::new(Self {
+        let build = build.into();
+        Arc::new_cyclic(|me| Self {
             state: Mutex::new(State::default()),
-            build: build.into(),
+            build,
+            me: me.clone(),
         })
+    }
+
+    /// What new shells are told about the daemon (see [`PaneEnv`]).
+    pub fn set_pane_env(&self, env: PaneEnv) {
+        self.lock().env = env;
     }
 
     /// A panic on one connection's thread mustn't lock everyone out.
@@ -140,11 +241,14 @@ impl Daemon {
         out.push(encode(&ServerMsg::<Frame>::Reply { req, reply }));
     }
 
+    fn session(&self, id: SessionId) -> Option<Arc<Session>> {
+        self.lock().sessions.get(&id).map(|e| e.session.clone())
+    }
+
     fn handle(&self, conn: ConnId, out: &Arc<Outbox>, msg: ClientMsg) {
         // Calls on one session, made outside the lock.
         let with = |id: SessionId, f: &dyn Fn(&Session)| {
-            let s = self.lock().sessions.get(&id).map(|e| e.session.clone());
-            if let Some(s) = s {
+            if let Some(s) = self.session(id) {
                 f(&s);
             }
         };
@@ -157,30 +261,71 @@ impl Daemon {
                     build: self.build.clone(),
                 },
             ),
-            ClientMsg::Spawn {
-                req,
-                size,
-                cwd_from,
-                argv,
-            } => {
-                let reply = match self.spawn(size, cwd_from, argv) {
-                    Ok(session) => Reply::Spawned { session },
-                    Err(e) => Reply::Error {
-                        message: format!("could not start the shell: {e}"),
-                    },
+            ClientMsg::Watch { req } => {
+                let mut st = self.lock();
+                st.watchers.insert(conn);
+                let layout = st.model.layout().clone();
+                // Also as the first event, so a client can take every
+                // layout from one ordered stream.
+                out.push(encode(&ServerMsg::Layout {
+                    layout: layout.clone(),
+                }));
+                Self::reply(out, req, Reply::Layout { layout });
+            }
+            ClientMsg::GetLayout { req } => {
+                let layout = self.lock().model.layout().clone();
+                Self::reply(out, req, Reply::Layout { layout });
+            }
+            ClientMsg::Act { req, action } => {
+                let reply = match self.act(conn, action) {
+                    Ok((pane, tab)) => Reply::Acted { pane, tab },
+                    Err(e) => e,
                 };
                 Self::reply(out, req, reply);
             }
-            ClientMsg::List { req } => {
-                let ids = self.lock().sessions.keys().copied().collect();
-                Self::reply(out, req, Reply::Sessions { ids });
+            ClientMsg::Panes { req } => Self::reply(out, req, self.panes()),
+            ClientMsg::Read {
+                req,
+                pane,
+                source,
+                lines,
+            } => {
+                let reply = match self.session(pane) {
+                    Some(s) => Reply::Text {
+                        text: s.read(source, lines.map(|n| n as usize)),
+                    },
+                    None => err(format!("no pane p{pane}")),
+                };
+                Self::reply(out, req, reply);
+            }
+            ClientMsg::Status { req, pane, mark } => {
+                let reply = match self.session(pane) {
+                    Some(s) => Reply::Status {
+                        ended: false,
+                        code: None,
+                        mark: mark.and_then(|m| s.mark(&m)),
+                    },
+                    None => match self.lock().ended.iter().rev().find(|(p, _)| *p == pane) {
+                        Some(&(_, code)) => Reply::Status {
+                            ended: true,
+                            code,
+                            mark: None,
+                        },
+                        None => err(format!("no pane p{pane}")),
+                    },
+                };
+                Self::reply(out, req, reply);
             }
             ClientMsg::Attach { session } => {
                 let mut st = self.lock();
                 if let Some(e) = st.sessions.get_mut(&session) {
                     e.viewer = Some(conn);
-                    e.session
-                        .attach(sink(session, Some(out.clone()), e.exited.clone()));
+                    e.session.attach(sink(
+                        session,
+                        Some(out.clone()),
+                        e.exited.clone(),
+                        self.me.clone(),
+                    ));
                 }
             }
             ClientMsg::Detach { session } => {
@@ -189,57 +334,236 @@ impl Daemon {
                     && e.viewer == Some(conn)
                 {
                     e.viewer = None;
-                    e.session.attach(sink(session, None, e.exited.clone()));
+                    e.session
+                        .attach(sink(session, None, e.exited.clone(), self.me.clone()));
                 }
             }
-            ClientMsg::Close { session } => {
-                let entry = self.lock().sessions.remove(&session);
-                // Dropping ends the shell and joins its thread: not under the lock.
-                drop(entry);
-            }
             ClientMsg::Input { session, event } => with(session, &|s| s.input(event.clone())),
-            ClientMsg::Resize { session, size } => with(session, &|s| s.resize(size)),
+            ClientMsg::Resize { session, size } => {
+                let s = {
+                    let mut st = self.lock();
+                    st.sessions.get_mut(&session).map(|e| {
+                        e.size = size;
+                        e.session.clone()
+                    })
+                };
+                if let Some(s) = s {
+                    s.resize(size);
+                }
+            }
             ClientMsg::Ack { session, seq } => with(session, &|s| s.ack(seq)),
             ClientMsg::RequestFull { session } => with(session, &|s| s.request_full()),
-            ClientMsg::LayoutGet { req } => {
-                let layout = self.lock().layout.clone();
-                Self::reply(out, req, Reply::Layout { layout });
-            }
-            ClientMsg::LayoutSet { layout } => self.lock().layout = Some(layout),
             ClientMsg::Shutdown => self.shutdown(),
         }
     }
 
+    /// Apply a layout action. Returns the pane and tab it made or acted on.
+    fn act(&self, conn: ConnId, action: Action) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
+        let no_pane = |p: PaneId| err(format!("no pane p{p}"));
+        let no_tab = |t: TabId| err(format!("no tab t{t}"));
+        match action {
+            Action::NewTab {
+                near,
+                cwd,
+                argv,
+                focus,
+            } => {
+                let size = near
+                    .and_then(|p| self.lock().sessions.get(&p).map(|e| e.size))
+                    .unwrap_or(DEFAULT_SIZE);
+                let cwd = cwd
+                    .map(PathBuf::from)
+                    .or_else(|| self.session(near?)?.cwd());
+                let pane = self.spawn(size, cwd, argv).map_err(spawn_error)?;
+                let mut st = self.lock();
+                let tab = st.model.new_tab(pane, focus);
+                st.broadcast(None);
+                Ok((Some(pane), Some(tab)))
+            }
+            Action::Split {
+                pane: target,
+                dir,
+                cwd,
+                argv,
+                focus,
+            } => {
+                let size = {
+                    let st = self.lock();
+                    if st.model.layout().tab_of(target).is_none() {
+                        return Err(no_pane(target));
+                    }
+                    st.sessions
+                        .get(&target)
+                        .map_or(DEFAULT_SIZE, |e| half(e.size, dir))
+                };
+                let cwd = cwd
+                    .map(PathBuf::from)
+                    .or_else(|| self.session(target)?.cwd());
+                let pane = self.spawn(size, cwd, argv).map_err(spawn_error)?;
+                let mut st = self.lock();
+                match st.model.split(target, dir, pane, focus) {
+                    Some(tab) => {
+                        st.broadcast(None);
+                        Ok((Some(pane), Some(tab)))
+                    }
+                    // The target closed meanwhile.
+                    None => {
+                        let entry = st.sessions.remove(&pane);
+                        drop(st);
+                        drop(entry);
+                        Err(no_pane(target))
+                    }
+                }
+            }
+            Action::Close { pane } => {
+                let entry = {
+                    let mut st = self.lock();
+                    if !st.model.remove(pane) {
+                        return Err(no_pane(pane));
+                    }
+                    st.note_ended(pane, None);
+                    st.broadcast(None);
+                    st.sessions.remove(&pane)
+                };
+                // Dropping ends the shell and joins its thread: not under the lock.
+                drop(entry);
+                Ok((Some(pane), None))
+            }
+            // Focus changes the app makes itself aren't echoed back to it:
+            // a late echo could undo a newer click.
+            Action::Focus { pane } => {
+                let mut st = self.lock();
+                if !st.model.focus(pane) {
+                    return Err(no_pane(pane));
+                }
+                st.broadcast(Some(conn));
+                let tab = st.model.layout().active;
+                Ok((Some(pane), tab))
+            }
+            Action::Activate { tab } => {
+                let mut st = self.lock();
+                if !st.model.activate(tab) {
+                    return Err(no_tab(tab));
+                }
+                st.broadcast(Some(conn));
+                Ok((None, Some(tab)))
+            }
+            Action::SetRatio { tab, path, ratio } => {
+                let mut st = self.lock();
+                if !st.model.set_ratio(tab, &path, ratio) {
+                    return Err(err("no such split"));
+                }
+                st.broadcast(None);
+                Ok((None, Some(tab)))
+            }
+            Action::Equalize { tab } => {
+                let mut st = self.lock();
+                if !st.model.equalize(tab) {
+                    return Err(no_tab(tab));
+                }
+                st.broadcast(None);
+                Ok((None, Some(tab)))
+            }
+            Action::Zoom { tab, pane } => {
+                let mut st = self.lock();
+                if !st.model.zoom(tab, pane) {
+                    return Err(err("no such tab or pane"));
+                }
+                st.broadcast(None);
+                Ok((pane, Some(tab)))
+            }
+        }
+    }
+
+    /// Start a shell for a new pane (not yet in the layout).
     fn spawn(
         &self,
-        size: proto::Resize,
-        cwd_from: Option<SessionId>,
+        size: Resize,
+        cwd: Option<PathBuf>,
         argv: Option<Vec<String>>,
     ) -> io::Result<SessionId> {
-        let near = cwd_from.and_then(|id| Some(self.lock().sessions.get(&id)?.session.clone()));
-        let cwd = near.and_then(|s| s.cwd());
+        let (id, env) = {
+            let mut st = self.lock();
+            st.next_session += 1;
+            (st.next_session, st.env.clone())
+        };
+        let mut vars = vec![("KIBANN_PANE".to_owned(), format!("p{id}"))];
+        if let Some(s) = &env.socket {
+            vars.push(("KIBANN_SOCKET".into(), s.to_string_lossy().into_owned()));
+        }
+        if let Some(b) = &env.bin {
+            vars.push(("KIBANN_BIN".into(), b.to_string_lossy().into_owned()));
+        }
+        if let Some(dir) = &env.path_dir {
+            let mut path = std::ffi::OsString::from(dir);
+            if let Some(old) = std::env::var_os("PATH") {
+                path.push(if cfg!(windows) { ";" } else { ":" });
+                path.push(old);
+            }
+            vars.push(("PATH".into(), path.to_string_lossy().into_owned()));
+        }
         let session = Session::spawn(
             Spawn {
                 argv,
                 cwd,
-                ..Spawn::default()
+                env: vars,
             },
             size,
         )?;
         let exited = Arc::new(AtomicBool::new(false));
-        let mut st = self.lock();
-        st.next_session += 1;
-        let id = st.next_session;
-        session.attach(sink(id, None, exited.clone()));
-        st.sessions.insert(
+        session.attach(sink(id, None, exited.clone(), self.me.clone()));
+        self.lock().sessions.insert(
             id,
             Entry {
                 session: Arc::new(session),
                 viewer: None,
                 exited,
+                size,
             },
         );
         Ok(id)
+    }
+
+    /// A shell exited: its pane goes.
+    fn pane_ended(&self, id: SessionId, code: Option<u32>) {
+        let entry = {
+            let mut st = self.lock();
+            let Some(entry) = st.sessions.remove(&id) else {
+                return; // closed already
+            };
+            st.note_ended(id, code);
+            if st.model.remove(id) {
+                st.broadcast(None);
+            }
+            entry
+        };
+        drop(entry);
+    }
+
+    fn panes(&self) -> Reply {
+        let list: Vec<(PaneId, TabId, Option<Arc<Session>>)> = {
+            let st = self.lock();
+            st.model
+                .layout()
+                .tabs
+                .iter()
+                .flat_map(|t| t.tree.panes().into_iter().map(move |p| (p, t.id)))
+                .map(|(p, t)| (p, t, st.sessions.get(&p).map(|e| e.session.clone())))
+                .collect()
+        };
+        // Each asks the session thread: outside the lock.
+        let panes = list
+            .into_iter()
+            .map(|(id, tab, s)| PaneInfo {
+                id,
+                tab,
+                title: s.as_ref().map(|s| s.title()).unwrap_or_default(),
+                cwd: s
+                    .and_then(|s| s.cwd())
+                    .map(|d| d.to_string_lossy().into_owned()),
+            })
+            .collect();
+        Reply::Panes { panes }
     }
 
     /// The client went away: its sessions keep running, unattached.
@@ -248,10 +572,13 @@ impl Daemon {
         if let Some(out) = st.conns.remove(&conn) {
             out.close();
         }
+        st.watchers.remove(&conn);
+        let me = self.me.clone();
         for (id, e) in st.sessions.iter_mut() {
             if e.viewer == Some(conn) {
                 e.viewer = None;
-                e.session.attach(sink(*id, None, e.exited.clone()));
+                e.session
+                    .attach(sink(*id, None, e.exited.clone(), me.clone()));
             }
         }
     }
@@ -285,6 +612,10 @@ impl Daemon {
             .filter(|e| !e.exited.load(Ordering::SeqCst))
             .count()
     }
+}
+
+fn spawn_error(e: io::Error) -> Reply {
+    err(format!("could not start the shell: {e}"))
 }
 
 #[cfg(unix)]

@@ -13,6 +13,7 @@ path = "src/bin/kibannd.rs"
 proto = { path = "../proto" }
 term = { path = "../term" }
 serde_json = { version = "1", features = ["raw_value"] }
+regex = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1,5 +1,9 @@
 // Tabs of split panes, each pane a TerminalView with its own transport.
 //
+// The layout belongs to the backend (the daemon): user actions go to it, and
+// the workspace changes when a layout comes back (`apply`). Only focus moves
+// at once, so typing never waits on a round trip.
+//
 // Panes are absolutely positioned from `layout.rects`, so a resize is one
 // pass and dividers are plain elements on top. Inactive tabs stay in the DOM,
 // hidden, so their terminals keep their state and frames.
@@ -7,21 +11,18 @@
 import { detectPlatform, type Platform } from "../input/keyboard";
 import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
+import type { Layout, LayoutAction } from "../proto";
+import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
-import { mapLeaves, type Saved, type SessionId } from "./snapshot";
 import {
   cycle,
   dividers,
-  equalize,
-  leaf,
   neighbor,
   panes,
   ratioAt,
   rects,
-  remove,
-  resize,
+  resizeTarget,
   setRatio,
-  split,
   type PaneId,
   type Rect,
   type Tree,
@@ -29,7 +30,7 @@ import {
 
 /** How far one resize shortcut moves a divider, in CSS px (Ghostty's 10). */
 const RESIZE_STEP = 10;
-/** A menu item firing right after the same shortcut was handled is that shortcut. */
+/** A menu item firing right before or after the same shortcut is that shortcut. */
 const MENU_ECHO_MS = 300;
 
 const COLORS = {
@@ -61,8 +62,10 @@ export interface Tab {
 }
 
 export interface WorkspaceOptions {
-  /** A transport for a new pane, opened from `near` (for its directory). */
-  transport(near: Transport | null): Transport;
+  /** Where layout actions go. */
+  backend: LayoutBackend;
+  /** A transport for the pane (session) `pane`. */
+  transport(pane: PaneId): Transport;
   platform?: Platform;
   /** Passed to every TerminalView. */
   view?: Pick<TerminalOptions, "fontSize" | "dpr" | "onPaint" | "onOpenLink">;
@@ -72,8 +75,6 @@ export interface WorkspaceOptions {
   onEmpty?(): void;
   /** Right-click in a pane with no program taking the mouse. */
   onContextMenu?(pane: Pane, e: MouseEvent): void;
-  /** Tabs, splits, sizes or focus changed (to save the layout). */
-  onChange?(): void;
 }
 
 export class Workspace {
@@ -83,10 +84,8 @@ export class Workspace {
   readonly tabs: Tab[] = [];
   readonly panes = new Map<PaneId, Pane>();
   active: Tab | null = null;
-  private nextPane = 1;
-  private nextTab = 1;
   private readonly platform: Platform;
-  private lastKey: { action: string; at: number } | null = null;
+  private lastRun: { action: string; from: "key" | "menu"; at: number } | null = null;
   private readonly cleanups: Array<() => void> = [];
 
   constructor(
@@ -141,7 +140,7 @@ export class Workspace {
     const tab = on?.tab ?? this.active;
     switch (action.kind) {
       case "newTab":
-        this.newTab(this.opts.transport(on?.transport ?? null));
+        this.send({ t: "new_tab", near: on?.id, focus: true });
         return;
       case "goToTab": {
         const t = action.index < 0 ? this.tabs[this.tabs.length - 1] : this.tabs[action.index];
@@ -158,10 +157,10 @@ export class Workspace {
     if (!on || !tab) return;
     switch (action.kind) {
       case "close":
-        this.closePane(on);
+        this.send({ t: "close", pane: on.id });
         return;
       case "split":
-        this.splitPane(on, action.dir);
+        this.send({ t: "split", pane: on.id, dir: action.dir, focus: true });
         return;
       case "focusCycle":
         this.focusPane(cycle(tab.tree, on.id, action.step));
@@ -171,31 +170,29 @@ export class Workspace {
         if (next !== null) this.focusPane(next);
         return;
       }
-      case "resize":
-        tab.zoomed = null;
-        tab.tree = resize(tab.tree, this.box(), on.id, action.toward, RESIZE_STEP);
-        this.layout(tab);
+      case "resize": {
+        const r = resizeTarget(tab.tree, this.box(), on.id, action.toward, RESIZE_STEP);
+        if (r) this.send({ t: "set_ratio", tab: tab.id, path: r.path, ratio: r.ratio });
         return;
+      }
       case "equalize":
-        tab.tree = equalize(tab.tree);
-        this.layout(tab);
+        this.send({ t: "equalize", tab: tab.id });
         return;
-      case "zoom":
-        tab.zoomed = tab.zoomed === null && panes(tab.tree).length > 1 ? on.id : null;
-        this.layout(tab);
-        this.focusPane(on.id);
+      case "zoom": {
+        const zoom = tab.zoomed === null && panes(tab.tree).length > 1;
+        this.send({ t: "zoom", tab: tab.id, pane: zoom ? on.id : undefined });
         return;
+      }
     }
   }
 
-  /** A menu item fired. Skips the echo of a shortcut the page already handled. */
+  private send(a: LayoutAction): void {
+    this.opts.backend.act(a).catch((e) => console.warn(`kibann: ${a.t} failed:`, e));
+  }
+
+  /** A menu item fired. */
   runFromMenu(action: Action): void {
-    const key = JSON.stringify(action);
-    if (this.lastKey && this.lastKey.action === key && performance.now() - this.lastKey.at < MENU_ECHO_MS) {
-      this.lastKey = null;
-      return;
-    }
-    this.run(action);
+    this.runOnce(action, "menu");
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -203,107 +200,105 @@ export class Workspace {
     if (!action) return;
     e.preventDefault();
     e.stopPropagation();
-    this.lastKey = { action: JSON.stringify(action), at: performance.now() };
+    this.runOnce(action, "key");
+  }
+
+  /**
+   * A shortcut can arrive twice, as a key press in the page and as its menu
+   * item firing, in either order. The second is skipped: running a toggle
+   * (zoom) twice would undo it.
+   */
+  private runOnce(action: Action, from: "key" | "menu"): void {
+    const key = JSON.stringify(action);
+    const last = this.lastRun;
+    if (last && last.action === key && last.from !== from && performance.now() - last.at < MENU_ECHO_MS) {
+      this.lastRun = null;
+      return;
+    }
+    this.lastRun = { action: key, from, at: performance.now() };
     this.run(action);
   }
 
-  // ---- tabs ----
+  // ---- the layout from the backend ----
 
-  newTab(transport: Transport): Tab {
-    const id = this.nextPane++;
-    return this.openTab(leaf(id), new Map([[id, transport]]), id, null);
+  /**
+   * Show `layout`: add and remove tabs and panes to match, then place them.
+   * Keyboard focus moves only when the focused pane or the shown tab
+   * changed, so a pane an agent opens in the background doesn't take it.
+   */
+  apply(layout: Layout): void {
+    const hadTabs = this.tabs.length > 0;
+    const before = this.active ? { tab: this.active.id, pane: this.active.focused } : null;
+    const byId = new Map(this.tabs.map((t) => [t.id, t]));
+    const next: Tab[] = layout.tabs.map((lt) => {
+      const tab = byId.get(lt.id) ?? this.makeTab(lt.id, lt.tree, lt.focused);
+      tab.tree = lt.tree;
+      tab.focused = lt.focused;
+      tab.zoomed = lt.zoomed;
+      return tab;
+    });
+    for (const t of this.tabs) {
+      if (next.includes(t)) continue;
+      t.el.remove();
+      t.button.remove();
+    }
+    this.tabs.splice(0, this.tabs.length, ...next);
+    for (const t of next) this.bar.append(t.button); // in layout order
+
+    const want = new Map<PaneId, Tab>();
+    for (const t of next) for (const id of panes(t.tree)) want.set(id, t);
+    for (const [id, p] of this.panes) if (!want.has(id)) this.dropPane(p);
+    for (const [id, tab] of want) {
+      const p = this.panes.get(id);
+      if (!p) this.addPane(tab, id, this.opts.transport(id));
+      else if (p.tab !== tab) {
+        p.tab = tab;
+        tab.el.append(p.el);
+      }
+    }
+
+    const active = next.find((t) => t.id === layout.active) ?? next[0] ?? null;
+    if (this.active && this.active !== active) this.active.el.style.display = "none";
+    this.active = active;
+    for (const t of next) {
+      if (t === active) {
+        t.el.style.display = "block";
+        this.layout(t);
+      } else this.place(t);
+      for (const id of panes(t.tree)) this.panes.get(id)?.view?.setActive(id === t.focused);
+    }
+    if (active && (before?.tab !== active.id || before.pane !== active.focused)) {
+      this.panes.get(active.focused)?.view?.focus();
+    }
+    this.updateBar();
+    this.emitTitle();
+    if (hadTabs && next.length === 0) this.opts.onEmpty?.();
   }
 
-  /** Open a tab with this split tree, one transport per pane. */
-  private openTab(tree: Tree, transports: Map<PaneId, Transport>, focused: PaneId, zoomed: PaneId | null): Tab {
+  private makeTab(id: number, tree: Tree, focused: PaneId): Tab {
     const el = document.createElement("div");
     el.className = "tab-stage";
     Object.assign(el.style, { position: "absolute", inset: "0", display: "none" });
     this.stage.append(el);
     const button = document.createElement("div");
-    const tab: Tab = { id: this.nextTab++, tree, focused, zoomed, el, button };
+    const tab: Tab = { id, tree, focused, zoomed: null, el, button };
     this.makeTabButton(tab);
-    this.tabs.push(tab);
-    for (const [paneId, t] of transports) this.addPane(tab, paneId, t);
-    this.activate(tab);
-    this.updateBar();
-    this.changed();
     return tab;
   }
 
-  /** The layout as data, with each pane named by `key` (its session).
-   * Panes without one yet (still starting) are left out. */
-  snapshot(key: (t: Transport) => SessionId | null): Saved {
-    const sessionOf = (id: PaneId) => {
-      const p = this.panes.get(id);
-      return p ? key(p.transport) : null;
-    };
-    const tabs: Saved["tabs"] = [];
-    let active = 0;
-    for (const tab of this.tabs) {
-      const tree = mapLeaves(tab.tree, sessionOf);
-      if (!tree) continue;
-      if (tab === this.active) active = tabs.length;
-      const focused = sessionOf(tab.focused);
-      const zoomed = tab.zoomed === null ? null : sessionOf(tab.zoomed);
-      tabs.push({ tree, focused: focused ?? (tree.kind === "leaf" ? tree.pane : panes(tree)[0]), zoomed });
-    }
-    return { version: 1, tabs, active };
-  }
+  // ---- tabs ----
 
-  /** Open the tabs of a saved layout, reattaching each pane with
-   * `transport(session)`. */
-  restore(saved: Saved, transport: (session: SessionId) => Transport): void {
-    const opened: Tab[] = [];
-    for (const t of saved.tabs) {
-      const ids = new Map<SessionId, PaneId>();
-      const tree = mapLeaves(t.tree, (session) => {
-        const id = this.nextPane++;
-        ids.set(session, id);
-        return id;
-      });
-      if (!tree) continue;
-      const transports = new Map([...ids].map(([session, id]) => [id, transport(session)]));
-      const focused = ids.get(t.focused) ?? panes(tree)[0];
-      const zoomed = t.zoomed === null ? null : (ids.get(t.zoomed) ?? null);
-      opened.push(this.openTab(tree, transports, focused, zoomed));
-    }
-    const active = opened[saved.active] ?? opened[0];
-    if (active) this.activate(active);
-  }
-
-  private changed(): void {
-    this.opts.onChange?.();
-  }
-
+  /** Show `tab` now, and tell the backend. */
   activate(tab: Tab): void {
-    if (this.active === tab) {
-      this.focusPane(tab.focused);
-      return;
+    if (this.active !== tab) {
+      if (this.active) this.active.el.style.display = "none";
+      this.active = tab;
+      tab.el.style.display = "block";
+      this.layout(tab);
+      this.updateBar();
+      this.send({ t: "activate", tab: tab.id });
     }
-    if (this.active) this.active.el.style.display = "none";
-    this.active = tab;
-    tab.el.style.display = "block";
-    this.layout(tab);
     this.focusPane(tab.focused);
-    this.updateBar();
-    this.emitTitle();
-    this.changed();
-  }
-
-  private closeTab(tab: Tab): void {
-    const i = this.tabs.indexOf(tab);
-    this.tabs.splice(i, 1);
-    tab.el.remove();
-    tab.button.remove();
-    if (this.active === tab) {
-      this.active = null;
-      const next = this.tabs[Math.min(i, this.tabs.length - 1)];
-      if (next) this.activate(next);
-    }
-    this.updateBar();
-    this.changed();
-    if (this.tabs.length === 0) this.opts.onEmpty?.();
   }
 
   private makeTabButton(tab: Tab): void {
@@ -329,17 +324,11 @@ export class Workspace {
     b.append(x, label);
     b.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
-      if (e.button === 1 || e.target === x) this.closeTabPanes(tab);
-      else if (e.button === 0) this.activate(tab);
+      if (e.button === 1 || e.target === x) {
+        for (const id of panes(tab.tree)) this.send({ t: "close", pane: id });
+      } else if (e.button === 0) this.activate(tab);
     });
     this.bar.append(b);
-  }
-
-  private closeTabPanes(tab: Tab): void {
-    for (const id of panes(tab.tree)) {
-      const p = this.panes.get(id);
-      if (p) this.closePane(p);
-    }
   }
 
   private updateBar(): void {
@@ -369,9 +358,6 @@ export class Workspace {
     tab.el.append(el);
     const pane: Pane = { id, tab, el, transport, view: null, title: "", closed: false };
     this.panes.set(id, pane);
-    transport.onExit = () => this.closePane(pane);
-    if (this.active === tab) this.layout(tab);
-    else this.place(tab);
     void TerminalView.create(el, transport, {
       ...this.opts.view,
       platform: this.platform,
@@ -389,52 +375,22 @@ export class Workspace {
         return;
       }
       pane.view = view;
-      // A new pane's session exists now, so it can be saved.
-      this.changed();
       view.setActive(pane.tab.focused === pane.id);
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
     });
     return pane;
   }
 
-  splitPane(on: Pane, dir: "row" | "column"): Pane {
-    const tab = on.tab;
-    tab.zoomed = null;
-    const id = this.nextPane++;
-    tab.tree = split(tab.tree, on.id, dir, id);
-    tab.focused = id;
-    const pane = this.addPane(tab, id, this.opts.transport(on.transport));
-    this.layout(tab);
-    this.updateActive(tab);
-    return pane;
-  }
-
-  closePane(pane: Pane): void {
-    if (pane.closed) return;
+  /** The pane left the layout (closed, or its program exited). */
+  private dropPane(pane: Pane): void {
     pane.closed = true;
-    const tab = pane.tab;
-    const order = panes(tab.tree);
-    const i = order.indexOf(pane.id);
     this.panes.delete(pane.id);
     pane.view?.dispose();
     pane.el.remove();
     pane.transport.close?.();
-    const tree = remove(tab.tree, pane.id);
-    if (!tree) {
-      this.closeTab(tab);
-      return;
-    }
-    tab.tree = tree;
-    if (tab.zoomed === pane.id) tab.zoomed = null;
-    if (tab.focused === pane.id) {
-      const left = panes(tree);
-      tab.focused = left[Math.max(0, i - 1)] ?? left[0];
-    }
-    this.layout(tab);
-    if (tab === this.active) this.focusPane(tab.focused);
-    this.updateBar();
   }
 
+  /** Focus a pane now (the backend is told; same rules as the daemon). */
   focusPane(id: PaneId): void {
     const pane = this.panes.get(id);
     if (!pane) return;
@@ -443,7 +399,10 @@ export class Workspace {
       tab.zoomed = null;
       this.layout(tab);
     }
-    tab.focused = id;
+    if (tab.focused !== id) {
+      tab.focused = id;
+      this.send({ t: "focus", pane: id });
+    }
     this.updateActive(tab);
     if (tab === this.active) pane.view?.focus();
   }
@@ -452,11 +411,11 @@ export class Workspace {
     const tab = pane.tab;
     if (tab.focused === pane.id) return;
     tab.focused = pane.id;
+    this.send({ t: "focus", pane: pane.id });
     this.updateActive(tab);
   }
 
   private updateActive(tab: Tab): void {
-    this.changed();
     for (const id of panes(tab.tree)) this.panes.get(id)?.view?.setActive(id === tab.focused);
     if (tab === this.active) {
       this.updateBar();
@@ -472,7 +431,6 @@ export class Workspace {
 
   /** Position a tab's panes and dividers in the stage. */
   layout(tab: Tab): void {
-    this.changed();
     this.place(tab);
     for (const d of tab.el.querySelectorAll(".divider")) d.remove();
     if (tab.zoomed !== null) return;
@@ -494,8 +452,10 @@ export class Workspace {
         e.preventDefault();
         el.setPointerCapture(e.pointerId);
         const origin = this.stage.getBoundingClientRect();
+        let ratio: number | null = null;
         const move = (ev: PointerEvent) => {
-          tab.tree = setRatio(tab.tree, d.path, ratioAt(d, ev.clientX - origin.left, ev.clientY - origin.top));
+          ratio = ratioAt(d, ev.clientX - origin.left, ev.clientY - origin.top);
+          tab.tree = setRatio(tab.tree, d.path, ratio);
           this.place(tab);
           // Keep the grab area under the pointer while dragging.
           const next = dividers(tab.tree, this.box()).find((n) => n.path.join() === d.path.join());
@@ -509,6 +469,7 @@ export class Workspace {
           el.removeEventListener("pointerup", up);
           this.layout(tab);
           this.focusPane(tab.focused);
+          if (ratio !== null) this.send({ t: "set_ratio", tab: tab.id, path: d.path, ratio });
         };
         el.addEventListener("pointermove", move);
         el.addEventListener("pointerup", up);

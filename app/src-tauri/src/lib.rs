@@ -1,8 +1,8 @@
 //! Tauri shell: one window, any number of terminal sessions (one per pane).
 //!
-//! Sessions live in `term`, which knows nothing about Tauri; this file only
-//! turns the frontend's commands into session calls, and frames and exits
-//! into channel messages and events.
+//! Sessions and the layout live in the daemon; this file only turns the
+//! frontend's commands into daemon requests, and frames and layouts into
+//! channel messages and events.
 
 mod open;
 
@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use daemon::client::{Client, ClientEvent};
+use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::wire::{ClientMsg, SessionId};
 use proto::{InputEvent, Resize};
 use serde::Serialize;
@@ -31,14 +32,8 @@ impl Term {
     }
 }
 
-#[derive(Clone, Serialize)]
-struct Exited {
-    id: SessionId,
-    code: Option<u32>,
-}
-
 /// Frames go to their session's channel as the JSON the daemon sent, without
-/// being decoded here; exits become `term-exited` events.
+/// being decoded here; layouts become `layout` events.
 fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) + Send + 'static {
     move |event| match event {
         ClientEvent::Frame { session, json } => {
@@ -46,14 +41,12 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
                 let _ = ch.send(InvokeResponseBody::Json(json.to_owned()));
             }
         }
-        ClientEvent::Exited { session, code } => {
-            let _ = app.emit("term-exited", Exited { id: session, code });
+        ClientEvent::Layout(layout) => {
+            let _ = app.emit("layout", layout);
         }
-        // The daemon went away, and its shells with it.
+        // The daemon went away, and its shells with it: no panes are left.
         ClientEvent::Disconnected => {
-            for &id in channels.lock().unwrap().keys() {
-                let _ = app.emit("term-exited", Exited { id, code: None });
-            }
+            let _ = app.emit("layout", Layout::default());
         }
     }
 }
@@ -181,32 +174,6 @@ fn offer_restart(app: &AppHandle) {
         });
 }
 
-/// Start a shell at `size`. With `cwd_from`, it starts in that session's
-/// working directory (a new pane next to it).
-// Commands are async so a slow daemon never blocks the main thread.
-#[tauri::command]
-async fn term_spawn(
-    state: State<'_, Term>,
-    size: Resize,
-    cwd_from: Option<SessionId>,
-) -> Result<SessionId, String> {
-    // KIBANN_COMMAND runs a program instead of the login shell (split on
-    // whitespace; for trying the app with vim, htop and the like).
-    let argv = std::env::var("KIBANN_COMMAND")
-        .ok()
-        .map(|c| c.split_whitespace().map(String::from).collect());
-    state
-        .client
-        .spawn(size, cwd_from, argv)
-        .map_err(|e| e.to_string())
-}
-
-/// Sessions still running, for a reloaded page or a reopened app.
-#[tauri::command]
-async fn term_list(state: State<'_, Term>) -> Result<Vec<SessionId>, String> {
-    state.client.list().map_err(|e| e.to_string())
-}
-
 /// Send `id`'s frames to `channel`, starting with a full frame.
 #[tauri::command]
 async fn term_attach(
@@ -218,11 +185,11 @@ async fn term_attach(
     state.send(ClientMsg::Attach { session: id })
 }
 
-/// End the shell and forget the session.
+/// The pane left the layout: stop sending its frames.
 #[tauri::command]
-async fn term_close(state: State<'_, Term>, id: SessionId) -> Result<(), String> {
+async fn term_release(state: State<'_, Term>, id: SessionId) -> Result<(), String> {
     state.channels.lock().unwrap().remove(&id);
-    state.send(ClientMsg::Close { session: id })
+    state.send(ClientMsg::Detach { session: id })
 }
 
 #[tauri::command]
@@ -249,15 +216,62 @@ async fn term_request_full(state: State<'_, Term>, id: SessionId) -> Result<(), 
     state.send(ClientMsg::RequestFull { session: id })
 }
 
-/// The workspace layout saved while the app was closed (the frontend's JSON).
+/// The layout now. It also arrives as the first `layout` event, and every
+/// change after it.
 #[tauri::command]
-async fn layout_get(state: State<'_, Term>) -> Result<Option<String>, String> {
-    state.client.layout().map_err(|e| e.to_string())
+async fn layout_watch(state: State<'_, Term>) -> Result<Layout, String> {
+    state.client.watch().map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct Acted {
+    pane: Option<PaneId>,
+    tab: Option<TabId>,
+}
+
+/// Change the layout (a shortcut, a menu item, a click).
 #[tauri::command]
-async fn layout_set(state: State<'_, Term>, layout: String) -> Result<(), String> {
-    state.send(ClientMsg::LayoutSet { layout })
+async fn layout_act(state: State<'_, Term>, action: Action) -> Result<Acted, String> {
+    // KIBANN_COMMAND runs a program instead of the login shell (split on
+    // whitespace; for trying the app with vim, htop and the like).
+    let command = || {
+        std::env::var("KIBANN_COMMAND")
+            .ok()
+            .map(|c| c.split_whitespace().map(String::from).collect())
+    };
+    let action = match action {
+        Action::NewTab {
+            near,
+            cwd,
+            argv: None,
+            focus,
+        } => Action::NewTab {
+            near,
+            cwd,
+            argv: command(),
+            focus,
+        },
+        Action::Split {
+            pane,
+            dir,
+            cwd,
+            argv: None,
+            focus,
+        } => Action::Split {
+            pane,
+            dir,
+            cwd,
+            argv: command(),
+            focus,
+        },
+        other => other,
+    };
+    // Dev builds log every action, to see what a shortcut or click sent.
+    if cfg!(debug_assertions) {
+        eprintln!("kibann: layout action {action:?}");
+    }
+    let (pane, tab) = state.client.act(action).map_err(|e| e.to_string())?;
+    Ok(Acted { pane, tab })
 }
 
 /// `KIBANN_LAYOUT`: workspace actions to run at startup, comma separated
@@ -421,16 +435,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            term_spawn,
-            term_list,
             term_attach,
-            term_close,
+            term_release,
             term_input,
             term_resize,
             term_ack,
             term_request_full,
-            layout_get,
-            layout_set,
+            layout_watch,
+            layout_act,
             app_quit,
             open_link,
             dev_layout

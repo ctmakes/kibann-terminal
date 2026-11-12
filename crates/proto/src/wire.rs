@@ -8,18 +8,20 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
+use crate::layout::{Action, Layout, PaneId, TabId};
 use crate::{Frame, InputEvent, Resize};
 
 /// Bumped whenever a message changes shape. A client and daemon with
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
 
-pub type SessionId = u32;
+/// A session is a pane: the same id.
+pub type SessionId = PaneId;
 /// Matches a reply to its request.
 pub type ReqId = u32;
 
@@ -31,29 +33,46 @@ pub enum ClientMsg {
         req: ReqId,
         version: u32,
     },
-    /// Start a shell. With `cwd_from`, in that session's directory; with
-    /// `argv`, run that instead of the login shell. Replied with
-    /// [`Reply::Spawned`].
-    Spawn {
-        req: ReqId,
-        size: Resize,
-        cwd_from: Option<SessionId>,
-        argv: Option<Vec<String>>,
-    },
-    /// Replied with [`Reply::Sessions`].
-    List {
+    /// Replied with [`Reply::Layout`], and the same layout as the first
+    /// [`ServerMsg::Layout`]; from then on every change comes as one, except
+    /// the focus changes this connection makes itself.
+    Watch {
         req: ReqId,
     },
-    /// Send this session's frames and exit to this connection, starting with
-    /// a full frame. Takes the session over from another connection.
+    /// Replied with [`Reply::Layout`].
+    GetLayout {
+        req: ReqId,
+    },
+    /// Change the layout. Replied with [`Reply::Acted`].
+    Act {
+        req: ReqId,
+        action: Action,
+    },
+    /// Title and directory of every pane. Replied with [`Reply::Panes`].
+    Panes {
+        req: ReqId,
+    },
+    /// The pane's text. Replied with [`Reply::Text`].
+    Read {
+        req: ReqId,
+        pane: PaneId,
+        source: ReadSource,
+        /// Only the last this many lines.
+        lines: Option<u32>,
+    },
+    /// Whether the pane's program ended, and whether `mark` was printed
+    /// there (see [`MARK_OSC`]). Replied with [`Reply::Status`].
+    Status {
+        req: ReqId,
+        pane: PaneId,
+        mark: Option<String>,
+    },
+    /// Send this session's frames to this connection, starting with a full
+    /// frame. Takes the session over from another connection.
     Attach {
         session: SessionId,
     },
     Detach {
-        session: SessionId,
-    },
-    /// End the shell and forget the session.
-    Close {
         session: SessionId,
     },
     Input {
@@ -71,26 +90,64 @@ pub enum ClientMsg {
     RequestFull {
         session: SessionId,
     },
-    /// Replied with [`Reply::Layout`].
-    LayoutGet {
-        req: ReqId,
-    },
-    /// Keep the app's layout (its own JSON) while it is closed.
-    LayoutSet {
-        layout: String,
-    },
     /// End every session and exit.
     Shutdown,
+}
+
+/// What [`ClientMsg::Read`] returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadSource {
+    /// The screen as the program drew it, row by row.
+    Visible,
+    /// Scrollback and screen, with lines that wrapped joined again.
+    Recent,
+}
+
+/// An OSC number nothing else uses. `ESC ] 7770 ; <mark> ; <code> BEL` in a
+/// pane's output records `mark` with exit code `code`, for
+/// [`ClientMsg::Status`]; the emulator ignores it, so nothing shows.
+pub const MARK_OSC: u32 = 7770;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaneInfo {
+    pub id: PaneId,
+    pub tab: TabId,
+    pub title: String,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Reply {
-    Hello { version: u32, build: String },
-    Spawned { session: SessionId },
-    Sessions { ids: Vec<SessionId> },
-    Layout { layout: Option<String> },
-    Error { message: String },
+    Hello {
+        version: u32,
+        build: String,
+    },
+    Layout {
+        layout: Layout,
+    },
+    /// The pane and tab an action made or acted on.
+    Acted {
+        pane: Option<PaneId>,
+        tab: Option<TabId>,
+    },
+    Panes {
+        panes: Vec<PaneInfo>,
+    },
+    Text {
+        text: String,
+    },
+    Status {
+        /// The program exited (the pane is gone), with its code if known.
+        ended: bool,
+        code: Option<u32>,
+        /// The code that came with the mark, once it was printed.
+        mark: Option<i32>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// From the daemon. `F` is [`Frame`] when sending; a client that only passes
@@ -108,10 +165,9 @@ pub enum ServerMsg<F = Frame> {
         session: SessionId,
         frame: F,
     },
-    /// The shell exited, with its code when known.
-    Exited {
-        session: SessionId,
-        code: Option<u32>,
+    /// The layout changed (to connections that sent [`ClientMsg::Watch`]).
+    Layout {
+        layout: Layout,
     },
 }
 
@@ -224,16 +280,25 @@ mod tests {
                 req: 1,
                 version: PROTOCOL_VERSION,
             },
-            ClientMsg::Spawn {
-                req: 2,
-                size: size(),
-                cwd_from: Some(3),
-                argv: None,
+            ClientMsg::Watch { req: 2 },
+            ClientMsg::Act {
+                req: 3,
+                action: Action::Split {
+                    pane: 1,
+                    dir: crate::layout::Dir::Row,
+                    cwd: None,
+                    argv: None,
+                    focus: false,
+                },
             },
-            ClientMsg::List { req: 3 },
+            ClientMsg::Read {
+                req: 4,
+                pane: 1,
+                source: ReadSource::Recent,
+                lines: Some(10),
+            },
             ClientMsg::Attach { session: 1 },
             ClientMsg::Detach { session: 1 },
-            ClientMsg::Close { session: 1 },
             ClientMsg::Input {
                 session: 1,
                 event: InputEvent::Text {
@@ -246,10 +311,6 @@ mod tests {
             },
             ClientMsg::Ack { session: 1, seq: 9 },
             ClientMsg::RequestFull { session: 1 },
-            ClientMsg::LayoutGet { req: 4 },
-            ClientMsg::LayoutSet {
-                layout: r#"{"tabs":[]}"#.into(),
-            },
             ClientMsg::Shutdown,
         ];
         for m in msgs {
@@ -282,13 +343,16 @@ mod tests {
 
         let reply: ServerMsg = round_trip(&ServerMsg::<Frame>::Reply {
             req: 1,
-            reply: Reply::Sessions { ids: vec![1, 2] },
+            reply: Reply::Acted {
+                pane: Some(2),
+                tab: None,
+            },
         });
         assert!(matches!(
             reply,
             ServerMsg::Reply {
                 req: 1,
-                reply: Reply::Sessions { .. }
+                reply: Reply::Acted { pane: Some(2), .. }
             }
         ));
     }

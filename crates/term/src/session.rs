@@ -19,7 +19,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use proto::wire::ReadSource;
 use proto::{Frame, InputEvent, MouseAction, Resize};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use crate::cast::{CastWriter, Header};
 use crate::emulator::{Emulator, TERMINFO_NAME};
@@ -59,8 +62,15 @@ enum Msg {
     RequestFull,
     Attach(Sink),
     Cwd(Sender<Option<PathBuf>>),
+    Title(Sender<String>),
+    Read(ReadSource, Option<usize>, Sender<String>),
     Shutdown,
 }
+
+/// Marks seen in the output (see [`crate::read::MarkScanner`]), oldest
+/// first, at most [`MAX_MARKS`].
+type Marks = Arc<Mutex<VecDeque<(String, i32)>>>;
+const MAX_MARKS: usize = 64;
 
 /// What to run. Defaults to the user's login shell.
 #[derive(Default)]
@@ -74,6 +84,7 @@ pub struct Spawn {
 /// Handle to a session. Dropping it kills the shell and stops the threads.
 pub struct Session {
     tx: SyncSender<Msg>,
+    marks: Marks,
     thread: Option<JoinHandle<()>>,
     killer: Option<Box<dyn ChildKiller + Send + Sync>>,
 }
@@ -129,14 +140,25 @@ impl Session {
         }
         let pty_writer = spawn_writer(writer)?;
         let master = pair.master;
+        let marks = Marks::default();
+        let m = marks.clone();
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
                 let pty = Pty { master, shell_pid };
-                run(rx, size, pty_writer, Some(pty), true, debug_recorder(size));
+                run(
+                    rx,
+                    size,
+                    pty_writer,
+                    Some(pty),
+                    true,
+                    debug_recorder(size),
+                    m,
+                );
             })?;
         Ok(Self {
             tx,
+            marks,
             thread: Some(thread),
             killer: Some(killer),
         })
@@ -152,13 +174,16 @@ impl Session {
         let (tx, rx) = mpsc::sync_channel(QUEUE);
         spawn_reader(Box::new(output), tx.clone());
         let pty_writer = spawn_writer(Box::new(input))?;
+        let marks = Marks::default();
+        let m = marks.clone();
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
-                run(rx, size, pty_writer, None, false, None);
+                run(rx, size, pty_writer, None, false, None, m);
             })?;
         Ok(Self {
             tx,
+            marks,
             thread: Some(thread),
             killer: None,
         })
@@ -194,6 +219,28 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         self.send(Msg::Cwd(tx));
         rx.recv_timeout(Duration::from_millis(500)).ok().flatten()
+    }
+
+    /// The title the tab shows: the program's own, else its name.
+    pub fn title(&self) -> String {
+        let (tx, rx) = mpsc::channel();
+        self.send(Msg::Title(tx));
+        rx.recv_timeout(Duration::from_millis(500))
+            .unwrap_or_default()
+    }
+
+    /// The pane's text (see [`crate::read::text`]). Empty if the session is
+    /// gone or busy for more than a moment.
+    pub fn read(&self, source: ReadSource, lines: Option<usize>) -> String {
+        let (tx, rx) = mpsc::channel();
+        self.send(Msg::Read(source, lines, tx));
+        rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default()
+    }
+
+    /// The code printed with `mark`, once the output has carried it.
+    pub fn mark(&self, mark: &str) -> Option<i32> {
+        let marks = self.marks.lock().unwrap_or_else(|e| e.into_inner());
+        marks.iter().rev().find(|(m, _)| m == mark).map(|(_, c)| *c)
     }
 
     fn send(&self, m: Msg) {
@@ -402,7 +449,9 @@ fn run(
     master: Option<Pty>,
     report_exit: bool,
     mut rec: Option<Recorder>,
+    marks: Marks,
 ) {
+    let mut scanner = crate::read::MarkScanner::default();
     let Ok(mut emu) = Emulator::new(size) else {
         return;
     };
@@ -450,6 +499,13 @@ fn run(
                     budget = budget.saturating_sub(data.len());
                     emu.write(&data);
                     p.dirty = true;
+                    scanner.scan(&data, |mark, code| {
+                        let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
+                        if m.len() == MAX_MARKS {
+                            m.pop_front();
+                        }
+                        m.push_back((mark, code));
+                    });
                     if let Some(r) = &mut rec {
                         let _ = r.output(&data);
                     }
@@ -499,6 +555,13 @@ fn run(
                         .reported_dir()
                         .or_else(|| master.as_ref().and_then(Pty::cwd));
                     let _ = reply.send(dir);
+                }
+                Msg::Title(reply) => {
+                    let _ = reply.send(emu.title());
+                }
+                Msg::Read(source, lines, reply) => {
+                    let text = crate::read::text(emu.terminal(), emu.size(), source, lines);
+                    let _ = reply.send(text.unwrap_or_default());
                 }
                 Msg::Shutdown => return,
             }

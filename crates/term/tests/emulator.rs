@@ -800,3 +800,45 @@ fn hovering_never_reaches_the_program() {
     );
     assert!(out.is_empty());
 }
+
+// ---- reading text for agents ----
+
+fn read(e: &Emulator, source: proto::wire::ReadSource, lines: Option<usize>) -> String {
+    term::read::text(e.terminal(), e.size(), source, lines).unwrap()
+}
+
+#[test]
+fn reading_the_screen_and_the_scrollback() {
+    use proto::wire::ReadSource::{Recent, Visible};
+    let mut e = emu();
+    for i in 1..=8 {
+        e.write(format!("line {i}\r\n").as_bytes());
+    }
+    // A line wider than the screen wraps onto two rows.
+    e.write(b"0123456789abcdefghijKLMNO");
+    // The screen holds the last 5 rows: 6, 7, 8 and the wrapped line.
+    assert_eq!(
+        read(&e, Visible, None),
+        "line 6\nline 7\nline 8\n0123456789abcdefghij\nKLMNO"
+    );
+    // Scrollback and screen, the wrapped line joined.
+    let recent = read(&e, Recent, None);
+    assert!(recent.starts_with("line 1\nline 2\n"), "{recent}");
+    assert!(
+        recent.ends_with("line 8\n0123456789abcdefghijKLMNO"),
+        "{recent}"
+    );
+    assert_eq!(
+        read(&e, Recent, Some(2)),
+        "line 8\n0123456789abcdefghijKLMNO"
+    );
+}
+
+#[test]
+fn reading_a_mostly_empty_screen() {
+    use proto::wire::ReadSource::{Recent, Visible};
+    let mut e = emu();
+    e.write(b"$ ");
+    assert_eq!(read(&e, Visible, None), "$");
+    assert_eq!(read(&e, Recent, None), "$");
+}

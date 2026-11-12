@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use daemon::client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
-use proto::wire::{ClientMsg, PROTOCOL_VERSION, SessionId};
+use proto::layout::{Action, Dir, Layout};
+use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
 use proto::{Frame, InputEvent, Resize};
 
 const SIZE: Resize = Resize {
@@ -50,7 +51,7 @@ fn start(socket: &Path, idle: Duration) -> (Arc<Daemon>, JoinHandle<std::io::Res
 #[derive(Debug)]
 enum Ev {
     Frame(SessionId, Box<Frame>),
-    Exited(SessionId, Option<u32>),
+    Layout(Layout),
     Disconnected,
 }
 
@@ -62,7 +63,7 @@ fn events() -> (impl FnMut(ClientEvent<'_>) + Send + 'static, Receiver<Ev>) {
                 session,
                 Box::new(serde_json::from_str(json).expect("frame json")),
             ),
-            ClientEvent::Exited { session, code } => Ev::Exited(session, code),
+            ClientEvent::Layout(l) => Ev::Layout(l),
             ClientEvent::Disconnected => Ev::Disconnected,
         });
     };
@@ -74,7 +75,67 @@ fn sh(c: &Client, script: Option<&str>) -> SessionId {
         Some(s) => vec!["/bin/sh".into(), "-c".into(), s.into()],
         None => vec!["/bin/sh".into()],
     };
-    c.spawn(SIZE, None, Some(argv)).expect("spawn")
+    let (pane, _) = c
+        .act(Action::NewTab {
+            near: None,
+            cwd: None,
+            argv: Some(argv),
+            focus: true,
+        })
+        .expect("new tab");
+    let pane = pane.unwrap();
+    c.send(&ClientMsg::Resize {
+        session: pane,
+        size: SIZE,
+    })
+    .unwrap();
+    pane
+}
+
+/// The next layout event, skipping frames.
+fn next_layout(rx: &Receiver<Ev>) -> Layout {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(Ev::Layout(l)) => return l,
+            Ok(_) => {}
+            Err(_) => panic!("no layout event"),
+        }
+    }
+}
+
+fn read(c: &Client, pane: SessionId, source: ReadSource) -> String {
+    match c
+        .request(|req| ClientMsg::Read {
+            req,
+            pane,
+            source,
+            lines: None,
+        })
+        .unwrap()
+    {
+        Reply::Text { text } => text,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn status(c: &Client, pane: SessionId, mark: Option<&str>) -> Reply {
+    c.request(|req| ClientMsg::Status {
+        req,
+        pane,
+        mark: mark.map(String::from),
+    })
+    .unwrap()
+}
+
+/// Poll until `f` holds.
+fn eventually(what: &str, mut f: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !f() {
+        assert!(Instant::now() < deadline, "never: {what}");
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn type_text(c: &Client, session: SessionId, text: &str) {
@@ -162,10 +223,6 @@ fn sessions_keep_running_while_detached() {
         let c = Client::connect(&path, f).unwrap();
         let s = sh(&c, None);
         c.send(&ClientMsg::Attach { session: s }).unwrap();
-        c.send(&ClientMsg::LayoutSet {
-            layout: "{\"tabs\":1}".into(),
-        })
-        .unwrap();
         type_text(&c, s, "sleep 0.3; echo later-$((1+1))\r");
         wait_for(&c, &rx, s, "sleep 0.3");
         s
@@ -174,8 +231,7 @@ fn sessions_keep_running_while_detached() {
     thread::sleep(Duration::from_millis(700));
     let (f, rx) = events();
     let c = Client::connect(&path, f).unwrap();
-    assert_eq!(c.list().unwrap(), vec![s]);
-    assert_eq!(c.layout().unwrap().as_deref(), Some("{\"tabs\":1}"));
+    assert_eq!(c.layout().unwrap().panes(), vec![s]);
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     wait_for(&c, &rx, s, "later-2");
     d.shutdown();
@@ -209,31 +265,118 @@ fn a_second_client_takes_the_session_over() {
 }
 
 #[test]
-fn an_exit_while_detached_is_reported_on_attach() {
+fn a_shell_that_exits_takes_its_pane_with_it() {
     let path = socket();
     let (d, h) = start(&path, Duration::from_secs(60));
     let (f, rx) = events();
     let c = Client::connect(&path, f).unwrap();
-    let s = sh(&c, Some("exit 3"));
-    thread::sleep(Duration::from_millis(500));
-    assert_eq!(d.live_sessions(), 0);
-    c.send(&ClientMsg::Attach { session: s }).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(Ev::Exited(id, code)) => {
-                assert_eq!((id, code), (s, Some(3)));
-                break;
-            }
-            Ok(Ev::Frame(_, f)) => c
-                .send(&ClientMsg::Ack {
-                    session: s,
-                    seq: f.seq,
-                })
-                .unwrap(),
-            _ => assert!(Instant::now() < deadline, "no exit reported"),
+    let keep = sh(&c, None);
+    assert_eq!(c.watch().unwrap().panes(), vec![keep]);
+    assert_eq!(next_layout(&rx).panes(), vec![keep]); // the same, as an event
+    let s = sh(&c, Some("sleep 0.2; exit 3"));
+    assert_eq!(next_layout(&rx).panes(), vec![keep, s]);
+    // Nobody watches its frames; the exit still closes the pane.
+    assert_eq!(next_layout(&rx).panes(), vec![keep]);
+    assert_eq!(d.live_sessions(), 1);
+    assert_eq!(
+        status(&c, s, None),
+        Reply::Status {
+            ended: true,
+            code: Some(3),
+            mark: None
         }
-    }
+    );
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn layout_changes_reach_the_watcher_but_its_own_focus_changes_dont() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, app_rx) = events();
+    let app = Client::connect(&path, f).unwrap();
+    let first = sh(&app, None);
+    let layout = app.watch().unwrap();
+    assert_eq!(layout.tabs.len(), 1);
+    assert_eq!(next_layout(&app_rx), layout);
+    let tab = layout.tabs[0].id;
+
+    // An agent splits next to the first pane without taking focus.
+    let (f, _rx) = events();
+    let agent = Client::connect(&path, f).unwrap();
+    let (p, t) = agent
+        .act(Action::Split {
+            pane: first,
+            dir: Dir::Row,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: false,
+        })
+        .unwrap();
+    assert_eq!(t, Some(tab));
+    let p = p.unwrap();
+    let l = next_layout(&app_rx);
+    assert_eq!(l.panes(), vec![first, p]);
+    assert_eq!(l.tabs[0].focused, first);
+
+    // The app's own click on the new pane isn't echoed back...
+    app.act(Action::Focus { pane: p }).unwrap();
+    // ...but the agent's focus change is.
+    agent.act(Action::Focus { pane: first }).unwrap();
+    let l = next_layout(&app_rx);
+    assert_eq!(l.tabs[0].focused, first);
+
+    // Errors for panes that aren't there.
+    assert!(agent.act(Action::Close { pane: 99 }).is_err());
+    assert!(
+        agent
+            .act(Action::Split {
+                pane: 99,
+                dir: Dir::Row,
+                cwd: None,
+                argv: None,
+                focus: false
+            })
+            .is_err()
+    );
+    agent.act(Action::Close { pane: p }).unwrap();
+    assert_eq!(next_layout(&app_rx).panes(), vec![first]);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
+fn panes_can_be_read_and_marks_seen() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, _rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let s = sh(&c, None);
+    type_text(
+        &c,
+        s,
+        "printf 'a-%s\\n' 1 2; printf '\\033]7770;m1;%d\\007' 5\r",
+    );
+    eventually("the mark", || {
+        status(&c, s, Some("m1"))
+            == Reply::Status {
+                ended: false,
+                code: None,
+                mark: Some(5),
+            }
+    });
+    let text = read(&c, s, ReadSource::Visible);
+    assert!(text.contains("a-1\na-2"), "{text}");
+    assert_eq!(
+        status(&c, s, Some("m2")),
+        Reply::Status {
+            ended: false,
+            code: None,
+            mark: None
+        }
+    );
+    assert!(matches!(status(&c, 99, None), Reply::Error { .. }));
     d.shutdown();
     h.join().unwrap().unwrap();
 }
@@ -246,8 +389,7 @@ fn the_daemon_exits_when_nothing_is_left() {
         let (f, _rx) = events();
         let c = Client::connect(&path, f).unwrap();
         let s = sh(&c, None);
-        c.send(&ClientMsg::Close { session: s }).unwrap();
-        c.list().unwrap(); // the close is handled before this reply
+        c.act(Action::Close { pane: s }).unwrap();
     }
     let start = Instant::now();
     h.join().unwrap().unwrap();
@@ -347,7 +489,7 @@ fn clients_racing_to_start_share_one_daemon() {
 
     let s = sh(&clients[0].0, None);
     for (c, _) in &clients {
-        assert_eq!(c.list().unwrap(), vec![s]);
+        assert_eq!(c.layout().unwrap().panes(), vec![s]);
     }
     clients[0].0.send(&ClientMsg::Shutdown).unwrap();
     // Every client sees the daemon go.
@@ -394,7 +536,11 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: SessionId) -> Duration {
         loop {
             match rx.recv_timeout(Duration::from_secs(2)).expect("echo") {
                 Ev::Frame(id, f) if id == s => {
-                    c.send(&ClientMsg::Ack { session: s, seq: f.seq }).unwrap();
+                    c.send(&ClientMsg::Ack {
+                        session: s,
+                        seq: f.seq,
+                    })
+                    .unwrap();
                     screen.apply(&f);
                     if screen.0.values().any(|r| r.trim_end().ends_with(&marker)) {
                         break;

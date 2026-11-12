@@ -10,6 +10,7 @@ pub mod frame;
 pub mod keymap;
 pub mod links;
 pub mod process;
+pub mod read;
 pub mod replay;
 pub mod selection;
 pub mod session;
