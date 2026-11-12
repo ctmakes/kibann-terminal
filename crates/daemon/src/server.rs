@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 
+use proto::git::PaneDir;
 use proto::layout::{Action, Dir, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{
@@ -43,6 +44,29 @@ const DEFAULT_SIZE: Resize = Resize {
     cell_w: 8,
     cell_h: 16,
 };
+
+/// Where a pane is: its directory and the checkout that holds it.
+#[derive(Debug, Clone, Default)]
+struct Place {
+    dir: PathBuf,
+    /// The checkout's root (watched in [`Daemon::git`] for this pane).
+    root: Option<PathBuf>,
+    at_shell: bool,
+}
+
+/// `dir` with the home directory shown as `~`.
+fn shown(dir: &std::path::Path) -> String {
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(rest) = dir.strip_prefix(&home)
+    {
+        return if rest.as_os_str().is_empty() {
+            "~".into()
+        } else {
+            format!("~/{}", rest.display())
+        };
+    }
+    dir.display().to_string()
+}
 
 /// How many ended panes to remember, for `kibann pane wait --exit`.
 const MAX_ENDED: usize = 256;
@@ -82,6 +106,10 @@ struct State {
     env: PaneEnv,
     /// Agent status per pane.
     status: Statuses,
+    /// Directory and checkout per pane.
+    places: HashMap<PaneId, Place>,
+    /// The git map watchers last got.
+    git_sent: BTreeMap<PaneId, PaneDir>,
     shutdown: bool,
 }
 
@@ -132,6 +160,37 @@ impl State {
         }
     }
 
+    fn git_map(&self, git: &git::Watcher) -> BTreeMap<PaneId, PaneDir> {
+        self.places
+            .iter()
+            .map(|(&id, p)| {
+                let dir = PaneDir {
+                    dir: p.dir.to_string_lossy().into_owned(),
+                    shown: shown(&p.dir),
+                    git: p.root.as_deref().and_then(|r| git.info(r)),
+                };
+                (id, dir)
+            })
+            .collect()
+    }
+
+    /// Send the git map to watchers if it changed.
+    fn git_changed(&mut self, git: &git::Watcher) {
+        let now = self.git_map(git);
+        if now != self.git_sent {
+            self.send_watchers(&encode(&ServerMsg::Git { panes: now.clone() }), None);
+            self.git_sent = now;
+        }
+    }
+
+    /// The pane is gone: stop watching its checkout for it.
+    fn forget_place(&mut self, pane: PaneId, git: &git::Watcher) {
+        if let Some(root) = self.places.remove(&pane).and_then(|p| p.root) {
+            git.remove(&root);
+        }
+        self.git_changed(git);
+    }
+
     fn note_ended(&mut self, pane: PaneId, code: Option<u32>) {
         if self.ended.len() == MAX_ENDED {
             self.ended.pop_front();
@@ -144,6 +203,8 @@ pub struct Daemon {
     state: Mutex<State>,
     build: String,
     me: Weak<Daemon>,
+    /// Keeps each checkout's git info current.
+    git: git::Watcher,
 }
 
 /// One message, framed, ready for an outbox.
@@ -214,10 +275,19 @@ impl Daemon {
     /// `build` identifies this daemon's binary; see [`crate::build_id`].
     pub fn new(build: impl Into<String>) -> Arc<Self> {
         let build = build.into();
-        Arc::new_cyclic(|me| Self {
-            state: Mutex::new(State::default()),
-            build,
-            me: me.clone(),
+        Arc::new_cyclic(|me: &Weak<Daemon>| {
+            let weak = me.clone();
+            Self {
+                state: Mutex::new(State::default()),
+                build,
+                me: me.clone(),
+                git: git::Watcher::new(move |_root, _info| {
+                    if let Some(d) = weak.upgrade() {
+                        let mut st = d.lock();
+                        st.git_changed(&d.git);
+                    }
+                }),
+            }
         })
     }
 
@@ -313,6 +383,9 @@ impl Daemon {
                 st.status_changed();
                 out.push(encode(&ServerMsg::Status {
                     panes: st.status.map(),
+                }));
+                out.push(encode(&ServerMsg::Git {
+                    panes: st.git_map(&self.git),
                 }));
                 Self::reply(out, req, Reply::Layout { layout });
             }
@@ -508,6 +581,7 @@ impl Daemon {
                     }
                     st.note_ended(pane, None);
                     st.status.remove(pane);
+                    st.forget_place(pane, &self.git);
                     st.broadcast(None);
                     st.sessions.remove(&pane)
                 };
@@ -619,6 +693,7 @@ impl Daemon {
             };
             st.note_ended(id, code);
             st.status.remove(id);
+            st.forget_place(id, &self.git);
             if st.model.remove(id) {
                 st.broadcast(None);
             } else {
@@ -644,12 +719,77 @@ impl Daemon {
             (a.name().to_owned(), state)
         });
         let seen = st.is_seen(id);
+        let was_working = st
+            .status
+            .get(id)
+            .is_some_and(|s| s.state == AgentState::Working);
         st.status.detected(id, agent, fg.at_shell, seen);
         st.status_changed();
+        let finished = was_working
+            && st
+                .status
+                .get(id)
+                .is_none_or(|s| matches!(s.state, AgentState::Idle | AgentState::Done));
+
+        // Where it is. A new directory is looked up off this (the
+        // session's) thread: it runs git.
+        let place = st.places.entry(id).or_default();
+        let back_at_shell = fg.at_shell && !place.at_shell;
+        place.at_shell = fg.at_shell;
+        if let Some(dir) = fg.cwd
+            && dir != place.dir
+        {
+            place.dir = dir.clone();
+            let me = self.me.clone();
+            let _ = thread::Builder::new()
+                .name("daemon-git-discover".into())
+                .spawn(move || {
+                    let checkout = git::Checkout::discover(&dir);
+                    if let Some(d) = me.upgrade() {
+                        d.pane_checkout(id, &dir, checkout);
+                    }
+                });
+        }
+        // Events can be missed; a prompt coming back or an agent finishing
+        // is a good moment to look again.
+        if (back_at_shell || finished)
+            && let Some(root) = &place.root
+        {
+            self.git.refresh(root);
+        }
+        st.git_changed(&self.git);
+    }
+
+    /// `dir`, where pane `id` is, belongs to `checkout`.
+    fn pane_checkout(&self, id: PaneId, dir: &std::path::Path, checkout: Option<git::Checkout>) {
+        let mut st = self.lock();
+        let Some(place) = st.places.get_mut(&id) else {
+            return; // closed meanwhile
+        };
+        if place.dir != dir {
+            return; // moved on meanwhile
+        }
+        let root = checkout.as_ref().map(|c| c.root.clone());
+        if place.root != root {
+            if let Some(old) = place.root.take() {
+                self.git.remove(&old);
+            }
+            if let Some(c) = &checkout {
+                self.git.add(c);
+            }
+            place.root = root;
+        }
+        st.git_changed(&self.git);
     }
 
     fn panes(&self) -> Reply {
-        type Row = (PaneId, TabId, Option<Arc<Session>>, Option<PaneStatus>);
+        type Row = (
+            PaneId,
+            TabId,
+            Option<Arc<Session>>,
+            Option<PaneStatus>,
+            Option<proto::git::GitInfo>,
+        );
         let list: Vec<Row> = {
             let st = self.lock();
             st.model
@@ -659,14 +799,20 @@ impl Daemon {
                 .flat_map(|t| t.tree.panes().into_iter().map(move |p| (p, t.id)))
                 .map(|(p, t)| {
                     let s = st.sessions.get(&p).map(|e| e.session.clone());
-                    (p, t, s, st.status.get(p))
+                    let git = st
+                        .places
+                        .get(&p)
+                        .and_then(|pl| pl.root.as_deref())
+                        .and_then(|r| self.git.info(r));
+                    (p, t, s, st.status.get(p), git)
                 })
                 .collect()
         };
         // Each asks the session thread: outside the lock.
         let panes = list
             .into_iter()
-            .map(|(id, tab, s, status)| PaneInfo {
+            .map(|(id, tab, s, status, git)| PaneInfo {
+                git,
                 id,
                 tab,
                 agent: status.as_ref().map(|a| a.agent.clone()),
@@ -712,6 +858,11 @@ impl Daemon {
 
     pub fn is_shut_down(&self) -> bool {
         self.lock().shutdown
+    }
+
+    /// Git checkouts watched for panes now.
+    pub fn checkouts_watched(&self) -> usize {
+        self.git.watching()
     }
 
     pub fn clients(&self) -> usize {

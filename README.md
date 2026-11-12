@@ -63,6 +63,19 @@ kibann skill install    # the guide for Claude Code, to ~/.claude/skills/kibann
 
 Each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH` (a link to the app beside the socket). Output is JSON; errors are JSON on stderr with exit code 1, and a bad command line exits 2. `kibann help` lists everything; `skills/kibann/SKILL.md` is the guide agents read. Anything that can open the socket can type into every pane, so only your own user can.
 
+### Where each pane is
+
+Every pane has a slim header showing where it is: outside a repository, the directory (`~/Downloads`); inside one, the repository, the linked worktree if any, and the branch, then how many files differ from HEAD (`●5`, staged, unstaged and untracked counted once) and commits ahead of and behind the upstream (`↑2 ↓1`). A merge or rebase stopped in the middle shows as `MERGING` or `REBASING`, with conflicted files as `!2`. Tabs show the focused pane's branch after their title.
+
+It updates from filesystem events, not polling, so an idle workspace costs nothing:
+
+- **One `git status` per checkout**, shared by every pane in it.
+- **Ignored files don't count**, so a build writing to `target/` starts no run.
+- **Bursts of changes** cost one run.
+- **Git is run with `--no-optional-locks`**, so it never takes the index lock an agent's `git commit` needs.
+
+Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane list` includes the same information as `git`.
+
 ### Agent status at a glance
 
 Panes running Claude Code show what it is doing with a dot in their top-right corner: **green, pulsing** while it works, **amber** when it waits for you (a permission prompt or question), and **blue** when it finished while you were looking elsewhere (it clears when you focus the pane). An idle agent and a plain shell show nothing. Each tab shows its most urgent dot (amber, then blue, then green), and the Dock icon counts the agents waiting for you.

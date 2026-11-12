@@ -269,3 +269,44 @@ fn agents_can_be_waited_on_and_report_themselves() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+#[test]
+fn pane_list_shows_the_checkout() {
+    let (socket, d, h) = start("c");
+    let repo = socket.parent().unwrap().join("proj");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(&repo)
+            .args(["-c", "init.defaultBranch=trunk"])
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.join("x"), "").unwrap();
+    let c = Client::connect(&socket, |_| {}).unwrap();
+    c.act(Action::NewTab {
+        near: None,
+        cwd: Some(repo.to_string_lossy().into_owned()),
+        argv: Some(vec!["/bin/sh".into()]),
+        focus: true,
+    })
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let pane = loop {
+        let list = ok(kibann(&socket, None, &["pane", "list"]));
+        let p = list["panes"][0].clone();
+        if !p["git"].is_null() {
+            break p;
+        }
+        assert!(Instant::now() < deadline, "no git: {list}");
+        thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(pane["git"]["branch"], "trunk");
+    assert_eq!(pane["git"]["repo"], "proj");
+    assert_eq!(pane["git"]["changed"], 1);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

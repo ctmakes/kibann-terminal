@@ -3,9 +3,10 @@
 // TypeScript. Either way the workspace changes only when a layout comes back
 // (`Workspace.apply`), except for focus, which it moves at once.
 
-import type { AgentState, Layout, LayoutAction } from "../proto";
+import type { AgentState, Layout, LayoutAction, PaneDir } from "../proto";
 import type { PaneId } from "./layout";
 import { Model, type TabId } from "./model";
+import type { GitMap } from "./pane";
 import type { StatusMap } from "./status";
 
 /** The pane and tab an action made or acted on. */
@@ -35,6 +36,8 @@ export class FakeBackend implements LayoutBackend {
   readonly origin = new Map<PaneId, PaneId | null>();
   onLayout: (layout: Layout) => void = () => {};
   onStatus: (map: StatusMap) => void = () => {};
+  onGit: (map: GitMap) => void = () => {};
+  private places: GitMap = {};
   /** Agent status, as the daemon would keep it. */
   private status: StatusMap = {};
 
@@ -91,6 +94,14 @@ export class FakeBackend implements LayoutBackend {
   private deliverStatus(): void {
     const map = structuredClone(this.status);
     queueMicrotask(() => this.onStatus(map));
+  }
+
+  /** Where a pane is (null: unknown), as the daemon would report it. */
+  setPlace(pane: PaneId, place: PaneDir | null): void {
+    if (place) this.places[String(pane)] = place;
+    else delete this.places[String(pane)];
+    const map = structuredClone(this.places);
+    queueMicrotask(() => this.onGit(map));
   }
 
   /** A pane's program exited. */

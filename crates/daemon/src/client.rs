@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use proto::git::PaneDir;
 use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::status::PaneStatus;
 use proto::wire::{
@@ -34,6 +35,9 @@ pub enum ClientEvent<'a> {
     /// Every pane with an agent, whenever one changes (after
     /// [`Client::watch`]).
     Status(BTreeMap<PaneId, PaneStatus>),
+    /// Every pane's directory and checkout, whenever one changes (after
+    /// [`Client::watch`]).
+    Git(BTreeMap<PaneId, PaneDir>),
     /// The connection closed: the daemon exited or crashed.
     Disconnected,
 }
@@ -86,6 +90,7 @@ impl Client {
                             }),
                             ServerMsg::Layout { layout } => on_event(ClientEvent::Layout(layout)),
                             ServerMsg::Status { panes } => on_event(ClientEvent::Status(panes)),
+                            ServerMsg::Git { panes } => on_event(ClientEvent::Git(panes)),
                         }
                     }
                     // Requests still waiting fail now rather than time out.

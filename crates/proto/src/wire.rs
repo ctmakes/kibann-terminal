@@ -10,6 +10,7 @@ use serde_json::value::RawValue;
 
 use std::collections::BTreeMap;
 
+use crate::git::{GitInfo, PaneDir};
 use crate::layout::{Action, Layout, PaneId, TabId};
 use crate::status::{AgentState, PaneStatus};
 use crate::{Frame, InputEvent, Resize};
@@ -18,7 +19,7 @@ use crate::{Frame, InputEvent, Resize};
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -38,8 +39,9 @@ pub enum ClientMsg {
     },
     /// Replied with [`Reply::Layout`], and the same layout as the first
     /// [`ServerMsg::Layout`]; from then on every change comes as one, except
-    /// the focus changes this connection makes itself. Agent status comes
-    /// the same way, as [`ServerMsg::Status`].
+    /// the focus changes this connection makes itself. Agent status and git
+    /// context come the same way, as [`ServerMsg::Status`] and
+    /// [`ServerMsg::Git`].
     Watch {
         req: ReqId,
     },
@@ -138,6 +140,8 @@ pub struct PaneInfo {
     /// The agent in the pane and its state, if there is one.
     pub agent: Option<String>,
     pub state: Option<AgentState>,
+    /// The git checkout the pane is in, if any.
+    pub git: Option<GitInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,6 +203,11 @@ pub enum ServerMsg<F = Frame> {
     /// first right after the first layout).
     Status {
         panes: BTreeMap<PaneId, PaneStatus>,
+    },
+    /// Every pane's directory and git checkout, whenever one changes (to
+    /// watchers, first right after the first layout).
+    Git {
+        panes: BTreeMap<PaneId, PaneDir>,
     },
 }
 

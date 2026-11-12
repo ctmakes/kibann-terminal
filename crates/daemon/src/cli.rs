@@ -25,7 +25,7 @@ const USAGE: &str = "\
 usage: kibann <command>
 
   pane list                         every pane: id, tab, title, directory, focused,
-                                    agent and its state
+                                    agent and its state, git checkout
   pane current                      the pane this shell runs in
   pane split [P] [--direction right|down] [--cwd DIR] [--focus]
                                     a new shell next to P (default: this pane)
@@ -471,6 +471,7 @@ fn pane_list(c: &Client, only: Option<PaneId>) -> Out {
             "focused": focused,
             "agent": p.agent,
             "state": p.state.map(AgentState::name),
+            "git": p.git,
         })
     };
     match only {

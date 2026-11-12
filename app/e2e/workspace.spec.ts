@@ -483,3 +483,83 @@ test.describe("agent status", () => {
     await expect(page.locator("#ws")).toHaveScreenshot("workspace-pane-dot.png");
   });
 });
+
+test.describe("pane header", () => {
+  const git = (g: Record<string, unknown>) => ({
+    root: "/r/kibann-terminal",
+    repo: "kibann-terminal",
+    worktree: null,
+    branch: "feat/term",
+    detached: null,
+    upstream: "origin/feat/term",
+    ahead: 0,
+    behind: 0,
+    changed: 0,
+    conflicts: 0,
+    operation: null,
+    ...g,
+  });
+  async function place(page: Page, pane: number, p: unknown): Promise<void> {
+    await page.evaluate(([id, pl]) => (window as any).__ws.setPlace(id, pl), [pane, p] as const);
+    await settle(page);
+  }
+  const headers = (page: Page) => page.evaluate(() => (window as any).__ws.headers());
+
+  test("repo, worktree, branch, counts and plain directories", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+d");
+    await press(page, "Meta+Shift+d");
+    await place(page, 1, { dir: "/r/kibann-terminal", shown: "~/kibann-terminal", git: git({ changed: 5, ahead: 2, behind: 1 }) });
+    await place(page, 2, {
+      dir: "/w/fix-links",
+      shown: "/w/fix-links",
+      git: git({ worktree: "fix-links", branch: "fix/links", changed: 1, operation: "rebase", conflicts: 1 }),
+    });
+    await place(page, 3, { dir: "/Users/x/Downloads", shown: "~/Downloads", git: null });
+    const h = await headers(page);
+    expect(h.panes).toEqual({
+      1: "kibann-terminal ⎇ feat/term ●5 ↑2 ↓1",
+      2: "kibann-terminal › fix-links ⎇ fix/links REBASING !1 ●1",
+      3: "~/Downloads",
+    });
+    // The terminal sits below the header: every pane keeps its size when
+    // its place changes.
+    const before = await state(page);
+    await place(page, 3, { dir: "/r/kibann-terminal", shown: "~", git: git({}) });
+    expect((await state(page)).panes).toEqual(before.panes);
+    await agentDot(page, 3);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-pane-headers.png");
+  });
+
+  test("tabs show the focused pane's branch", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+t");
+    await place(page, 1, { dir: "/r", shown: "/r", git: git({ branch: null, detached: "9f12549" }) });
+    await place(page, 2, { dir: "/r", shown: "/r", git: git({}) });
+    const tabs = (await headers(page)).tabs as string[];
+    expect(tabs[0]).toMatch(/ · 9f12549$/);
+    expect(tabs[1]).toMatch(/ · feat\/term$/);
+  });
+
+  test("a narrow pane gives way at the branch first", async ({ page }) => {
+    await open(page, { w: "260", h: "120" });
+    await place(page, 1, {
+      dir: "/r",
+      shown: "/r",
+      git: git({ branch: "feature/a-very-long-branch-name-indeed", changed: 12, ahead: 3 }),
+    });
+    const w = await page.evaluate(() => {
+      const r = (s: string) => document.querySelector(s)!.getBoundingClientRect().width;
+      return { changed: r(".pane-changed"), sync: r(".pane-sync"), branch: r(".pane-branch") };
+    });
+    expect(w.changed).toBeGreaterThan(10);
+    expect(w.sync).toBeGreaterThan(10);
+    expect(w.branch).toBeLessThan(150);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-pane-header-narrow.png");
+  });
+
+  async function agentDot(page: Page, pane: number): Promise<void> {
+    await page.evaluate((p) => (window as any).__ws.setAgent(p, "working"), pane);
+    await settle(page);
+  }
+});

@@ -6,6 +6,7 @@ import type { Layout, LayoutAction } from "./proto";
 import { TauriTransport, inTauri } from "./transport/tauri";
 import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
+import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
 import { Workspace, type Pane } from "./workspace/workspace";
 
@@ -55,6 +56,7 @@ async function start(): Promise<void> {
   await listen<Layout>("layout", (e) => ws.apply(e.payload));
   // Agent status comes the same way, right after the first layout.
   await listen<StatusMap>("agent-status", (e) => ws.setStatus(e.payload));
+  await listen<GitMap>("pane-git", (e) => ws.setGit(e.payload));
   const layout = await invoke<Layout>("layout_watch");
 
   if (layout.tabs.length === 0) {

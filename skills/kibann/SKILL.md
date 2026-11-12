@@ -48,7 +48,8 @@ kibann pane wait P --exit         # the pane's shell exits
 kibann pane wait P --until done,blocked --timeout 900000
                                   # P's agent finished or waits for the user
 kibann pane list                  # every pane: id, tab, title, cwd, focused,
-                                  # agent ("claude" or null) and state
+                                  # agent ("claude" or null), state, and git:
+                                  # {repo, worktree, branch, changed, ahead, ...}
 kibann pane current               # your own pane
 kibann pane focus P
 kibann pane close P
@@ -98,6 +99,11 @@ pane; it turns `idle` once they focus it). Kibann reads them from Claude
 Code's screen and title. Wait for `working` first: right after `run`, the
 agent hasn't started yet and the pane has no agent. If `blocked` comes back,
 read the pane and tell the user what it asks; don't answer it.
+
+To see what another pane's agent changed, compare `.git.branch` and
+`.git.changed` from `kibann pane list` before and after, rather than typing
+`git status` into its pane. The counts follow file changes within about a
+second; `ahead`/`behind` are as of the last fetch (Kibann never fetches).
 
 A script or other agent can say what it is doing itself, which beats what
 the screen shows until it releases it or exits to the shell:

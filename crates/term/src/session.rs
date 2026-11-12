@@ -53,13 +53,16 @@ pub enum Event {
     Foreground(Foreground),
 }
 
-/// What runs in the pane, as far as agent status cares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What runs in the pane and where, as far as agent status and git
+/// context care.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Foreground {
     /// A known agent and its state, read from its title and screen.
     pub agent: Option<(Agent, AgentState)>,
     /// The shell itself is in the foreground (nothing runs in it).
     pub at_shell: bool,
+    /// The working directory, as [`Session::cwd`] finds it.
+    pub cwd: Option<PathBuf>,
 }
 
 /// How often at most to look at the screen for an agent's state while
@@ -472,6 +475,7 @@ impl Pty {
         Foreground {
             agent,
             at_shell: fg.is_some() && fg == shell,
+            cwd: emu.reported_dir().or_else(|| self.cwd()),
         }
     }
 
@@ -672,8 +676,8 @@ fn run(
         {
             agent_due = None;
             let now_fg = m.foreground(&emu);
-            if foreground != Some(now_fg) {
-                foreground = Some(now_fg);
+            if foreground.as_ref() != Some(&now_fg) {
+                foreground = Some(now_fg.clone());
                 if let Some(sink) = p.sink.as_mut() {
                     sink(Event::Foreground(now_fg));
                 }

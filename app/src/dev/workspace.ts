@@ -69,6 +69,7 @@ const ws = new Workspace(root, {
 });
 backend.onLayout = (l) => ws.apply(l);
 backend.onStatus = (m) => ws.setStatus(m);
+backend.onGit = (m) => ws.setGit(m);
 let badge = 0;
 // `saved`: a layout from `__ws.snapshot()`, as if the daemon kept it.
 if (params.saved) ws.apply(backend.layout);
@@ -91,6 +92,19 @@ else void backend.act({ t: "new_tab", focus: true });
   /** A pane's agent changes state (as the daemon would detect it). */
   setAgent(pane: number, state: string | null) {
     backend.setAgent(pane, state as never);
+  },
+  /** Where a pane is, as the daemon would report it. */
+  setPlace(pane: number, place: unknown) {
+    backend.setPlace(pane, place as never);
+  },
+  /** Each pane's header text, and each tab's title. */
+  headers() {
+    return {
+      panes: Object.fromEntries(
+        [...ws.panes.values()].map((p) => [p.id, [...p.header.el.querySelectorAll(".pane-place > span")].map((s) => s.textContent).join(" ")]),
+      ),
+      tabs: ws.tabs.map((t) => t.button.title),
+    };
   },
   /** Which dots show: per pane, and per tab in bar order. */
   dots() {

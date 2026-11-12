@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod git;
 pub mod layout;
 pub mod status;
 pub mod wire;

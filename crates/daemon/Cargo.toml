@@ -12,6 +12,7 @@ path = "src/bin/kibannd.rs"
 [dependencies]
 proto = { path = "../proto" }
 term = { path = "../term" }
+git = { path = "../git" }
 serde_json = { version = "1", features = ["raw_value"] }
 regex = "1"
 

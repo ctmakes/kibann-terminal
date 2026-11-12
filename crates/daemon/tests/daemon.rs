@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use daemon::client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
+use proto::git::PaneDir;
 use proto::layout::{Action, Dir, Layout};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
@@ -54,6 +55,7 @@ enum Ev {
     Frame(SessionId, Box<Frame>),
     Layout(Layout),
     Status(BTreeMap<SessionId, PaneStatus>),
+    Git(BTreeMap<SessionId, PaneDir>),
     Disconnected,
 }
 
@@ -67,6 +69,7 @@ fn events() -> (impl FnMut(ClientEvent<'_>) + Send + 'static, Receiver<Ev>) {
             ),
             ClientEvent::Layout(l) => Ev::Layout(l),
             ClientEvent::Status(s) => Ev::Status(s),
+            ClientEvent::Git(g) => Ev::Git(g),
             ClientEvent::Disconnected => Ev::Disconnected,
         });
     };
@@ -686,6 +689,109 @@ fn agents_are_detected_and_done_while_unseen() {
     // The agent exits to the shell: no status.
     type_text(&app, p, "\r");
     next_status(&rx, p, None);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+/// Wait for a git event in which `pane`'s place satisfies `f`.
+fn next_git(rx: &Receiver<Ev>, pane: SessionId, what: &str, f: impl Fn(&PaneDir) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(Ev::Git(m)) if m.get(&pane).is_some_and(&f) => return,
+            Ok(_) => {}
+            Err(_) => panic!("never: {what}"),
+        }
+    }
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let ok = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+#[test]
+fn panes_know_their_checkout() {
+    let path = socket();
+    let repo = path.parent().unwrap().join("proj");
+    std::fs::create_dir_all(&repo).unwrap();
+    let repo = repo.canonicalize().unwrap();
+    git(&repo, &["init", "-q"]);
+    std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "first"]);
+
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let app = Client::connect(&path, f).unwrap();
+    app.watch().unwrap();
+    let (p, _) = app
+        .act(Action::NewTab {
+            near: None,
+            cwd: Some(repo.to_string_lossy().into_owned()),
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: true,
+        })
+        .unwrap();
+    let p = p.unwrap();
+    next_git(&rx, p, "the branch", |d| {
+        d.git
+            .as_ref()
+            .is_some_and(|g| g.branch.as_deref() == Some("main") && g.repo == "proj")
+    });
+
+    // Edits show up from file events alone.
+    std::fs::write(repo.join("b.txt"), "new\n").unwrap();
+    next_git(&rx, p, "one change", |d| {
+        d.git.as_ref().is_some_and(|g| g.changed == 1)
+    });
+
+    // A second pane in the repo shares the checkout.
+    let (q, _) = app
+        .act(Action::Split {
+            pane: p,
+            dir: Dir::Row,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: false,
+        })
+        .unwrap();
+    let q = q.unwrap();
+    next_git(&rx, q, "the second pane", |d| d.git.is_some());
+    assert_eq!(d.checkouts_watched(), 1);
+    let panes = match app.request(|req| ClientMsg::Panes { req }).unwrap() {
+        Reply::Panes { panes } => panes,
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        panes
+            .iter()
+            .all(|i| i.git.as_ref().is_some_and(|g| g.changed == 1))
+    );
+
+    // Leaving the repo, and closing the other pane, stops watching it.
+    type_text(&app, p, "cd /\r");
+    next_git(&rx, p, "left the repo", |d| {
+        d.git.is_none() && d.shown == "/"
+    });
+    app.act(Action::Close { pane: q }).unwrap();
+    eventually("no checkouts watched", || d.checkouts_watched() == 0);
     d.shutdown();
     h.join().unwrap().unwrap();
 }

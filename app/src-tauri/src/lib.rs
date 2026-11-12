@@ -47,12 +47,19 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
         ClientEvent::Status(panes) => {
             let _ = app.emit("agent-status", panes);
         }
+        ClientEvent::Git(panes) => {
+            let _ = app.emit("pane-git", panes);
+        }
         // The daemon went away, and its shells with it: no panes are left.
         ClientEvent::Disconnected => {
             let _ = app.emit("layout", Layout::default());
             let _ = app.emit(
                 "agent-status",
                 std::collections::BTreeMap::<u32, proto::status::PaneStatus>::new(),
+            );
+            let _ = app.emit(
+                "pane-git",
+                std::collections::BTreeMap::<u32, proto::git::PaneDir>::new(),
             );
         }
     }

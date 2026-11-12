@@ -21,6 +21,9 @@ export type { LayoutTab } from "./generated/LayoutTab";
 export type { LayoutAction } from "./generated/LayoutAction";
 export type { AgentState } from "./generated/AgentState";
 export type { PaneStatus } from "./generated/PaneStatus";
+export type { GitInfo } from "./generated/GitInfo";
+export type { GitOp } from "./generated/GitOp";
+export type { PaneDir } from "./generated/PaneDir";
 
 export const Flag = {
   BOLD: 1 << 0,

@@ -14,6 +14,7 @@ import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
+import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
 import {
   cycle,
@@ -47,8 +48,10 @@ export interface Pane {
   id: PaneId;
   tab: Tab;
   el: HTMLDivElement;
-  /** The agent status dot in the pane's corner. */
+  /** The agent status dot, in the header. */
   dot: HTMLSpanElement;
+  /** Where the pane is (directory or checkout), above the terminal. */
+  header: PaneHeader;
   transport: Transport;
   view: TerminalView | null;
   title: string;
@@ -95,6 +98,8 @@ export class Workspace {
   private readonly cleanups: Array<() => void> = [];
   /** Agent status by pane, from the daemon. */
   status: StatusMap = {};
+  /** Each pane's directory and checkout, from the daemon. */
+  git: GitMap = {};
   private blocked = 0;
 
   constructor(
@@ -280,7 +285,7 @@ export class Workspace {
         t.el.style.display = "block";
         this.layout(t);
       } else this.place(t);
-      for (const id of panes(t.tree)) this.panes.get(id)?.view?.setActive(id === t.focused);
+      for (const id of panes(t.tree)) this.setPaneActive(id, id === t.focused);
     }
     if (active && (before?.tab !== active.id || before.pane !== active.focused)) {
       this.panes.get(active.focused)?.view?.focus();
@@ -300,6 +305,13 @@ export class Workspace {
       this.blocked = blocked;
       this.opts.onBlocked?.(blocked);
     }
+  }
+
+  /** Show the daemon's map of directories and checkouts. */
+  setGit(map: GitMap): void {
+    this.git = map;
+    for (const p of this.panes.values()) p.header.show(map[String(p.id)]);
+    this.updateBar();
   }
 
   private showPaneDot(p: Pane): void {
@@ -369,7 +381,8 @@ export class Workspace {
       const on = t === this.active;
       t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
       t.button.style.color = on ? COLORS.activeText : COLORS.text;
-      const title = this.panes.get(t.focused)?.title || "shell";
+      const branch = branchOf(this.git[String(t.focused)]);
+      const title = (this.panes.get(t.focused)?.title || "shell") + (branch ? ` · ${branch}` : "");
       t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
       t.button.title = title;
       showDot(t.dot, rollUp(this.status, panes(t.tree)));
@@ -388,14 +401,20 @@ export class Workspace {
     el.className = "pane";
     el.dataset.pane = String(id);
     Object.assign(el.style, { position: "absolute", overflow: "hidden" });
-    // Above the canvas, clear of the scrollbar.
-    const dot = makeDot({ position: "absolute", top: "6px", right: "14px", zIndex: "3" });
-    el.append(dot);
+    const dot = makeDot();
+    const header = new PaneHeader(dot);
+    header.show(this.git[String(id)]);
+    header.setActive(tab.focused === id);
+    // The terminal fills what the header leaves.
+    const body = document.createElement("div");
+    body.className = "pane-body";
+    Object.assign(body.style, { position: "absolute", left: "0", right: "0", top: `${HEADER_H}px`, bottom: "0" });
+    el.append(header.el, body);
     tab.el.append(el);
-    const pane: Pane = { id, tab, el, dot, transport, view: null, title: "", closed: false };
+    const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false };
     this.panes.set(id, pane);
     this.showPaneDot(pane);
-    void TerminalView.create(el, transport, {
+    void TerminalView.create(body, transport, {
       ...this.opts.view,
       platform: this.platform,
       autofocus: false,
@@ -416,6 +435,12 @@ export class Workspace {
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
     });
     return pane;
+  }
+
+  private setPaneActive(id: PaneId, active: boolean): void {
+    const p = this.panes.get(id);
+    p?.view?.setActive(active);
+    p?.header.setActive(active);
   }
 
   /** The pane left the layout (closed, or its program exited). */
@@ -453,7 +478,7 @@ export class Workspace {
   }
 
   private updateActive(tab: Tab): void {
-    for (const id of panes(tab.tree)) this.panes.get(id)?.view?.setActive(id === tab.focused);
+    for (const id of panes(tab.tree)) this.setPaneActive(id, id === tab.focused);
     if (tab === this.active) {
       this.updateBar();
       this.emitTitle();
