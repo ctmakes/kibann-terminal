@@ -13,6 +13,7 @@
 //! next frame carries all of them.
 
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -54,6 +55,7 @@ enum Msg {
     Ack(u64),
     RequestFull,
     Attach(Sink),
+    Cwd(Sender<Option<PathBuf>>),
     Shutdown,
 }
 
@@ -87,8 +89,15 @@ impl Session {
             }
             _ => CommandBuilder::new_default_prog(),
         };
+        for (k, _) in std::env::vars_os() {
+            if k.to_str().is_some_and(is_foreign_terminal_var) {
+                cmd.env_remove(&k);
+            }
+        }
         cmd.env("TERM", TERMINFO_NAME);
         cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "kibann");
+        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         for (k, v) in &spawn.env {
             cmd.env(k, v);
         }
@@ -100,6 +109,7 @@ impl Session {
         // Our copy of the slave must close, or reads never see the end.
         drop(pair.slave);
         let killer = child.clone_killer();
+        let shell_pid = child.process_id();
         let reader = pair.master.try_clone_reader().map_err(io::Error::other)?;
         let writer = pair.master.take_writer().map_err(io::Error::other)?;
 
@@ -119,14 +129,8 @@ impl Session {
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
-                run(
-                    rx,
-                    size,
-                    pty_writer,
-                    Some(master),
-                    true,
-                    debug_recorder(size),
-                );
+                let pty = Pty { master, shell_pid };
+                run(rx, size, pty_writer, Some(pty), true, debug_recorder(size));
             })?;
         Ok(Self {
             tx,
@@ -180,6 +184,15 @@ impl Session {
         self.send(Msg::RequestFull);
     }
 
+    /// The shell's working directory: what it last reported (OSC 7), else
+    /// what the OS says for the foreground program or the shell. `None` when
+    /// unknown (or the session is busy for more than a moment).
+    pub fn cwd(&self) -> Option<PathBuf> {
+        let (tx, rx) = mpsc::channel();
+        self.send(Msg::Cwd(tx));
+        rx.recv_timeout(Duration::from_millis(500)).ok().flatten()
+    }
+
     fn send(&self, m: Msg) {
         let _ = self.tx.send(m);
     }
@@ -195,6 +208,42 @@ impl Drop for Session {
             let _ = t.join();
         }
     }
+}
+
+/// Variables describing the terminal (or multiplexer, or agent) that started
+/// the app. Programs use them for feature detection, so inherited ones would
+/// make them think they run somewhere else. Everything else, `EDITOR` and
+/// `PATH` included, passes through.
+pub fn is_foreign_terminal_var(name: &str) -> bool {
+    const NAMES: &[&str] = &[
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERM_SESSION_ID",
+        "LC_TERMINAL",
+        "LC_TERMINAL_VERSION",
+        "COLORFGBG",
+        "VTE_VERSION",
+        "WINDOWID",
+        "TMUX",
+        "TMUX_PANE",
+        "STY",
+        "WT_SESSION",
+        "WT_PROFILE_ID",
+        "TERMINAL_EMULATOR",
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+    ];
+    const PREFIXES: &[&str] = &[
+        "GHOSTTY_",
+        "ITERM_",
+        "KITTY_",
+        "WEZTERM_",
+        "ALACRITTY_",
+        "KONSOLE_",
+        "VSCODE_",
+        "KIBANN_",
+    ];
+    NAMES.contains(&name) || PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 fn home_dir() -> Option<std::path::PathBuf> {
@@ -318,11 +367,36 @@ fn debug_recorder(size: Resize) -> Option<Recorder> {
     CastWriter::new(file, header, None).ok()
 }
 
+/// The real PTY side of a session.
+struct Pty {
+    master: Box<dyn MasterPty + Send>,
+    shell_pid: Option<u32>,
+}
+
+impl Pty {
+    /// The foreground program's process (group leader), else the shell's.
+    fn foreground_pid(&self) -> Option<i32> {
+        #[cfg(unix)]
+        if let Some(pid) = self.master.process_group_leader() {
+            return Some(pid);
+        }
+        self.shell_pid.and_then(|p| i32::try_from(p).ok())
+    }
+
+    fn cwd(&self) -> Option<PathBuf> {
+        let fg = self.foreground_pid()?;
+        crate::process::cwd(fg).or_else(|| {
+            let shell = i32::try_from(self.shell_pid?).ok()?;
+            crate::process::cwd(shell)
+        })
+    }
+}
+
 fn run(
     rx: Receiver<Msg>,
     size: Resize,
     pty: Sender<Vec<u8>>,
-    master: Option<Box<dyn MasterPty + Send>>,
+    master: Option<Pty>,
     report_exit: bool,
     mut rec: Option<Recorder>,
 ) {
@@ -401,7 +475,7 @@ fn run(
                     }
                     if let Ok(true) = emu.resize(s) {
                         if let Some(m) = &master {
-                            let _ = m.resize(pty_size(s));
+                            let _ = m.master.resize(pty_size(s));
                         }
                         p.dirty = true;
                         p.force_full = true;
@@ -417,12 +491,26 @@ fn run(
                     p.last_frame = None;
                     exit_sent = false;
                 }
+                Msg::Cwd(reply) => {
+                    let dir = emu
+                        .reported_dir()
+                        .or_else(|| master.as_ref().and_then(Pty::cwd));
+                    let _ = reply.send(dir);
+                }
                 Msg::Shutdown => return,
             }
             if budget == 0 {
                 break;
             }
             next = rx.try_recv().ok();
+        }
+
+        // The foreground program changes as programs start, exit or exec,
+        // which comes with output; the lookup is a syscall or two.
+        if p.dirty
+            && let Some(m) = &master
+        {
+            emu.set_program_name(m.foreground_pid().and_then(crate::process::name));
         }
 
         let out = emu.take_outbox();

@@ -33,4 +33,9 @@ scrollbar: Scrollbar,
  * Present only when the selected text changed: the new text, or "" when
  * the selection was cleared. The frontend keeps the last value for Copy.
  */
-selection_text?: string, };
+selection_text?: string, 
+/**
+ * Present only when the pane's title changed: the program's title
+ * (OSC 0/2) when it set one, else the foreground program's name.
+ */
+title?: string, };

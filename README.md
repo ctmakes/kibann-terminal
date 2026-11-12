@@ -19,9 +19,28 @@ npm install
 npm run tauri dev      # needs Zig 0.17 on PATH (libghostty-vt builds from source)
 npm run tauri build -- --bundles app   # macOS .app in target/release/bundle
 KIBANN_COMMAND="htop" npm run tauri dev   # run a program instead of the login shell
+KIBANN_LAYOUT="right,down,tab" npm run tauri dev   # start with splits and tabs
+KIBANN_RECORD=/tmp/s.cast npm run tauri dev   # record sessions (asciicast) for debugging
 ```
 
-The window closes when its shell exits.
+Tabs and splits use Ghostty's default shortcuts:
+
+| Action | macOS | Linux / Windows |
+|---|---|---|
+| New tab | Cmd+T | Ctrl+Shift+T |
+| Close pane | Cmd+W | Ctrl+Shift+W |
+| Split right / down | Cmd+D / Cmd+Shift+D | Ctrl+Shift+O / Ctrl+Shift+E |
+| Previous / next pane | Cmd+[ / Cmd+] | Ctrl+Super+[ / ] |
+| Pane in a direction | Cmd+Opt+Arrows | Ctrl+Alt+Arrows |
+| Resize pane | Cmd+Ctrl+Arrows | Ctrl+Super+Shift+Arrows |
+| Equalize panes | Cmd+Ctrl+= | Ctrl+Super+Shift+= |
+| Zoom pane | Cmd+Shift+Enter | Ctrl+Shift+Enter |
+| Previous / next tab | Cmd+Shift+[ / ] | Ctrl+PageUp / PageDown |
+| Tab 1–8, last tab | Cmd+1–8, Cmd+9 | Alt+1–8, Alt+9 |
+
+Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
+
+New panes and tabs start in the focused pane's directory. A pane closes when its shell exits, and the app quits when the last pane closes. The shell doesn't inherit variables describing the terminal the app was started from (`TERM_PROGRAM`, `TMUX`, `GHOSTTY_*` and the like); it gets `TERM_PROGRAM=kibann`.
 
 Selection and scrollback work like Ghostty's:
 

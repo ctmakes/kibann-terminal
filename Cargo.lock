@@ -1701,6 +1701,7 @@ name = "kibann"
 version = "0.1.0"
 dependencies = [
  "proto",
+ "serde",
  "tauri",
  "tauri-build",
  "term",

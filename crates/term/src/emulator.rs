@@ -47,6 +47,10 @@ pub struct Emulator {
     buttons: u32,
     size: Resize,
     sel: Selector,
+    /// Name of the foreground program, the title when the program sets none.
+    program_name: Option<String>,
+    /// The title the frontend last received.
+    sent_title: String,
 }
 
 /// Keys that only change modifiers; pressing them isn't typing.
@@ -122,7 +126,7 @@ impl Emulator {
                 // keep that one: it is just as consistent.
                 if s.captured.borrow().is_none()
                     && let Ok(mut b) = s.builder.try_borrow_mut()
-                    && let Ok(Some(f)) = b.build(t, false, None)
+                    && let Ok(Some(f)) = b.build(t, false, None, None)
                 {
                     *s.captured.borrow_mut() = Some(f);
                 }
@@ -143,6 +147,8 @@ impl Emulator {
             buttons: 0,
             size,
             sel: Selector::new()?,
+            program_name: None,
+            sent_title: String::new(),
         })
     }
 
@@ -169,6 +175,11 @@ impl Emulator {
     }
 
     /// When the current hold times out, if there is one.
+    /// The directory the shell last reported (OSC 7), if any.
+    pub fn reported_dir(&self) -> Option<std::path::PathBuf> {
+        crate::process::parse_reported_dir(self.term.pwd().ok()?)
+    }
+
     pub fn hold_deadline(&self) -> Option<Instant> {
         self.shared
             .hold_since
@@ -212,10 +223,29 @@ impl Emulator {
         if force_full && text.is_none() {
             text = Some(self.sel.sent_text().to_owned());
         }
+        let title = self.title();
+        let title = (force_full || title != self.sent_title).then(|| {
+            self.sent_title.clone_from(&title);
+            title
+        });
         self.shared
             .builder
             .borrow_mut()
-            .build(&self.term, force_full, text)
+            .build(&self.term, force_full, text, title)
+    }
+
+    /// The program's title (OSC 0/2) if it set one, else the foreground
+    /// program's name from [`Self::set_program_name`].
+    pub fn title(&self) -> String {
+        match self.term.title() {
+            Ok(t) if !t.is_empty() => String::from_utf8_lossy(t).into_owned(),
+            _ => self.program_name.clone().unwrap_or_default(),
+        }
+    }
+
+    /// The foreground program's name, the title when the program sets none.
+    pub fn set_program_name(&mut self, name: Option<String>) {
+        self.program_name = name;
     }
 
     /// A selection drag is held past an edge; call [`Self::autoscroll_tick`]

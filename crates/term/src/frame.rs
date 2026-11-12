@@ -107,12 +107,13 @@ impl FrameBuilder {
 
     /// Update from the terminal and build a frame of what changed, then mark
     /// the render state clean. `None` when nothing changed and there is no
-    /// `selection_text` to deliver.
+    /// `selection_text` or `title` to deliver.
     pub fn build(
         &mut self,
         term: &Terminal<'static, '_>,
         force_full: bool,
         selection_text: Option<String>,
+        title: Option<String>,
     ) -> Result<Option<Frame>> {
         let mouse_tracking = mouse_tracking(term);
         let sb = term.scrollbar()?;
@@ -277,6 +278,7 @@ impl FrameBuilder {
         if !full
             && out_rows.is_empty()
             && selection_text.is_none()
+            && title.is_none()
             && self.last.as_ref() == Some(&meta)
         {
             snap.clean()?;
@@ -299,6 +301,7 @@ impl FrameBuilder {
             focus_reporting,
             scrollbar,
             selection_text,
+            title,
         }))
     }
 }

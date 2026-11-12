@@ -21,6 +21,11 @@ export class ReplayTransport implements Transport {
   fullRequests = 0;
   /** Test hook: skip sending the next frame, as if it were lost. */
   dropNext = false;
+  onExit?: (code: number | null) => void;
+  closed = false;
+  /** Sent with the next frame when it changes. */
+  title = "";
+  private sentTitle = "";
   private onFrame: ((f: Frame) => void) | null = null;
   private seq = 0;
   private acked = 0;
@@ -76,12 +81,26 @@ export class ReplayTransport implements Transport {
     const next = this.source.build(this.size.cols, this.size.rows, this.tick);
     const frame = buildFrame(++this.seq, next, full ? null : this.last);
     this.last = next;
+    if (full || this.title !== this.sentTitle) {
+      frame.title = this.title;
+      this.sentTitle = this.title;
+    }
     if (this.dropNext && !full) {
       this.dropNext = false;
       return;
     }
     this.framesSent++;
     this.onFrame(frame);
+  }
+
+  /** Test hook: the program exits. */
+  exit(code: number | null = 0): void {
+    this.onExit?.(code);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.dispose();
   }
 
   dispose(): void {

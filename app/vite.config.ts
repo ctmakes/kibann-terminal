@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         harness: resolve(import.meta.dirname, "src/dev/harness.html"),
+        workspace: resolve(import.meta.dirname, "src/dev/workspace.html"),
       },
     },
   },

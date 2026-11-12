@@ -282,3 +282,104 @@ fn real_pty_runs_a_command_and_reports_exit() {
     }
     assert!(seen.starts_with("hi from pty"), "row 0 was {seen:?}");
 }
+
+#[cfg(unix)]
+fn spawn_sh(script: &str) -> Session {
+    let s = Session::spawn(
+        term::Spawn {
+            argv: Some(vec!["/bin/sh".into(), "-c".into(), script.into()]),
+            ..Default::default()
+        },
+        SIZE,
+    )
+    .unwrap();
+    let (tx, rx) = mpsc::channel::<Event>();
+    s.attach(move |e| {
+        let _ = tx.send(e);
+    });
+    // Keep the channel open; frames pile up unacked, which is fine here.
+    std::mem::forget(rx);
+    s
+}
+
+/// Ask until `want` holds or a few seconds pass (the shell starts async).
+#[cfg(unix)]
+fn cwd_eventually(
+    s: &Session,
+    want: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let end = std::time::Instant::now() + WAIT;
+    loop {
+        let c = s.cwd();
+        if c.as_deref().is_some_and(&want) || std::time::Instant::now() > end {
+            return c;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cwd_follows_the_shell() {
+    let dir = std::env::temp_dir().join(format!("kibann-cwd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let s = spawn_sh(&format!("cd '{}' && sleep 5", dir.display()));
+    let got = cwd_eventually(&s, |p| p == dir);
+    assert_eq!(got.as_deref(), Some(dir.as_path()));
+    drop(s);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn cwd_prefers_what_the_shell_reports() {
+    let s = spawn_sh(r"printf '\033]7;file://host/some/where%%20else\007'; sleep 5");
+    let got = cwd_eventually(&s, |p| p.starts_with("/some"));
+    assert_eq!(
+        got.as_deref(),
+        Some(std::path::Path::new("/some/where else"))
+    );
+}
+
+/// Titles that reach the frontend, in order, until `last` arrives.
+#[cfg(unix)]
+fn titles_until(script: &str, last: &str) -> Vec<String> {
+    let s = Session::spawn(
+        term::Spawn {
+            argv: Some(vec!["/bin/sh".into(), "-c".into(), script.into()]),
+            ..Default::default()
+        },
+        SIZE,
+    )
+    .unwrap();
+    let (tx, rx) = mpsc::channel();
+    s.attach(move |e| {
+        let _ = tx.send(e);
+    });
+    let mut seen = Vec::new();
+    while let Ok(Event::Frame(f)) = rx.recv_timeout(WAIT) {
+        s.ack(f.seq);
+        if let Some(t) = f.title {
+            let done = t == last;
+            seen.push(t);
+            if done {
+                break;
+            }
+        }
+    }
+    seen
+}
+
+#[cfg(unix)]
+#[test]
+fn title_is_the_programs_or_the_process_name() {
+    // The shell's name until the program sets a title; the process name
+    // again once the title is cleared, following an exec.
+    let seen = titles_until(
+        r#"printf x; sleep 0.3; printf '\033]2;hello\007'; sleep 0.3; printf '\033]2;\007'; exec awk 'BEGIN { system("sleep 0.3"); printf "y"; fflush(); system("sleep 5") }'"#,
+        "awk",
+    );
+    assert!(seen.contains(&"hello".to_owned()), "{seen:?}");
+    assert_eq!(seen.last().map(String::as_str), Some("awk"), "{seen:?}");
+}

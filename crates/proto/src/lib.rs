@@ -76,6 +76,11 @@ pub struct Frame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub selection_text: Option<String>,
+    /// Present only when the pane's title changed: the program's title
+    /// (OSC 0/2) when it set one, else the foreground program's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
 }
 
 /// Scrollback position, in rows.

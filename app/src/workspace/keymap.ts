@@ -1,0 +1,98 @@
+// Workspace shortcuts (tabs and splits), Ghostty's defaults for each platform.
+// They are taken before the terminal sees the key.
+
+import type { KeyLike, Platform } from "../input/keyboard";
+import type { Dir, Direction } from "./layout";
+
+export type Action =
+  | { kind: "newTab" }
+  | { kind: "close" }
+  | { kind: "split"; dir: Dir }
+  | { kind: "focusCycle"; step: 1 | -1 }
+  | { kind: "focus"; toward: Direction }
+  | { kind: "resize"; toward: Direction }
+  | { kind: "equalize" }
+  | { kind: "zoom" }
+  | { kind: "tabCycle"; step: 1 | -1 }
+  /** 0-based; -1 is the last tab. */
+  | { kind: "goToTab"; index: number };
+
+/** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
+type Mods = string;
+
+interface Binding {
+  mods: Mods;
+  code: string;
+  action: Action;
+}
+
+const ARROWS: Array<[string, Direction]> = [
+  ["ArrowLeft", "left"],
+  ["ArrowRight", "right"],
+  ["ArrowUp", "up"],
+  ["ArrowDown", "down"],
+];
+
+const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => `Digit${d}`);
+
+function table(p: Platform): Binding[] {
+  const b: Binding[] = [];
+  const add = (mods: Mods, code: string, action: Action) => b.push({ mods, code, action });
+  if (p === "mac") {
+    add("m", "KeyT", { kind: "newTab" });
+    add("m", "KeyW", { kind: "close" });
+    add("m", "KeyD", { kind: "split", dir: "row" });
+    add("ms", "KeyD", { kind: "split", dir: "column" });
+    add("m", "BracketLeft", { kind: "focusCycle", step: -1 });
+    add("m", "BracketRight", { kind: "focusCycle", step: 1 });
+    for (const [code, toward] of ARROWS) {
+      add("am", code, { kind: "focus", toward });
+      add("cm", code, { kind: "resize", toward });
+    }
+    add("cm", "Equal", { kind: "equalize" });
+    add("ms", "Enter", { kind: "zoom" });
+    add("ms", "BracketLeft", { kind: "tabCycle", step: -1 });
+    add("ms", "BracketRight", { kind: "tabCycle", step: 1 });
+    DIGITS.forEach((code, i) => add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
+  } else {
+    add("cs", "KeyT", { kind: "newTab" });
+    add("cs", "KeyW", { kind: "close" });
+    add("cs", "KeyO", { kind: "split", dir: "row" });
+    add("cs", "KeyE", { kind: "split", dir: "column" });
+    add("cm", "BracketLeft", { kind: "focusCycle", step: -1 });
+    add("cm", "BracketRight", { kind: "focusCycle", step: 1 });
+    for (const [code, toward] of ARROWS) {
+      add("ca", code, { kind: "focus", toward });
+      add("cms", code, { kind: "resize", toward });
+    }
+    add("cms", "Equal", { kind: "equalize" });
+    add("cs", "Enter", { kind: "zoom" });
+    add("c", "PageUp", { kind: "tabCycle", step: -1 });
+    add("c", "PageDown", { kind: "tabCycle", step: 1 });
+    DIGITS.forEach((code, i) => add("a", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
+  }
+  add("c", "Tab", { kind: "tabCycle", step: 1 });
+  add("cs", "Tab", { kind: "tabCycle", step: -1 });
+  return b;
+}
+
+const tables = new Map<Platform, Binding[]>();
+
+function modsOf(e: KeyLike): Mods {
+  return (e.ctrlKey ? "c" : "") + (e.altKey ? "a" : "") + (e.metaKey ? "m" : "") + (e.shiftKey ? "s" : "");
+}
+
+/** Sorted letters, so "ms" and "sm" compare equal. */
+const norm = (m: Mods) => [...m].sort().join("");
+
+/** The workspace action for a keydown, if it is one of the shortcuts. */
+export function actionFor(e: KeyLike, platform: Platform): Action | null {
+  if (e.isComposing) return null;
+  let t = tables.get(platform);
+  if (!t) {
+    t = table(platform).map((b) => ({ ...b, mods: norm(b.mods) }));
+    tables.set(platform, t);
+  }
+  const m = norm(modsOf(e));
+  return t.find((b) => b.code === e.code && b.mods === m)?.action ?? null;
+}

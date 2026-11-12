@@ -48,6 +48,8 @@ export class Grid {
   scrollbar: Scrollbar = { total: 0, offset: 0, len: 0 };
   /** The selected text, for Copy; "" when nothing is selected. */
   selectionText = "";
+  /** The program's title, or the foreground program's name. */
+  title = "";
   lines: GridRow[] = [];
   lastSeq: number | null = null;
   awaitingFull = false;
@@ -85,6 +87,7 @@ export class Grid {
     this.focusReporting = frame.focus_reporting;
     if (frame.scrollbar) this.scrollbar = frame.scrollbar;
     if (frame.selection_text !== undefined) this.selectionText = frame.selection_text;
+    if (frame.title !== undefined) this.title = frame.title;
     this.lastSeq = frame.seq;
 
     const dirty = new Set<number>();

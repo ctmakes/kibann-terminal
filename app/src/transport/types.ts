@@ -9,4 +9,8 @@ export interface Transport {
   /** The frame with this seq has been painted. */
   ack(seq: number): void;
   requestFull(): void;
+  /** The program ended on its own. Set by the owner before `attach`. */
+  onExit?: (code: number | null) => void;
+  /** End the session (closing its pane). */
+  close?(): void;
 }

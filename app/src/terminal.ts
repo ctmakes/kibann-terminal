@@ -44,6 +44,10 @@ export interface TerminalOptions {
   onPaint?: (info: PaintInfo) => void;
   /** Right-click menu; see `MouseInput`. Without it, right-click does nothing. */
   onContextMenu?: (e: MouseEvent) => void;
+  /** The input gained or lost keyboard focus. */
+  onFocusChange?: (focused: boolean) => void;
+  /** The title changed (see `Grid.title`). */
+  onTitle?: (title: string) => void;
 }
 
 function sameCursor(a: Cursor, b: Cursor): boolean {
@@ -67,6 +71,8 @@ export class TerminalView {
   readonly textarea: HTMLTextAreaElement;
   /** Shows where the view is while scrolled back into history. */
   readonly scrollbarEl: HTMLDivElement;
+  /** Dims the pane when another pane is active. */
+  readonly dimEl: HTMLDivElement;
   readonly grid = new Grid();
   readonly painter: Painter;
   readonly cursor: CursorLayer;
@@ -162,8 +168,19 @@ export class TerminalView {
       display: "none",
     });
 
+    this.dimEl = document.createElement("div");
+    this.dimEl.className = "term-dim";
+    Object.assign(this.dimEl.style, {
+      position: "absolute",
+      inset: "0",
+      pointerEvents: "none",
+      display: "none",
+      // Ghostty's unfocused-split-opacity: 0.7 over the background.
+      opacity: "0.3",
+    });
+
     this.gridEl.append(this.gridCanvas, this.overlay, this.textarea);
-    this.root.append(this.gridEl, this.scrollbarEl);
+    this.root.append(this.gridEl, this.scrollbarEl, this.dimEl);
     container.append(this.root);
 
     this.painter = new Painter(this.gridCanvas, this.m);
@@ -228,6 +245,12 @@ export class TerminalView {
     this.focused = focused;
     this.cursor.setFocused(focused);
     this.transport.input({ kind: "focus", focused });
+    this.opts.onFocusChange?.(focused);
+  }
+
+  /** Whether this is the pane the user is working in; others are dimmed. */
+  setActive(active: boolean): void {
+    this.dimEl.style.display = active ? "none" : "block";
   }
 
   /** Re-measure after a DPR change; counts as a resize. */
@@ -273,6 +296,7 @@ export class TerminalView {
     const frames = this.pending;
     this.pending = [];
     const prevCursor = this.grid.cursor;
+    const prevTitle = this.grid.title;
     const dirty = new Set<number>();
     let full = false;
     let ackSeq: number | null = null;
@@ -306,7 +330,9 @@ export class TerminalView {
     const ms = performance.now() - t0;
 
     this.root.style.background = css(this.grid.defaultBg);
+    this.dimEl.style.background = css(this.grid.defaultBg);
     this.updateScrollbar();
+    if (this.grid.title !== prevTitle) this.opts.onTitle?.(this.grid.title);
     this.mouse.setTracking(this.grid.mouseTracking);
     this.positionTextarea();
     this.transport.ack(ackSeq);
