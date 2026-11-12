@@ -24,6 +24,7 @@ use proto::{Frame, InputEvent, MouseAction, Resize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use crate::agent::{Agent, State as AgentState};
 use crate::cast::{CastWriter, Header};
 use crate::emulator::{Emulator, TERMINFO_NAME};
 use crate::selection::AUTOSCROLL_INTERVAL;
@@ -48,7 +49,22 @@ pub enum Event {
     Frame(Frame),
     /// The shell exited, with its exit code when known.
     Exited(Option<u32>),
+    /// What runs in the foreground changed (see [`Foreground`]).
+    Foreground(Foreground),
 }
+
+/// What runs in the pane, as far as agent status cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Foreground {
+    /// A known agent and its state, read from its title and screen.
+    pub agent: Option<(Agent, AgentState)>,
+    /// The shell itself is in the foreground (nothing runs in it).
+    pub at_shell: bool,
+}
+
+/// How often at most to look at the screen for an agent's state while
+/// output arrives; one more look follows when it stops.
+const AGENT_CHECK: Duration = Duration::from_millis(250);
 
 pub type Sink = Box<dyn FnMut(Event) + Send>;
 
@@ -433,6 +449,32 @@ impl Pty {
         self.shell_pid.and_then(|p| i32::try_from(p).ok())
     }
 
+    /// The foreground program, and if it is a known agent, its state.
+    fn foreground(&self, emu: &Emulator) -> Foreground {
+        let fg = self.foreground_pid();
+        let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok());
+        let agent = fg.and_then(|pid| {
+            let name = crate::process::name(pid).unwrap_or_default();
+            let argv = crate::process::argv(pid).unwrap_or_default();
+            crate::agent::identify(&name, &argv)
+        });
+        let agent = agent.map(|a| {
+            let text = crate::read::text(
+                emu.terminal(),
+                emu.size(),
+                proto::wire::ReadSource::Visible,
+                None,
+            )
+            .unwrap_or_default();
+            let lines: Vec<&str> = text.lines().collect();
+            (a, crate::agent::detect(a, &emu.title(), &lines))
+        });
+        Foreground {
+            agent,
+            at_shell: fg.is_some() && fg == shell,
+        }
+    }
+
     fn cwd(&self) -> Option<PathBuf> {
         let fg = self.foreground_pid()?;
         crate::process::cwd(fg).or_else(|| {
@@ -470,15 +512,24 @@ fn run(
     let mut deadline: Option<Instant> = None;
     // Next autoscroll step while a selection drag is held past an edge.
     let mut autoscroll: Option<Instant> = None;
+    // Next look at the screen for an agent's state, and the last result.
+    let mut agent_due: Option<Instant> = None;
+    let mut foreground: Option<Foreground> = None;
 
     loop {
         let exit_wait = exit
             .filter(|_| !output_done && !exit_sent)
             .map(|(_, t)| t + EXIT_GRACE);
-        let wake = [deadline, emu.hold_deadline(), exit_wait, autoscroll]
-            .into_iter()
-            .flatten()
-            .min();
+        let wake = [
+            deadline,
+            emu.hold_deadline(),
+            exit_wait,
+            autoscroll,
+            agent_due,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         let first = match wake {
             Some(w) => match rx.recv_timeout(w.saturating_duration_since(Instant::now())) {
                 Ok(m) => Some(m),
@@ -499,6 +550,9 @@ fn run(
                     budget = budget.saturating_sub(data.len());
                     emu.write(&data);
                     p.dirty = true;
+                    if master.is_some() && agent_due.is_none() {
+                        agent_due = Some(Instant::now() + AGENT_CHECK);
+                    }
                     scanner.scan(&data, |mark, code| {
                         let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
                         if m.len() == MAX_MARKS {
@@ -611,6 +665,20 @@ fn run(
             autoscroll = None;
         }
         deadline = p.tick(&mut emu, now);
+
+        if let Some(due) = agent_due
+            && now >= due
+            && let Some(m) = &master
+        {
+            agent_due = None;
+            let now_fg = m.foreground(&emu);
+            if foreground != Some(now_fg) {
+                foreground = Some(now_fg);
+                if let Some(sink) = p.sink.as_mut() {
+                    sink(Event::Foreground(now_fg));
+                }
+            }
+        }
 
         if report_exit
             && let Some((code, at)) = exit

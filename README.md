@@ -63,6 +63,12 @@ kibann skill install    # the guide for Claude Code, to ~/.claude/skills/kibann
 
 Each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH` (a link to the app beside the socket). Output is JSON; errors are JSON on stderr with exit code 1, and a bad command line exits 2. `kibann help` lists everything; `skills/kibann/SKILL.md` is the guide agents read. Anything that can open the socket can type into every pane, so only your own user can.
 
+### Agent status at a glance
+
+Panes running Claude Code show what it is doing with a dot in their top-right corner: **green, pulsing** while it works, **amber** when it waits for you (a permission prompt or question), and **blue** when it finished while you were looking elsewhere (it clears when you focus the pane). An idle agent and a plain shell show nothing. Each tab shows its most urgent dot (amber, then blue, then green), and the Dock icon counts the agents waiting for you.
+
+Kibann reads this from Claude Code's title and the bottom of its screen, not from hooks, which miss an Esc mid-turn or a cancelled prompt (an approach learned from [herdr](https://github.com/herdrdev/herdr)). Agents can use it too: `kibann pane list` shows each pane's `agent` and `state`, `kibann pane wait P --until done,blocked` waits for one, and a script can report its own state with `kibann pane report --agent NAME --state working|idle|blocked` (and `pane release`).
+
 Selection and scrollback work like Ghostty's:
 
 - **Selecting text:** drag to select. Double-click selects a word, triple-click a line, and Alt-drag selects a rectangle.

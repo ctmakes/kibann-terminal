@@ -2,7 +2,7 @@
 //! exits. Frames are handed over as JSON text, not decoded, so a client that
 //! passes them on (the app, to its webview) does no per-frame work.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use proto::layout::{Action, Layout, PaneId, TabId};
+use proto::status::PaneStatus;
 use proto::wire::{
     ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, SessionId, read_msg,
     write_msg,
@@ -30,6 +31,9 @@ pub enum ClientEvent<'a> {
     Frame { session: SessionId, json: &'a str },
     /// The layout changed (after [`Client::watch`]).
     Layout(Layout),
+    /// Every pane with an agent, whenever one changes (after
+    /// [`Client::watch`]).
+    Status(BTreeMap<PaneId, PaneStatus>),
     /// The connection closed: the daemon exited or crashed.
     Disconnected,
 }
@@ -81,6 +85,7 @@ impl Client {
                                 json: frame.get(),
                             }),
                             ServerMsg::Layout { layout } => on_event(ClientEvent::Layout(layout)),
+                            ServerMsg::Status { panes } => on_event(ClientEvent::Status(panes)),
                         }
                     }
                     // Requests still waiting fail now rather than time out.

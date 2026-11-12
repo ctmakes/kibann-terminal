@@ -65,8 +65,11 @@ const ws = new Workspace(root, {
   view: { dpr: params.dpr ? Number(params.dpr) : undefined, onOpenLink: (t) => opened.push(t) },
   onTitle: (t) => titles.push(t),
   onEmpty: () => (quit = true),
+  onBlocked: (n) => (badge = n),
 });
 backend.onLayout = (l) => ws.apply(l);
+backend.onStatus = (m) => ws.setStatus(m);
+let badge = 0;
 // `saved`: a layout from `__ws.snapshot()`, as if the daemon kept it.
 if (params.saved) ws.apply(backend.layout);
 else void backend.act({ t: "new_tab", focus: true });
@@ -81,6 +84,21 @@ else void backend.act({ t: "new_tab", focus: true });
   },
   get quit() {
     return quit;
+  },
+  get badge() {
+    return badge;
+  },
+  /** A pane's agent changes state (as the daemon would detect it). */
+  setAgent(pane: number, state: string | null) {
+    backend.setAgent(pane, state as never);
+  },
+  /** Which dots show: per pane, and per tab in bar order. */
+  dots() {
+    const pick = (el: Element | null) => (el as HTMLElement | null)?.dataset.state ?? null;
+    return {
+      panes: Object.fromEntries([...ws.panes.values()].map((p) => [p.id, pick(p.dot)])),
+      tabs: ws.tabs.map((t) => pick(t.dot)),
+    };
   },
   /** Pane ids of the active tab in reading order, with the focused one. */
   state() {

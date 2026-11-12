@@ -6,6 +6,7 @@ import type { Layout, LayoutAction } from "./proto";
 import { TauriTransport, inTauri } from "./transport/tauri";
 import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
+import type { StatusMap } from "./workspace/status";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -39,6 +40,8 @@ async function start(): Promise<void> {
     onTitle: (title) => void win.setTitle(title),
     onEmpty: () => void invoke("app_quit"),
     onContextMenu: (pane) => void showContextMenu(ws, pane),
+    // The Dock icon shows how many agents wait for the user (macOS).
+    onBlocked: (count) => void invoke("set_badge", { count }),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
@@ -50,6 +53,8 @@ async function start(): Promise<void> {
   // Panes still running from before (the app was closed, or the page
   // reloaded) come back as they were.
   await listen<Layout>("layout", (e) => ws.apply(e.payload));
+  // Agent status comes the same way, right after the first layout.
+  await listen<StatusMap>("agent-status", (e) => ws.setStatus(e.payload));
   const layout = await invoke<Layout>("layout_watch");
 
   if (layout.tabs.length === 0) {

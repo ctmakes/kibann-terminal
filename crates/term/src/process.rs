@@ -60,6 +60,82 @@ pub fn name(_pid: i32) -> Option<String> {
     None
 }
 
+/// The arguments process `pid` was started with, `argv[0]` first. Tells
+/// apart programs whose process name says little (a native binary named
+/// after its version, or `node` running a script).
+#[cfg(target_os = "macos")]
+pub fn argv(pid: i32) -> Option<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size: libc::size_t = 0;
+    // SAFETY: a size query (null buffer) for a valid mib.
+    let r = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if r != 0 || size < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; size];
+    // SAFETY: `buf` holds `size` bytes.
+    let r = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if r != 0 {
+        return None;
+    }
+    parse_procargs2(&buf[..size])
+}
+
+/// `KERN_PROCARGS2`: argc (native-endian i32), the executable path, NUL
+/// padding, then argc NUL-terminated arguments (then the environment).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_procargs2(buf: &[u8]) -> Option<Vec<String>> {
+    let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?);
+    let rest = &buf[4..];
+    let exe_end = rest.iter().position(|&b| b == 0)?;
+    let mut i = exe_end;
+    while rest.get(i) == Some(&0) {
+        i += 1;
+    }
+    let args = rest[i..]
+        .split(|&b| b == 0)
+        .take(usize::try_from(argc).ok()?)
+        .map(|a| String::from_utf8_lossy(a).into_owned())
+        .collect();
+    Some(args)
+}
+
+#[cfg(target_os = "linux")]
+pub fn argv(pid: i32) -> Option<Vec<String>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let mut args: Vec<String> = raw
+        .split(|&b| b == 0)
+        .map(|a| String::from_utf8_lossy(a).into_owned())
+        .collect();
+    if args.last().is_some_and(String::is_empty) {
+        args.pop();
+    }
+    Some(args)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn argv(_pid: i32) -> Option<Vec<String>> {
+    None
+}
+
 /// A directory reported by the shell: OSC 7's `file://host/path` with
 /// percent escapes, or a bare absolute path (OSC 9;9, OSC 1337).
 pub fn parse_reported_dir(raw: &[u8]) -> Option<PathBuf> {
@@ -117,5 +193,20 @@ mod tests {
         let me = std::process::id() as i32;
         assert_eq!(cwd(me), std::env::current_dir().ok());
         assert!(name(me).is_some_and(|n| !n.is_empty()));
+        let args = argv(me).unwrap();
+        let first = std::env::args().next().unwrap();
+        assert_eq!(args[0], first);
+        assert_eq!(args.len(), std::env::args().count());
+    }
+
+    #[test]
+    fn procargs2_layout() {
+        let mut buf = 2i32.to_ne_bytes().to_vec();
+        buf.extend_from_slice(b"/usr/bin/x\0\0\0claude\0--resume\0HOME=/h\0");
+        assert_eq!(
+            parse_procargs2(&buf),
+            Some(vec!["claude".to_owned(), "--resume".to_owned()])
+        );
+        assert_eq!(parse_procargs2(&[1, 0]), None);
     }
 }

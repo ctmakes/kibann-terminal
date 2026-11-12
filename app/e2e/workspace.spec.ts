@@ -414,3 +414,72 @@ test.describe("restore", () => {
     expect(tab2.panes).toHaveLength(1);
   });
 });
+
+test.describe("agent status", () => {
+  type Dots = { panes: Record<number, string | null>; tabs: (string | null)[] };
+  const dots = (page: Page): Promise<Dots> => page.evaluate(() => (window as any).__ws.dots());
+  async function agent(page: Page, pane: number, s: string | null): Promise<void> {
+    await page.evaluate(([p, st]) => (window as any).__ws.setAgent(p, st), [pane, s] as const);
+    await settle(page);
+  }
+  const badge = (page: Page): Promise<number> => page.evaluate(() => (window as any).__ws.badge);
+
+  test("dots on panes, the tab roll-up, done clearing on focus, the badge", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+d"); // pane 2 beside 1, focused
+    await agent(page, 1, "working");
+    let d = await dots(page);
+    expect(d.panes).toEqual({ 1: "working", 2: null });
+    expect(await page.locator(".tab-bar").isVisible()).toBe(false); // one tab: no bar
+
+    // Pane 1 finishes while pane 2 has focus: done, until focused.
+    await agent(page, 1, "idle");
+    expect((await dots(page)).panes[1]).toBe("done");
+    await press(page, "Meta+[");
+    expect((await state(page)).focused).toBe(1);
+    expect((await dots(page)).panes[1]).toBe(null);
+
+    // Finishing while seen isn't done.
+    await agent(page, 1, "working");
+    await agent(page, 1, "idle");
+    expect((await dots(page)).panes[1]).toBe(null);
+
+    // Tabs roll up their panes: blocked beats done beats working.
+    await press(page, "Meta+t"); // tab 2 with pane 3, shown
+    await agent(page, 1, "working");
+    await agent(page, 2, "working");
+    d = await dots(page);
+    expect(d.tabs).toEqual(["working", null]);
+    await agent(page, 2, "idle"); // unseen: done
+    expect((await dots(page)).tabs[0]).toBe("done");
+    await agent(page, 1, "blocked");
+    expect((await dots(page)).tabs[0]).toBe("blocked");
+    expect(await badge(page)).toBe(1);
+    await agent(page, 3, "blocked");
+    expect(await badge(page)).toBe(2);
+    expect((await dots(page)).tabs).toEqual(["blocked", "blocked"]);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-agent-dots.png");
+
+    await agent(page, 1, "working");
+    await agent(page, 3, null);
+    expect(await badge(page)).toBe(0);
+    d = await dots(page);
+    expect(d.tabs).toEqual(["done", null]);
+
+    // Going back to the tab shows pane 1 (focused there); pane 2 stays
+    // done until it is focused.
+    await press(page, "Meta+1");
+    expect((await dots(page)).panes[2]).toBe("done");
+    await press(page, "Meta+]");
+    expect((await state(page)).focused).toBe(2);
+    d = await dots(page);
+    expect(d.panes).toEqual({ 1: "working", 2: null, 3: null });
+    expect(d.tabs[0]).toBe("working");
+  });
+
+  test("a pane's dot looks right", async ({ page }) => {
+    await open(page, { w: "400", h: "200" });
+    await agent(page, 1, "blocked");
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-pane-dot.png");
+  });
+});

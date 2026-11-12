@@ -14,6 +14,7 @@ import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
+import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
 import {
   cycle,
   dividers,
@@ -46,6 +47,8 @@ export interface Pane {
   id: PaneId;
   tab: Tab;
   el: HTMLDivElement;
+  /** The agent status dot in the pane's corner. */
+  dot: HTMLSpanElement;
   transport: Transport;
   view: TerminalView | null;
   title: string;
@@ -59,6 +62,7 @@ export interface Tab {
   zoomed: PaneId | null;
   el: HTMLDivElement;
   button: HTMLDivElement;
+  dot: HTMLSpanElement;
 }
 
 export interface WorkspaceOptions {
@@ -75,6 +79,8 @@ export interface WorkspaceOptions {
   onEmpty?(): void;
   /** Right-click in a pane with no program taking the mouse. */
   onContextMenu?(pane: Pane, e: MouseEvent): void;
+  /** How many panes' agents wait for the user changed (the Dock badge). */
+  onBlocked?(count: number): void;
 }
 
 export class Workspace {
@@ -87,6 +93,9 @@ export class Workspace {
   private readonly platform: Platform;
   private lastRun: { action: string; from: "key" | "menu"; at: number } | null = null;
   private readonly cleanups: Array<() => void> = [];
+  /** Agent status by pane, from the daemon. */
+  status: StatusMap = {};
+  private blocked = 0;
 
   constructor(
     container: HTMLElement,
@@ -118,6 +127,12 @@ export class Workspace {
     Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden" });
     this.root.append(this.bar, this.stage);
     container.append(this.root);
+
+    installStyle();
+    // Pulsing dots don't animate in a hidden window.
+    const onVisible = () => this.root.classList.toggle("kibann-hidden", document.hidden);
+    document.addEventListener("visibilitychange", onVisible);
+    this.cleanups.push(() => document.removeEventListener("visibilitychange", onVisible));
 
     const ro = new ResizeObserver(() => this.active && this.layout(this.active));
     ro.observe(this.stage);
@@ -275,13 +290,30 @@ export class Workspace {
     if (hadTabs && next.length === 0) this.opts.onEmpty?.();
   }
 
+  /** Show the daemon's agent status: pane dots, tab dots, the badge. */
+  setStatus(map: StatusMap): void {
+    this.status = map;
+    for (const p of this.panes.values()) this.showPaneDot(p);
+    this.updateBar();
+    const blocked = blockedCount(map);
+    if (blocked !== this.blocked) {
+      this.blocked = blocked;
+      this.opts.onBlocked?.(blocked);
+    }
+  }
+
+  private showPaneDot(p: Pane): void {
+    showDot(p.dot, dotFor(this.status, p.id), this.status[String(p.id)]?.agent);
+  }
+
   private makeTab(id: number, tree: Tree, focused: PaneId): Tab {
     const el = document.createElement("div");
     el.className = "tab-stage";
     Object.assign(el.style, { position: "absolute", inset: "0", display: "none" });
     this.stage.append(el);
     const button = document.createElement("div");
-    const tab: Tab = { id, tree, focused, zoomed: null, el, button };
+    const dot = makeDot({ marginRight: "6px" });
+    const tab: Tab = { id, tree, focused, zoomed: null, el, button, dot };
     this.makeTabButton(tab);
     return tab;
   }
@@ -321,7 +353,7 @@ export class Workspace {
     x.className = "tab-close";
     x.textContent = "×";
     Object.assign(x.style, { position: "absolute", left: "8px", fontSize: "14px", opacity: "0.6" });
-    b.append(x, label);
+    b.append(x, tab.dot, label);
     b.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       if (e.button === 1 || e.target === x) {
@@ -340,6 +372,7 @@ export class Workspace {
       const title = this.panes.get(t.focused)?.title || "shell";
       t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
       t.button.title = title;
+      showDot(t.dot, rollUp(this.status, panes(t.tree)));
     }
   }
 
@@ -355,9 +388,13 @@ export class Workspace {
     el.className = "pane";
     el.dataset.pane = String(id);
     Object.assign(el.style, { position: "absolute", overflow: "hidden" });
+    // Above the canvas, clear of the scrollbar.
+    const dot = makeDot({ position: "absolute", top: "6px", right: "14px", zIndex: "3" });
+    el.append(dot);
     tab.el.append(el);
-    const pane: Pane = { id, tab, el, transport, view: null, title: "", closed: false };
+    const pane: Pane = { id, tab, el, dot, transport, view: null, title: "", closed: false };
     this.panes.set(id, pane);
+    this.showPaneDot(pane);
     void TerminalView.create(el, transport, {
       ...this.opts.view,
       platform: this.platform,

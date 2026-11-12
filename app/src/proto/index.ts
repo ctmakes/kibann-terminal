@@ -19,6 +19,8 @@ export type { LinkSpan } from "./generated/LinkSpan";
 export type { Layout } from "./generated/Layout";
 export type { LayoutTab } from "./generated/LayoutTab";
 export type { LayoutAction } from "./generated/LayoutAction";
+export type { AgentState } from "./generated/AgentState";
+export type { PaneStatus } from "./generated/PaneStatus";
 
 export const Flag = {
   BOLD: 1 << 0,

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use proto::layout::{Action, Dir, Layout, PaneId, TabId};
+use proto::status::{AgentState, PaneStatus};
 use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
@@ -23,7 +24,8 @@ pub const SKILL: &str = include_str!("../../../skills/kibann/SKILL.md");
 const USAGE: &str = "\
 usage: kibann <command>
 
-  pane list                         every pane: id, tab, title, directory, focused
+  pane list                         every pane: id, tab, title, directory, focused,
+                                    agent and its state
   pane current                      the pane this shell runs in
   pane split [P] [--direction right|down] [--cwd DIR] [--focus]
                                     a new shell next to P (default: this pane)
@@ -35,8 +37,13 @@ usage: kibann <command>
   pane keys P KEY...                press keys: enter, esc, tab, up, ctrl+c, ...
   pane read P [--source visible|recent] [--lines N]
                                     print the pane's text
-  pane wait P (--match TEXT | --regex RE | --exit) [--timeout MS]
-                                    wait for text to appear, or the shell to exit
+  pane wait P (--match TEXT | --regex RE | --exit | --until STATE[,STATE])
+            [--timeout MS]          wait for text to appear, the shell to exit,
+                                    or P's agent to be idle|working|blocked|done
+  pane report P --agent NAME --state idle|working|blocked [--seq N]
+                                    say what the agent in P is doing (beats
+                                    what its screen shows)
+  pane release P                    forget P's report
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
   skill show | skill install        the guide for agents (to ~/.claude/skills/kibann)
@@ -122,6 +129,10 @@ const VALUED: &[&str] = &[
     "--lines",
     "--match",
     "--regex",
+    "--until",
+    "--agent",
+    "--state",
+    "--seq",
 ];
 
 impl Args {
@@ -333,9 +344,54 @@ fn dispatch(args: &[String]) -> Out {
             Ok(None)
         }
         (Some("pane"), Some("wait")) => {
-            a.only(&["--match", "--regex", "--exit", "--timeout"])?;
+            a.only(&["--match", "--regex", "--exit", "--until", "--timeout"])?;
             let pane = take_pane(&mut a, false)?;
             wait(&connect()?, pane, &a)
+        }
+        (Some("pane"), Some("report")) => {
+            a.only(&["--agent", "--state", "--seq"])?;
+            let pane = take_pane(&mut a, true)?;
+            let agent = a
+                .get("--agent")
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| usage("--agent NAME is required"))?
+                .to_owned();
+            let state = match a.get("--state").map(|s| (s, AgentState::parse(s))) {
+                Some((_, Some(s))) if s != AgentState::Done => s,
+                Some((s, _)) => {
+                    return Err(usage(format!(
+                        "--state is idle, working or blocked, not {s}"
+                    )));
+                }
+                None => return Err(usage("--state is required")),
+            };
+            let seq = a
+                .get("--seq")
+                .map(|n| n.parse().map_err(|_| usage("--seq takes a number")))
+                .transpose()?;
+            match connect()?.request(|req| ClientMsg::Report {
+                req,
+                pane,
+                agent,
+                state,
+                seq,
+            })? {
+                Reply::Ok => Ok(Some(json!({"ok": true}))),
+                Reply::Error { message } if message == "stale seq" => {
+                    Err(error("stale", "a report with a higher --seq came first"))
+                }
+                Reply::Error { message } => Err(error("not_found", message)),
+                other => Err(unexpected(other).into()),
+            }
+        }
+        (Some("pane"), Some("release")) => {
+            a.only(&[])?;
+            let pane = take_pane(&mut a, true)?;
+            match connect()?.request(|req| ClientMsg::Release { req, pane })? {
+                Reply::Ok => Ok(Some(json!({"ok": true}))),
+                Reply::Error { message } => Err(error("not_found", message)),
+                other => Err(unexpected(other).into()),
+            }
         }
         (Some("pane"), Some("focus")) => {
             let pane = take_pane(&mut a, false)?;
@@ -413,6 +469,8 @@ fn pane_list(c: &Client, only: Option<PaneId>) -> Out {
             "title": p.title,
             "cwd": p.cwd,
             "focused": focused,
+            "agent": p.agent,
+            "state": p.state.map(AgentState::name),
         })
     };
     match only {
@@ -470,18 +528,31 @@ fn type_text(c: &Client, pane: PaneId, text: &str, enter: bool) -> Result<(), Fa
     Ok(())
 }
 
-/// Status of `pane`: (ended, exit code, mark code).
-fn status(
-    c: &Client,
-    pane: PaneId,
-    mark: Option<&str>,
-) -> Result<(bool, Option<u32>, Option<i32>), Fail> {
+struct Status {
+    ended: bool,
+    code: Option<u32>,
+    /// The code printed with the mark asked for.
+    mark: Option<i32>,
+    agent: Option<PaneStatus>,
+}
+
+fn status(c: &Client, pane: PaneId, mark: Option<&str>) -> Result<Status, Fail> {
     match c.request(|req| ClientMsg::Status {
         req,
         pane,
         mark: mark.map(String::from),
     })? {
-        Reply::Status { ended, code, mark } => Ok((ended, code, mark)),
+        Reply::Status {
+            ended,
+            code,
+            mark,
+            agent,
+        } => Ok(Status {
+            ended,
+            code,
+            mark,
+            agent,
+        }),
         Reply::Error { message } => Err(error("not_found", message)),
         other => Err(unexpected(other).into()),
     }
@@ -509,7 +580,12 @@ fn run_and_wait(c: &Client, pane: PaneId, text: &str, timeout: Duration) -> Out 
     type_text(c, pane, &line, true)?;
     let deadline = Instant::now() + timeout;
     loop {
-        let (ended, code, got) = status(c, pane, Some(&mark))?;
+        let Status {
+            ended,
+            code,
+            mark: got,
+            ..
+        } = status(c, pane, Some(&mark))?;
         if let Some(code) = got {
             return Ok(Some(json!({"exit_code": code})));
         }
@@ -535,9 +611,39 @@ fn wait(c: &Client, pane: PaneId, a: &Args) -> Out {
         .transpose()
         .map_err(|e| usage(format!("bad --regex: {e}")))?;
     let text = a.get("--match");
+    if let Some(until) = a.get("--until") {
+        let want = until
+            .split(',')
+            .map(|s| {
+                AgentState::parse(s.trim()).ok_or_else(|| {
+                    usage(format!(
+                        "--until takes idle, working, blocked or done, not {s}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        loop {
+            let s = status(c, pane, None)?;
+            if s.ended {
+                return Err(error(
+                    "ended",
+                    format!("pane {} ended (code {:?})", pane_id(pane), s.code),
+                ));
+            }
+            if let Some(agent) = s.agent.filter(|a| want.contains(&a.state)) {
+                return Ok(Some(
+                    json!({"agent": agent.agent, "state": agent.state.name()}),
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(timed_out(&format!("not {until}"), timeout));
+            }
+            std::thread::sleep(POLL);
+        }
+    }
     if a.has("--exit") {
         loop {
-            let (ended, code, _) = status(c, pane, None)?;
+            let Status { ended, code, .. } = status(c, pane, None)?;
             if ended {
                 return Ok(Some(json!({"exit_code": code})));
             }
@@ -548,7 +654,9 @@ fn wait(c: &Client, pane: PaneId, a: &Args) -> Out {
         }
     }
     if text.is_none() && regex.is_none() {
-        return Err(usage("wait for what? --match TEXT, --regex RE or --exit"));
+        return Err(usage(
+            "wait for what? --match TEXT, --regex RE, --exit or --until STATE",
+        ));
     }
     loop {
         let screen = match read(c, pane, ReadSource::Recent, None) {

@@ -22,14 +22,16 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 
 use proto::layout::{Action, Dir, PaneId, TabId};
+use proto::status::{AgentState, PaneStatus};
 use proto::wire::{
     ClientMsg, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, read_msg, write_msg,
 };
 use proto::{Frame, Resize};
-use term::{Event, Session, Spawn};
+use term::{Event, Foreground, Session, Spawn};
 
 use crate::layout::Model;
 use crate::outbox::Outbox;
+use crate::status::Statuses;
 
 type ConnId = u64;
 
@@ -78,22 +80,55 @@ struct State {
     /// Panes whose shell ended, with the exit code, newest last.
     ended: VecDeque<(PaneId, Option<u32>)>,
     env: PaneEnv,
+    /// Agent status per pane.
+    status: Statuses,
     shutdown: bool,
 }
 
 impl State {
     /// Send the layout to every watcher but `skip`. Done under the lock, so
     /// changes reach each connection in order.
-    fn broadcast(&self, skip: Option<ConnId>) {
+    fn broadcast(&mut self, skip: Option<ConnId>) {
         let msg = encode(&ServerMsg::Layout {
             layout: self.model.layout().clone(),
         });
+        self.send_watchers(&msg, skip);
+        self.status_changed();
+    }
+
+    fn send_watchers(&self, msg: &[u8], skip: Option<ConnId>) {
         for c in &self.watchers {
             if Some(*c) != skip
                 && let Some(out) = self.conns.get(c)
             {
-                out.push(msg.clone());
+                out.push(msg.to_vec());
             }
+        }
+    }
+
+    /// The pane the user is looking at: the focused pane of the shown tab,
+    /// while an app watches.
+    fn seen_pane(&self) -> Option<PaneId> {
+        if self.watchers.is_empty() {
+            return None;
+        }
+        let layout = self.model.layout();
+        let tab = layout.tabs.iter().find(|t| Some(t.id) == layout.active)?;
+        Some(tab.zoomed.unwrap_or(tab.focused))
+    }
+
+    fn is_seen(&self, pane: PaneId) -> bool {
+        self.seen_pane() == Some(pane)
+    }
+
+    /// After anything that may change agent status (or what is seen): clear
+    /// done on the seen pane, and send the map if it changed.
+    fn status_changed(&mut self) {
+        if let Some(p) = self.seen_pane() {
+            self.status.seen(p);
+        }
+        if let Some(panes) = self.status.changed() {
+            self.send_watchers(&encode(&ServerMsg::Status { panes }), None);
         }
     }
 
@@ -131,6 +166,11 @@ fn sink(
         Event::Frame(frame) => {
             if let Some(o) = &out {
                 o.push_frame(encode(&ServerMsg::Frame { session: id, frame }));
+            }
+        }
+        Event::Foreground(fg) => {
+            if let Some(d) = daemon.upgrade() {
+                d.foreground(id, fg);
             }
         }
         Event::Exited(code) => {
@@ -270,6 +310,10 @@ impl Daemon {
                 out.push(encode(&ServerMsg::Layout {
                     layout: layout.clone(),
                 }));
+                st.status_changed();
+                out.push(encode(&ServerMsg::Status {
+                    panes: st.status.map(),
+                }));
                 Self::reply(out, req, Reply::Layout { layout });
             }
             ClientMsg::GetLayout { req } => {
@@ -304,16 +348,57 @@ impl Daemon {
                         ended: false,
                         code: None,
                         mark: mark.and_then(|m| s.mark(&m)),
+                        agent: self.lock().status.get(pane),
                     },
                     None => match self.lock().ended.iter().rev().find(|(p, _)| *p == pane) {
                         Some(&(_, code)) => Reply::Status {
                             ended: true,
                             code,
                             mark: None,
+                            agent: None,
                         },
                         None => err(format!("no pane p{pane}")),
                     },
                 };
+                Self::reply(out, req, reply);
+            }
+            ClientMsg::Report {
+                req,
+                pane,
+                agent,
+                state,
+                seq,
+            } => {
+                let mut st = self.lock();
+                let reply = if !st.sessions.contains_key(&pane) {
+                    err(format!("no pane p{pane}"))
+                } else if state == AgentState::Done {
+                    err("report idle; done is worked out from it")
+                } else if agent.is_empty() {
+                    err("no agent name")
+                } else {
+                    let seen = st.is_seen(pane);
+                    if st.status.report(pane, agent, state, seq, seen) {
+                        st.status_changed();
+                        Reply::Ok
+                    } else {
+                        err("stale seq")
+                    }
+                };
+                drop(st);
+                Self::reply(out, req, reply);
+            }
+            ClientMsg::Release { req, pane } => {
+                let mut st = self.lock();
+                let reply = if st.sessions.contains_key(&pane) {
+                    let seen = st.is_seen(pane);
+                    st.status.release(pane, seen);
+                    st.status_changed();
+                    Reply::Ok
+                } else {
+                    err(format!("no pane p{pane}"))
+                };
+                drop(st);
                 Self::reply(out, req, reply);
             }
             ClientMsg::Attach { session } => {
@@ -422,6 +507,7 @@ impl Daemon {
                         return Err(no_pane(pane));
                     }
                     st.note_ended(pane, None);
+                    st.status.remove(pane);
                     st.broadcast(None);
                     st.sessions.remove(&pane)
                 };
@@ -532,31 +618,59 @@ impl Daemon {
                 return; // closed already
             };
             st.note_ended(id, code);
+            st.status.remove(id);
             if st.model.remove(id) {
                 st.broadcast(None);
+            } else {
+                st.status_changed();
             }
             entry
         };
         drop(entry);
     }
 
+    /// A session saw its foreground program change (see [`Foreground`]).
+    fn foreground(&self, id: SessionId, fg: Foreground) {
+        let mut st = self.lock();
+        if !st.sessions.contains_key(&id) {
+            return;
+        }
+        let agent = fg.agent.map(|(a, s)| {
+            let state = match s {
+                term::agent::State::Idle => AgentState::Idle,
+                term::agent::State::Working => AgentState::Working,
+                term::agent::State::Blocked => AgentState::Blocked,
+            };
+            (a.name().to_owned(), state)
+        });
+        let seen = st.is_seen(id);
+        st.status.detected(id, agent, fg.at_shell, seen);
+        st.status_changed();
+    }
+
     fn panes(&self) -> Reply {
-        let list: Vec<(PaneId, TabId, Option<Arc<Session>>)> = {
+        type Row = (PaneId, TabId, Option<Arc<Session>>, Option<PaneStatus>);
+        let list: Vec<Row> = {
             let st = self.lock();
             st.model
                 .layout()
                 .tabs
                 .iter()
                 .flat_map(|t| t.tree.panes().into_iter().map(move |p| (p, t.id)))
-                .map(|(p, t)| (p, t, st.sessions.get(&p).map(|e| e.session.clone())))
+                .map(|(p, t)| {
+                    let s = st.sessions.get(&p).map(|e| e.session.clone());
+                    (p, t, s, st.status.get(p))
+                })
                 .collect()
         };
         // Each asks the session thread: outside the lock.
         let panes = list
             .into_iter()
-            .map(|(id, tab, s)| PaneInfo {
+            .map(|(id, tab, s, status)| PaneInfo {
                 id,
                 tab,
+                agent: status.as_ref().map(|a| a.agent.clone()),
+                state: status.map(|a| a.state),
                 title: s.as_ref().map(|s| s.title()).unwrap_or_default(),
                 cwd: s
                     .and_then(|s| s.cwd())

@@ -1,0 +1,11 @@
+title: ✳ Claude Code
+ ▐▛███▛█   Claude Code v2.1.323
+▝▜██████▀  Opus 5.5 with medium effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/kbdemo2
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix lint errors"
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CLAUDE_C…
+  ⏸ manual mode on · ? for shortcuts

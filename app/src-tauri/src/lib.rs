@@ -44,9 +44,16 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
         ClientEvent::Layout(layout) => {
             let _ = app.emit("layout", layout);
         }
+        ClientEvent::Status(panes) => {
+            let _ = app.emit("agent-status", panes);
+        }
         // The daemon went away, and its shells with it: no panes are left.
         ClientEvent::Disconnected => {
             let _ = app.emit("layout", Layout::default());
+            let _ = app.emit(
+                "agent-status",
+                std::collections::BTreeMap::<u32, proto::status::PaneStatus>::new(),
+            );
         }
     }
 }
@@ -302,6 +309,15 @@ fn app_quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// The Dock badge: how many agents wait for the user (none: no badge).
+#[tauri::command]
+fn set_badge(window: tauri::WebviewWindow, count: u32) {
+    let r = window.set_badge_count((count > 0).then_some(i64::from(count)));
+    if cfg!(debug_assertions) {
+        eprintln!("kibann: badge {count}: {r:?}");
+    }
+}
+
 /// End every shell and the daemon, then quit.
 fn quit_ending_sessions(app: &AppHandle) {
     if let Some(t) = app.try_state::<Term>() {
@@ -435,6 +451,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_badge,
             term_attach,
             term_release,
             term_input,

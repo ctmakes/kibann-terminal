@@ -1,0 +1,17 @@
+title: ✳ Greeting in one word
+ ▐▛███▛█   Claude Code v2.1.323
+▝▜██████▀  Opus 5.5 with medium effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/kbdemo2
+
+
+❯ say hi in one word
+
+⏺ Hi!
+
+✻ Sautéed for 1s · done 6:18 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CLAUDE_C…
+  ⏸ manual mode on · ? for shortcuts

@@ -26,6 +26,8 @@ another pane. For ordinary commands, keep using your own shell tool.
 - **Close only what you opened**, and only when it's no longer useful to
   the user (they may want to read it). Never close the user's panes or your
   own.
+- **Never answer another agent's prompt** (a permission question, a menu)
+  in a pane you didn't start. Tell the user it is waiting for them.
 - **Never end the daemon or quit the app.**
 
 ## Commands
@@ -43,7 +45,10 @@ kibann pane read P --lines 40     # the screen as text (--source recent: scrollb
 kibann pane wait P --match "ready on" --timeout 30000   # text already there counts
 kibann pane wait P --regex "error|done"
 kibann pane wait P --exit         # the pane's shell exits
-kibann pane list                  # every pane: id, tab, title, cwd, focused
+kibann pane wait P --until done,blocked --timeout 900000
+                                  # P's agent finished or waits for the user
+kibann pane list                  # every pane: id, tab, title, cwd, focused,
+                                  # agent ("claude" or null) and state
 kibann pane current               # your own pane
 kibann pane focus P
 kibann pane close P
@@ -75,6 +80,32 @@ Run another agent where the user can watch it:
 ```sh
 p=$(kibann pane split --direction right | jq -r .pane.id)
 kibann pane run "$p" "claude -p 'review the diff in this repo' > review.md" --wait --timeout 900000
+```
+
+Start another Claude Code where the user can watch it, and wait for it:
+
+```sh
+p=$(kibann pane split --direction right | jq -r .pane.id)
+kibann pane run "$p" "claude 'fix the failing test in src/parse.rs'"
+kibann pane wait "$p" --until working --timeout 60000
+kibann pane wait "$p" --until done,idle,blocked --timeout 1800000
+kibann pane read "$p" --lines 60
+```
+
+Agent states: `working`, `blocked` (waiting for the user to answer a
+prompt), `idle`, and `done` (finished while the user wasn't looking at the
+pane; it turns `idle` once they focus it). Kibann reads them from Claude
+Code's screen and title. Wait for `working` first: right after `run`, the
+agent hasn't started yet and the pane has no agent. If `blocked` comes back,
+read the pane and tell the user what it asks; don't answer it.
+
+A script or other agent can say what it is doing itself, which beats what
+the screen shows until it releases it or exits to the shell:
+
+```sh
+kibann pane report --agent mybot --state working --seq 1
+kibann pane report --agent mybot --state idle --seq 2
+kibann pane release
 ```
 
 `wait --match` and `--regex` look at every line on the screen and in the

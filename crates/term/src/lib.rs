@@ -4,6 +4,7 @@
 
 pub use libghostty_vt as vt;
 
+pub mod agent;
 pub mod cast;
 pub mod emulator;
 pub mod frame;
@@ -16,7 +17,7 @@ pub mod selection;
 pub mod session;
 
 pub use emulator::Emulator;
-pub use session::{Event, Session, Spawn};
+pub use session::{Event, Foreground, Session, Spawn};
 
 /// Version string of the linked libghostty-vt.
 pub fn ghostty_version() -> String {

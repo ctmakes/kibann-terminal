@@ -13,6 +13,7 @@ pub mod outbox;
 pub mod paths;
 pub mod pipe;
 pub mod server;
+pub mod status;
 
 /// Identifies a daemon's executable: its size and modification time. The
 /// app compares it with the executable it would start, so a rebuilt or

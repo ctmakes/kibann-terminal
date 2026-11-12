@@ -13,9 +13,9 @@ use daemon::server::{Daemon, PaneEnv, SocketConfig, serve_socket};
 use proto::layout::Action;
 use serde_json::Value;
 
-fn start() -> (PathBuf, Arc<Daemon>, JoinHandle<std::io::Result<()>>) {
+fn start(tag: &str) -> (PathBuf, Arc<Daemon>, JoinHandle<std::io::Result<()>>) {
     let socket = std::env::temp_dir()
-        .join(format!("kc{}", std::process::id()))
+        .join(format!("kc{}{tag}", std::process::id()))
         .join("s.sock");
     let d = Daemon::new("test-build");
     d.set_pane_env(PaneEnv {
@@ -64,7 +64,7 @@ fn fails(out: &Output, code: i32) -> Value {
 
 #[test]
 fn an_agent_splits_runs_reads_and_waits() {
-    let (socket, d, h) = start();
+    let (socket, d, h) = start("a");
     let c = Client::connect(&socket, |_| {}).unwrap();
     let (first, _) = c
         .act(Action::NewTab {
@@ -174,4 +174,98 @@ fn no_daemon_is_an_error() {
         &["pane", "list"],
     );
     assert_eq!(fails(&out, 1)["error"]["code"], "not_running");
+}
+
+#[test]
+fn agents_can_be_waited_on_and_report_themselves() {
+    let (socket, d, h) = start("b");
+    // A fake Claude Code (see the daemon test of the same idea).
+    let dir = socket.parent().unwrap().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", dir.join("claude")).unwrap();
+    std::fs::write(
+        dir.join("agent.sh"),
+        "printf '\\033]0;\\342\\240\\213 Working\\007'; read x\n\
+         printf '\\033]0;\\342\\234\\263 Claude Code\\007'; read y\n",
+    )
+    .unwrap();
+    let c = Client::connect(&socket, |_| {}).unwrap();
+    let (p, _) = c
+        .act(Action::NewTab {
+            near: None,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: true,
+        })
+        .unwrap();
+    let p = format!("p{}", p.unwrap());
+    let p = p.as_str();
+    let run = format!("{0}/claude {0}/agent.sh", dir.display());
+    ok(kibann(&socket, None, &["pane", "run", p, &run]));
+
+    let r = ok(kibann(
+        &socket,
+        None,
+        &["pane", "wait", p, "--until", "working"],
+    ));
+    assert_eq!(r["agent"], "claude");
+    assert_eq!(r["state"], "working");
+    let list = ok(kibann(&socket, None, &["pane", "list"]));
+    assert_eq!(list["panes"][0]["agent"], "claude");
+    assert_eq!(list["panes"][0]["state"], "working");
+
+    // No app is watching, so nobody saw it finish.
+    ok(kibann(&socket, None, &["pane", "keys", p, "enter"]));
+    let r = ok(kibann(
+        &socket,
+        None,
+        &["pane", "wait", p, "--until", "done,blocked"],
+    ));
+    assert_eq!(r["state"], "done");
+
+    // Reports.
+    let report = |state: &str, seq: &str| {
+        kibann(
+            &socket,
+            None,
+            &[
+                "pane", "report", p, "--agent", "bot", "--state", state, "--seq", seq,
+            ],
+        )
+    };
+    ok(report("blocked", "5"));
+    let r = ok(kibann(
+        &socket,
+        None,
+        &["pane", "wait", p, "--until", "blocked"],
+    ));
+    assert_eq!(r["agent"], "bot");
+    assert_eq!(fails(&report("working", "4"), 1)["error"]["code"], "stale");
+    fails(&report("done", "6"), 2);
+    ok(kibann(&socket, None, &["pane", "release", p]));
+    let r = ok(kibann(
+        &socket,
+        None,
+        &["pane", "wait", p, "--until", "idle", "--timeout", "2000"],
+    ));
+    assert_eq!(r["agent"], "claude");
+
+    // Usage errors.
+    fails(
+        &kibann(&socket, None, &["pane", "wait", p, "--until", "busy"]),
+        2,
+    );
+    // The agent exits; its status goes once the shell is back.
+    ok(kibann(&socket, None, &["pane", "keys", p, "enter"]));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let list = ok(kibann(&socket, None, &["pane", "list"]));
+        if list["panes"][0]["agent"].is_null() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "status never cleared: {list}");
+        thread::sleep(Duration::from_millis(50));
+    }
+    d.shutdown();
+    h.join().unwrap().unwrap();
 }

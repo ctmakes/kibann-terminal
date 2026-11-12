@@ -237,7 +237,12 @@ fn run() -> Result<(), String> {
             for step in steps {
                 match step {
                     Step::Sleep(d) => thread::sleep(d),
-                    Step::Send(b) => send(&writer, &b).map_err(|e| e.to_string())?,
+                    Step::Send(b) => {
+                        // Logged as input, so tests can find the moments
+                        // between steps.
+                        let _ = cast.lock().unwrap().input(&b);
+                        send(&writer, &b).map_err(|e| e.to_string())?
+                    }
                     Step::Resize(c, r) => {
                         pair.master
                             .resize(PtySize {

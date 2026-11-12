@@ -278,6 +278,7 @@ fn real_pty_runs_a_command_and_reports_exit() {
                 assert_eq!(code, Some(3));
                 break;
             }
+            Event::Foreground(_) => {}
         }
     }
     assert!(seen.starts_with("hi from pty"), "row 0 was {seen:?}");
@@ -358,7 +359,12 @@ fn titles_until(script: &str, last: &str) -> Vec<String> {
         let _ = tx.send(e);
     });
     let mut seen = Vec::new();
-    while let Ok(Event::Frame(f)) = rx.recv_timeout(WAIT) {
+    loop {
+        let f = match rx.recv_timeout(WAIT) {
+            Ok(Event::Frame(f)) => f,
+            Ok(Event::Foreground(_)) => continue,
+            _ => break,
+        };
         s.ack(f.seq);
         if let Some(t) = f.title {
             let done = t == last;

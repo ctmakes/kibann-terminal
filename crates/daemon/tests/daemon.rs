@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use daemon::client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::layout::{Action, Dir, Layout};
+use proto::status::{AgentState, PaneStatus};
 use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
 use proto::{Frame, InputEvent, Resize};
 
@@ -52,6 +53,7 @@ fn start(socket: &Path, idle: Duration) -> (Arc<Daemon>, JoinHandle<std::io::Res
 enum Ev {
     Frame(SessionId, Box<Frame>),
     Layout(Layout),
+    Status(BTreeMap<SessionId, PaneStatus>),
     Disconnected,
 }
 
@@ -64,6 +66,7 @@ fn events() -> (impl FnMut(ClientEvent<'_>) + Send + 'static, Receiver<Ev>) {
                 Box::new(serde_json::from_str(json).expect("frame json")),
             ),
             ClientEvent::Layout(l) => Ev::Layout(l),
+            ClientEvent::Status(s) => Ev::Status(s),
             ClientEvent::Disconnected => Ev::Disconnected,
         });
     };
@@ -283,7 +286,8 @@ fn a_shell_that_exits_takes_its_pane_with_it() {
         Reply::Status {
             ended: true,
             code: Some(3),
-            mark: None
+            mark: None,
+            agent: None,
         }
     );
     d.shutdown();
@@ -364,6 +368,7 @@ fn panes_can_be_read_and_marks_seen() {
                 ended: false,
                 code: None,
                 mark: Some(5),
+                agent: None,
             }
     });
     let text = read(&c, s, ReadSource::Visible);
@@ -373,7 +378,8 @@ fn panes_can_be_read_and_marks_seen() {
         Reply::Status {
             ended: false,
             code: None,
-            mark: None
+            mark: None,
+            agent: None,
         }
     );
     assert!(matches!(status(&c, 99, None), Reply::Error { .. }));
@@ -575,6 +581,111 @@ fn the_socket_adds_little_latency() {
         socket < in_process + Duration::from_millis(2),
         "socket {socket:?} vs in process {in_process:?}"
     );
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+/// The agent state the daemon reports for `pane`.
+fn agent_state(c: &Client, pane: SessionId) -> Option<AgentState> {
+    match status(c, pane, None) {
+        Reply::Status { agent, .. } => agent.map(|a| a.state),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Wait for a status event giving `pane` this state.
+fn next_status(rx: &Receiver<Ev>, pane: SessionId, state: Option<AgentState>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(Ev::Status(m)) if m.get(&pane).map(|s| s.state) == state => return,
+            Ok(_) => {}
+            Err(_) => panic!("no status event with p{pane} {state:?}"),
+        }
+    }
+}
+
+#[test]
+fn agents_are_detected_and_done_while_unseen() {
+    let path = socket();
+    // A fake Claude Code: a shell named `claude` that sets the title the
+    // way Claude does (spinner while working, ✳ when idle).
+    let dir = path.parent().unwrap().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", dir.join("claude")).unwrap();
+    std::fs::write(
+        dir.join("agent.sh"),
+        "printf '\\033]0;\\342\\240\\213 Working\\007'; echo busy; read x\n\
+         printf '\\033]0;\\342\\234\\263 Claude Code\\007'; echo finished; read y\n",
+    )
+    .unwrap();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let app = Client::connect(&path, f).unwrap();
+    let first = sh(&app, None);
+    app.watch().unwrap();
+
+    let script = format!(
+        "set -m; {0}/claude {0}/agent.sh; exec /bin/sh",
+        dir.display()
+    );
+    let (p, _) = app
+        .act(Action::Split {
+            pane: first,
+            dir: Dir::Row,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into(), "-c".into(), script]),
+            focus: false,
+        })
+        .unwrap();
+    let p = p.unwrap();
+    next_status(&rx, p, Some(AgentState::Working));
+    assert_eq!(agent_state(&app, first), None, "a plain shell has none");
+    let panes = match app.request(|req| ClientMsg::Panes { req }).unwrap() {
+        Reply::Panes { panes } => panes,
+        other => panic!("{other:?}"),
+    };
+    let info = panes.iter().find(|i| i.id == p).unwrap();
+    assert_eq!(info.agent.as_deref(), Some("claude"));
+    assert_eq!(info.state, Some(AgentState::Working));
+
+    // It finishes while the user looks at the other pane: done, until they
+    // focus it.
+    type_text(&app, p, "\r");
+    next_status(&rx, p, Some(AgentState::Done));
+    app.act(Action::Focus { pane: p }).unwrap();
+    next_status(&rx, p, Some(AgentState::Idle));
+
+    // A report beats the screen; an older one is dropped; release undoes it.
+    let report = |state, seq| {
+        app.request(|req| ClientMsg::Report {
+            req,
+            pane: p,
+            agent: "bot".into(),
+            state,
+            seq: Some(seq),
+        })
+        .unwrap()
+    };
+    assert_eq!(report(AgentState::Blocked, 2), Reply::Ok);
+    next_status(&rx, p, Some(AgentState::Blocked));
+    assert!(matches!(
+        report(AgentState::Working, 1),
+        Reply::Error { .. }
+    ));
+    assert_eq!(agent_state(&app, p), Some(AgentState::Blocked));
+    assert!(matches!(report(AgentState::Done, 3), Reply::Error { .. }));
+    assert_eq!(
+        app.request(|req| ClientMsg::Release { req, pane: p })
+            .unwrap(),
+        Reply::Ok
+    );
+    next_status(&rx, p, Some(AgentState::Idle));
+
+    // The agent exits to the shell: no status.
+    type_text(&app, p, "\r");
+    next_status(&rx, p, None);
     d.shutdown();
     h.join().unwrap().unwrap();
 }

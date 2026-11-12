@@ -3,9 +3,10 @@
 // TypeScript. Either way the workspace changes only when a layout comes back
 // (`Workspace.apply`), except for focus, which it moves at once.
 
-import type { Layout, LayoutAction } from "../proto";
+import type { AgentState, Layout, LayoutAction } from "../proto";
 import type { PaneId } from "./layout";
 import { Model, type TabId } from "./model";
+import type { StatusMap } from "./status";
 
 /** The pane and tab an action made or acted on. */
 export interface Acted {
@@ -33,6 +34,9 @@ export class FakeBackend implements LayoutBackend {
   /** Which pane each new pane was opened from (for its directory). */
   readonly origin = new Map<PaneId, PaneId | null>();
   onLayout: (layout: Layout) => void = () => {};
+  onStatus: (map: StatusMap) => void = () => {};
+  /** Agent status, as the daemon would keep it. */
+  private status: StatusMap = {};
 
   constructor(layout?: Layout) {
     this.model = new Model(layout);
@@ -52,6 +56,41 @@ export class FakeBackend implements LayoutBackend {
   /** An action from someone else (an agent with the CLI): always delivered. */
   external(a: LayoutAction): Promise<Acted> {
     return this.apply(a, true);
+  }
+
+  /** A pane's agent is in `state` (null: no agent). Like the daemon,
+   * working → idle on a pane that isn't the focused pane of the shown tab
+   * becomes done. */
+  setAgent(pane: PaneId, state: AgentState | null, agent = "claude"): void {
+    const key = String(pane);
+    const before = this.status[key]?.state;
+    if (state === null) delete this.status[key];
+    else {
+      const done = state === "idle" && (before === "working" || before === "done") && !this.seen(pane);
+      this.status[key] = { agent, state: done ? "done" : state };
+    }
+    this.deliverStatus();
+  }
+
+  private seen(pane: PaneId): boolean {
+    const l = this.model.layout;
+    const tab = l.tabs.find((t) => t.id === l.active);
+    return !!tab && (tab.zoomed ?? tab.focused) === pane;
+  }
+
+  /** After a layout change: the seen pane's done becomes idle. */
+  private clearSeen(): void {
+    for (const [key, s] of Object.entries(this.status)) {
+      if (s.state === "done" && this.seen(Number(key))) {
+        this.status[key] = { ...s, state: "idle" };
+        this.deliverStatus();
+      }
+    }
+  }
+
+  private deliverStatus(): void {
+    const map = structuredClone(this.status);
+    queueMicrotask(() => this.onStatus(map));
   }
 
   /** A pane's program exited. */
@@ -97,6 +136,11 @@ export class FakeBackend implements LayoutBackend {
     }
     if (!acted) return Promise.reject(new Error(`can't ${a.t}: no such pane or tab`));
     if (deliver) this.deliver();
+    if (a.t === "close") {
+      delete this.status[String(a.pane)];
+      this.deliverStatus();
+    }
+    this.clearSeen();
     return Promise.resolve(acted);
   }
 
