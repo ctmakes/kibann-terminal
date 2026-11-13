@@ -308,8 +308,25 @@ mod term {
 
     enum Ev {
         Input(Vec<u8>),
-        Changed,
+        /// The pane's place changed (it's sent once right after watching).
+        Changed(Option<PaneDir>),
         Closed,
+    }
+
+    /// What the viewer shows, for its heading: `repo · branch`, or the
+    /// directory outside a repo.
+    fn place(d: &PaneDir) -> String {
+        match &d.git {
+            Some(g) => {
+                let at = g.branch.as_deref().or(g.detached.as_deref());
+                let name = g.worktree.as_deref().unwrap_or(&g.repo);
+                match at {
+                    Some(b) => format!("{name} · {b}"),
+                    None => name.to_owned(),
+                }
+            }
+            None => d.shown.clone(),
+        }
     }
 
     /// The terminal in raw mode on the alternate screen, until dropped.
@@ -375,8 +392,8 @@ mod term {
             ClientEvent::Git(mut panes) => {
                 let mine = panes.remove(&pane);
                 if last.as_ref() != Some(&mine) {
-                    last = Some(mine);
-                    let _ = events.send(Ev::Changed);
+                    last = Some(mine.clone());
+                    let _ = events.send(Ev::Changed(mine));
                 }
             }
             ClientEvent::Layout(l) if l.tab_of(pane).is_none() => {
@@ -402,9 +419,11 @@ mod term {
 
         let screen = Screen::enter()?;
         let mut view = View {
-            title: format!("p{pane} changes"),
+            title: "Changes".into(),
             ..View::default()
         };
+        // The pane's title (tab, sidebar card).
+        print!("\x1b]2;Changes\x07");
         let mut size = Screen::size();
         let mut fetch = true;
         let mut out = io::stdout();
@@ -430,7 +449,12 @@ mod term {
                         view.key(k, size.0);
                     }
                 }
-                Ok(Ev::Changed) => fetch = true,
+                Ok(Ev::Changed(dir)) => {
+                    if let Some(d) = &dir {
+                        view.title = format!("Changes in {}", super::clean(&place(d)));
+                    }
+                    fetch = true;
+                }
                 Ok(Ev::Closed) => view.note = Some("The pane closed.".into()),
                 Err(mpsc::RecvTimeoutError::Timeout) => fetch = true,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -470,7 +494,7 @@ mod tests {
 
     fn view() -> View {
         let mut v = View {
-            title: "p1 changes".into(),
+            title: "Changes in repo · main".into(),
             ..View::default()
         };
         let long: String = (0..50).map(|i| format!("+line {i}\n")).collect();
@@ -509,7 +533,7 @@ mod tests {
         let screen = plain(&v.render(12, 40));
         let rows: Vec<&str> = screen.split("\r\n").collect();
         assert_eq!(rows.len(), 12, "{screen}");
-        assert!(rows[0].contains("p1 changes · 2 files"));
+        assert!(rows[0].contains("Changes in repo · main · 2 files"));
         assert!(rows[1].starts_with("› M a.txt") && rows[1].ends_with("+1 -1 "));
         assert!(rows[2].starts_with("  M b.txt"));
         assert!(rows[3].starts_with('─'));

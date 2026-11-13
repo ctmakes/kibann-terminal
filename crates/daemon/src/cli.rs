@@ -547,11 +547,23 @@ fn diff(c: &Client, pane: PaneId) -> Result<proto::git::Diff, Fail> {
 
 #[cfg(unix)]
 fn view(pane: PaneId) -> Out {
-    // Check the pane first, so a bad id fails before the screen changes.
-    check_pane(&connect()?, pane)?;
-    let socket = crate::paths::socket_path(cfg!(debug_assertions));
-    crate::view::run(pane, |on_event| Client::connect(&socket, on_event))?;
-    Ok(None)
+    let result = (|| {
+        // Check the pane first, so a bad id fails before the screen changes.
+        check_pane(&connect()?, pane)?;
+        let socket = crate::paths::socket_path(cfg!(debug_assertions));
+        crate::view::run(pane, |on_event| Client::connect(&socket, on_event))?;
+        Ok(None)
+    })();
+    // The viewer usually runs alone in a split that closes when it exits:
+    // say what went wrong and wait, or the split just flashes.
+    if let Err(Fail::Error { message, .. }) = &result
+        && std::io::IsTerminal::is_terminal(&std::io::stdin())
+    {
+        eprintln!("kibann: can't show the changes: {message}\r\n\r\nPress Enter to close.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+    result
 }
 
 #[cfg(not(unix))]
