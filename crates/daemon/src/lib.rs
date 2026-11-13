@@ -12,6 +12,7 @@ pub mod layout;
 pub mod outbox;
 pub mod paths;
 pub mod pipe;
+pub mod saved;
 pub mod server;
 pub mod status;
 pub mod view;
@@ -61,6 +62,15 @@ pub fn main(args: Vec<std::ffi::OsString>) -> i32 {
     }
 }
 
+/// The file to keep the layout in, if any: not for a daemon on a socket of
+/// its own (tests, a private daemon) unless `KIBANN_STATE_DIR` says where.
+pub fn layout_file(own_socket: bool) -> Option<std::path::PathBuf> {
+    if own_socket && std::env::var_os("KIBANN_STATE_DIR").is_none() {
+        return None;
+    }
+    paths::layout_file(cfg!(debug_assertions))
+}
+
 /// The daemon's `main`, shared by `kibannd` and the app's `--daemon` mode
 /// (used by dev builds). `args` are the arguments after the program name.
 /// Returns the exit code.
@@ -86,6 +96,7 @@ pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
             }
         }
     }
+    let own_socket = socket.is_some() || std::env::var_os("KIBANN_SOCKET").is_some();
     let socket = socket.unwrap_or_else(|| paths::socket_path(cfg!(debug_assertions)));
     // Read at start: the file may be rebuilt while we run.
     let build = std::env::current_exe()
@@ -93,6 +104,9 @@ pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
         .unwrap_or_else(|_| "unknown".into());
     let d = server::Daemon::new(build);
     d.set_pane_env(pane_env(&socket));
+    if let Some(f) = layout_file(own_socket) {
+        d.save_layout_to(f, saved::SAVE_DELAY);
+    }
     let cfg = server::SocketConfig {
         socket,
         idle_exit: Duration::from_secs(idle),

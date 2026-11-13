@@ -193,6 +193,17 @@ fn color(s: &str) -> Option<u32> {
 }
 
 /// Relative luminance, 0 (black) to 1 (white).
+/// `a` moved toward `b` by `t` (0..1), per channel (as `mix` in the app's
+/// `workspace/theme.ts`).
+pub fn mix(a: u32, b: u32, t: f64) -> u32 {
+    let ch = |s: u32| {
+        let x = f64::from((a >> s) & 0xff);
+        let y = f64::from((b >> s) & 0xff);
+        ((x * (1.0 - t) + y * t).round() as u32) << s
+    };
+    ch(16) | ch(8) | ch(0)
+}
+
 fn luminance(c: u32) -> f64 {
     let ch = |v: u32| {
         let v = f64::from(v & 0xff) / 255.0;

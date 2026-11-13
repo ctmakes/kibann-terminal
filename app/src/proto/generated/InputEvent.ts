@@ -34,4 +34,4 @@ x: number, y: number, mods: number, } | { "kind": "wheel",
 /**
  * Whole rows scrolled; positive is right / down.
  */
-dx_rows: number, dy_rows: number, x: number, y: number, mods: number, } | { "kind": "focus", focused: boolean, } | { "kind": "hover", x: number, y: number, on: boolean, } | { "kind": "scroll", by: ScrollBy, n: number, };
+dx_rows: number, dy_rows: number, x: number, y: number, mods: number, } | { "kind": "focus", focused: boolean, } | { "kind": "hover", x: number, y: number, on: boolean, } | { "kind": "scroll", by: ScrollBy, n: number, } | { "kind": "find", needle: string, } | { "kind": "find_step", older: boolean, } | { "kind": "find_end" };

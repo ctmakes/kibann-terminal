@@ -14,11 +14,12 @@ import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
-import { actionFor, type Action } from "./keymap";
+import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
+import { FindBar } from "./find";
 import { applyChrome, KIBANN_DARK, type ThemeApi } from "./theme";
 import type { Theme } from "../proto";
 import { Sidebar } from "./sidebar";
@@ -74,6 +75,8 @@ export interface Pane {
   view: TerminalView | null;
   title: string;
   closed: boolean;
+  /** Made the first time it's opened. */
+  find: FindBar | null;
 }
 
 export interface Tab {
@@ -113,6 +116,9 @@ export interface WorkspaceOptions {
   onNotify?(n: { pane: PaneId; title: string; body: string }): void;
   /** Whether the user is looking at the window (it has focus). */
   windowFocused?(): boolean;
+  /** The shortcuts changed (the config's `keybind`): each action's first
+   * key as a menu accelerator, by action (JSON); null for none. */
+  onKeys?(keys: Record<string, string | null>): void;
 }
 
 const HINT_KEY = "kibann.hint.shortcuts";
@@ -147,6 +153,8 @@ export class Workspace {
   fontSize: number;
   /** Bumped when the font changes, so views made meanwhile catch up. */
   private fontGen = 0;
+  /** The config's `keybind` lines in use, as JSON. */
+  private keybinds = "[]";
 
   constructor(
     container: HTMLElement,
@@ -155,7 +163,7 @@ export class Workspace {
     this.platform = opts.platform ?? detectPlatform();
     this.baseFont = this.fontSize = opts.view?.fontSize ?? DEFAULT_FONT_SIZE;
     applyChrome(KIBANN_DARK);
-    const sheetKey = this.platform === "mac" ? keyText("m", "/", "mac") : keyText("cs", "/", "other");
+    const sheetKey = () => keyFor({ kind: "shortcuts" }, this.platform);
     this.root = document.createElement("div");
     this.root.className = "workspace";
     Object.assign(this.root.style, {
@@ -180,7 +188,7 @@ export class Workspace {
       onShortcuts: () => this.shortcuts.toggle(),
       onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
       shortcutKey: sheetKey,
-      sidebarKey: this.platform === "mac" ? keyText("ms", "B", "mac") : keyText("cs", "B", "other"),
+      sidebarKey: () => keyFor({ kind: "sidebar" }, this.platform),
     });
     this.bar = document.createElement("div");
     this.bar.className = "tab-bar";
@@ -236,7 +244,7 @@ export class Workspace {
       : null;
     this.root.append(this.sidebar.el, main, this.shortcuts.el);
     if (this.picker) this.root.append(this.picker.el);
-    if (opts.firstRunHint) this.firstRunHint(sheetKey);
+    if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
 
     installStyle();
@@ -292,6 +300,16 @@ export class Workspace {
     if (action.kind === "fontSize") {
       const next = action.step === 0 ? this.baseFont : this.fontSize + action.step;
       this.useFont(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, next)), false);
+      return;
+    }
+    if (action.kind === "find" && on) {
+      this.findBar(on).open();
+      return;
+    }
+    if (action.kind === "findStep" && on) {
+      const bar = on.find;
+      if (bar?.visible) on.transport.input({ kind: "find_step", older: action.older });
+      else this.findBar(on).open();
       return;
     }
     if (action.kind === "sidebar") {
@@ -508,6 +526,13 @@ export class Workspace {
   /** The config file's settings: fonts and notifications. */
   setSettings(s: Settings): void {
     this.notifyOn = s.agent_notifications;
+    const keys = JSON.stringify(s.keybind);
+    if (keys !== this.keybinds) {
+      this.keybinds = keys;
+      for (const e of setKeybinds(this.platform, s.keybind)) this.notice(`Config: ${e}`, 8000);
+      this.shortcuts.rebuild();
+      this.opts.onKeys?.(menuKeys(this.platform));
+    }
     const families = setFontFamilies(s.font_family);
     const base = s.font_size ?? this.opts.view?.fontSize ?? DEFAULT_FONT_SIZE;
     // A new size in the file replaces any zoom.
@@ -667,7 +692,7 @@ export class Workspace {
     Object.assign(body.style, { position: "absolute", left: "0", right: "0", top: `${HEADER_H}px`, bottom: "0" });
     el.append(header.el, body);
     tab.el.append(el);
-    const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false };
+    const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false, find: null };
     this.panes.set(id, pane);
     this.showPaneDot(pane);
     const gen = this.fontGen;
@@ -686,6 +711,7 @@ export class Workspace {
         this.updateBar();
         if (pane === this.focusedPane) this.emitTitle();
       },
+      onFind: (find) => pane.find?.show(find),
       onContextMenu: this.opts.onContextMenu ? (e) => this.opts.onContextMenu!(pane, e) : undefined,
     }).then((view) => {
       if (pane.closed) {
@@ -699,6 +725,23 @@ export class Workspace {
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
     });
     return pane;
+  }
+
+  /** The pane's find bar, made on first use. */
+  private findBar(pane: Pane): FindBar {
+    if (pane.find) return pane.find;
+    const bar = new FindBar({
+      onNeedle: (needle) => pane.transport.input({ kind: "find", needle }),
+      onStep: (older) => pane.transport.input({ kind: "find_step", older }),
+      onClose: () => {
+        pane.transport.input({ kind: "find_end" });
+        if (pane === this.focusedPane) pane.view?.focus();
+      },
+    });
+    bar.show(pane.view?.grid.find ?? null);
+    pane.el.querySelector(".pane-body")?.append(bar.el);
+    pane.find = bar;
+    return bar;
   }
 
   private setPaneActive(id: PaneId, active: boolean): void {

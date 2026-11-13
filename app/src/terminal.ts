@@ -3,7 +3,7 @@ import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/jetbrains-mono/400-italic.css";
 import "@fontsource/jetbrains-mono/700-italic.css";
 
-import type { Cursor, Frame, InputEvent } from "./proto";
+import type { Cursor, Find, Frame, InputEvent } from "./proto";
 import { CursorLayer } from "./cursor";
 import { Grid } from "./grid";
 import { attachCopy, attachPaste, copyNow } from "./input/clipboard";
@@ -11,6 +11,7 @@ import { ImeInput } from "./input/ime";
 import { KeyboardInput, detectPlatform, type Platform } from "./input/keyboard";
 import { MouseInput } from "./input/mouse";
 import { LinkLayer } from "./links";
+import { FindLayer } from "./findlayer";
 import {
   DEFAULT_FONT_SIZE,
   computeMetrics,
@@ -49,6 +50,8 @@ export interface TerminalOptions {
   onFocusChange?: (focused: boolean) => void;
   /** The title changed (see `Grid.title`). */
   onTitle?: (title: string) => void;
+  /** The search's results changed, or it ended (`null`). */
+  onFind?: (find: Find | null) => void;
   /** Cmd+click (Ctrl+click) on a link: open `target`, a URL or an absolute path. */
   onOpenLink?: (target: string) => void;
 }
@@ -80,6 +83,7 @@ export class TerminalView {
   readonly painter: Painter;
   readonly cursor: CursorLayer;
   readonly links: LinkLayer;
+  readonly finds: FindLayer;
   m: Metrics;
 
   private pending: Frame[] = [];
@@ -189,6 +193,7 @@ export class TerminalView {
 
     this.painter = new Painter(this.gridCanvas, this.m);
     this.cursor = new CursorLayer(this.overlay, this.m);
+    this.finds = new FindLayer(this.gridEl);
     this.links = new LinkLayer(this.gridEl, this.root);
 
     const send = (e: InputEvent) => this.transport.input(e);
@@ -279,6 +284,7 @@ export class TerminalView {
     this.painter.setMetrics(this.m);
     this.cursor.setMetrics(this.m);
     this.links.update(this.grid, this.m, true);
+    this.finds.update(this.grid, this.m, true);
     this.painter.cols = -1; // force the layout pass to resize the canvases
     this.layout(this.container.clientWidth, this.container.clientHeight);
   }
@@ -318,6 +324,7 @@ export class TerminalView {
     this.pending = [];
     const prevCursor = this.grid.cursor;
     const prevTitle = this.grid.title;
+    const prevFind = this.grid.find;
     const dirty = new Set<number>();
     let full = false;
     let ackSeq: number | null = null;
@@ -356,6 +363,8 @@ export class TerminalView {
     if (this.grid.title !== prevTitle) this.opts.onTitle?.(this.grid.title);
     this.mouse.setTracking(this.grid.mouseTracking);
     this.links.update(this.grid, this.m);
+    this.finds.update(this.grid, this.m);
+    if (this.grid.find !== prevFind) this.opts.onFind?.(this.grid.find);
     this.mouse.setLinkShown(this.links.link !== null);
     this.positionTextarea();
     this.transport.ack(ackSeq);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PaneDir } from "../proto";
-import { groupPanes, type CardPane } from "./sidebar";
+import { badgeSource, badgeTexts, groupPanes, type CardPane } from "./sidebar";
 
 const pane = (id: number, tab: number): CardPane => ({
   id,
@@ -58,5 +58,26 @@ describe("sidebar groups", () => {
     expect(g.map((x) => x.label)).toEqual(["alpha", "~", "beta", "…"]);
     const g2 = groupPanes(panes, git, { "3": { agent: "claude", state: "blocked" } });
     expect(g2.map((x) => x.label)).toEqual(["beta", "alpha", "~", "…"]);
+  });
+});
+
+describe("rail badges", () => {
+  const at = (shown: string): PaneDir => ({ dir: shown.replace("~", "/home/me"), shown, git: null });
+
+  it("use the program, else the directory for a shell", () => {
+    expect(badgeSource("vim", at("~/src/app"))).toBe("vim");
+    expect(badgeSource("shell", at("~/src/app"))).toBe("app");
+    expect(badgeSource("-zsh", at("~/src/app"))).toBe("app");
+    expect(badgeSource("", at("~"))).toBe("~");
+    expect(badgeSource("", at("/"))).toBe("/");
+    expect(badgeSource("", undefined)).toBe("·");
+  });
+
+  it("are one letter, two where a neighbor would read the same", () => {
+    expect(badgeTexts(["vim", "htop", "app"])).toEqual(["V", "H", "A"]);
+    expect(badgeTexts(["kibann", "kubectl", "zsh"])).toEqual(["Ki", "Ku", "Z"]);
+    // The same source twice reads the same: it's the same thing.
+    expect(badgeTexts(["app", "app"])).toEqual(["A", "A"]);
+    expect(badgeTexts(["~", "✳ Claude Code"])).toEqual(["~", "C"]);
   });
 });

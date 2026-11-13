@@ -114,6 +114,8 @@ struct State {
     /// the same colors as the built-in dark theme).
     theme: Option<proto::theme::Theme>,
     shutdown: bool,
+    /// Keeps the layout on disk, once [`Daemon::save_layout_to`] set a file.
+    saver: Option<crate::saved::Saver>,
 }
 
 impl State {
@@ -125,6 +127,30 @@ impl State {
         });
         self.send_watchers(&msg, skip);
         self.status_changed();
+        self.offer_save();
+    }
+
+    /// Keep the layout and each pane's directory on disk (soon). Not while
+    /// ending everything on purpose: the panes closing then are to come back.
+    fn offer_save(&mut self) {
+        if self.shutdown || self.saver.is_none() {
+            return;
+        }
+        let mut layout = self.model.layout().clone();
+        for t in &mut layout.tabs {
+            t.zoomed = None;
+        }
+        let dirs = layout
+            .tabs
+            .iter()
+            .flat_map(|t| t.tree.panes())
+            .filter_map(|p| Some((p, self.places.get(&p)?.dir.to_str()?.to_owned())))
+            .filter(|(_, d)| !d.is_empty())
+            .collect();
+        let saved = crate::saved::Saved { layout, dirs };
+        if let Some(s) = &mut self.saver {
+            s.offer(&saved);
+        }
     }
 
     fn send_watchers(&self, msg: &[u8], skip: Option<ConnId>) {
@@ -183,6 +209,8 @@ impl State {
         if now != self.git_sent {
             self.send_watchers(&encode(&ServerMsg::Git { panes: now.clone() }), None);
             self.git_sent = now;
+            // A pane's directory changed.
+            self.offer_save();
         }
     }
 
@@ -555,6 +583,7 @@ impl Daemon {
             ClientMsg::Ack { session, seq } => with(session, &|s| s.ack(seq)),
             ClientMsg::RequestFull { session } => with(session, &|s| s.request_full()),
             ClientMsg::Shutdown => self.shutdown(),
+            ClientMsg::Restore { req } => Self::reply(out, req, self.restore()),
         }
     }
 
@@ -889,6 +918,95 @@ impl Daemon {
                     .attach(sink(*id, None, e.exited.clone(), me.clone()));
             }
         }
+    }
+
+    /// Keep the layout in `path` from now on, for [`Self::restore`],
+    /// written once it stayed the same for `delay`
+    /// ([`crate::saved::SAVE_DELAY`]).
+    pub fn save_layout_to(&self, path: PathBuf, delay: std::time::Duration) {
+        let mut st = self.lock();
+        st.saver = Some(crate::saved::Saver::start(path, delay));
+    }
+
+    /// With no panes open, reopen the saved layout: a fresh shell per pane
+    /// in its directory (home when it's gone), the same splits, sizes and
+    /// focus. Nothing when panes are open or nothing was saved.
+    fn restore(&self) -> Reply {
+        use crate::saved::{load, map_tree};
+        let saved = {
+            let st = self.lock();
+            if !st.model.layout().tabs.is_empty() {
+                return Reply::Restored { tabs: 0, panes: 0 };
+            }
+            st.saver.as_ref().and_then(|s| load(s.path()))
+        };
+        let Some(saved) = saved else {
+            return Reply::Restored { tabs: 0, panes: 0 };
+        };
+        // Panes that couldn't start get ids no session has, then go.
+        let mut failed = Vec::new();
+        let mut start = |old: PaneId| {
+            let dir = saved
+                .dirs
+                .get(&old)
+                .map(PathBuf::from)
+                .filter(|d| d.is_dir());
+            match self.spawn(DEFAULT_SIZE, dir, None) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("kibannd: restoring a pane: {e}");
+                    let id = PaneId::MAX - failed.len() as PaneId;
+                    failed.push(id);
+                    id
+                }
+            }
+        };
+        let mut layout = proto::layout::Layout::default();
+        for (i, t) in saved.layout.tabs.iter().enumerate() {
+            let mut map = std::collections::HashMap::new();
+            let tree = map_tree(&t.tree, &mut |old| {
+                let new = start(old);
+                map.insert(old, new);
+                new
+            });
+            let id = i as proto::layout::TabId + 1;
+            let first = tree.panes()[0];
+            layout.tabs.push(proto::layout::Tab {
+                id,
+                focused: map.get(&t.focused).copied().unwrap_or(first),
+                tree,
+                zoomed: None,
+            });
+            if saved.layout.active == Some(t.id) {
+                layout.active = Some(id);
+            }
+        }
+        if layout.active.is_none() {
+            layout.active = layout.tabs.first().map(|t| t.id);
+        }
+        let mut st = self.lock();
+        if !st.model.layout().tabs.is_empty() {
+            // Panes opened meanwhile win; the shells just started go.
+            let ids: Vec<_> = layout.tabs.iter().flat_map(|t| t.tree.panes()).collect();
+            let gone: Vec<_> = ids.iter().filter_map(|id| st.sessions.remove(id)).collect();
+            drop(st);
+            drop(gone);
+            return Reply::Restored { tabs: 0, panes: 0 };
+        }
+        st.model = Model::from_layout(layout);
+        for id in failed {
+            st.model.remove(id);
+        }
+        let tabs = st.model.layout().tabs.len() as u32;
+        let panes = st
+            .model
+            .layout()
+            .tabs
+            .iter()
+            .map(|t| t.tree.panes().len() as u32)
+            .sum();
+        st.broadcast(None);
+        Reply::Restored { tabs, panes }
     }
 
     /// End every session; [`serve_socket`] then exits.

@@ -1,4 +1,4 @@
-import type { Frame, InputEvent, Link, Resize } from "../proto";
+import type { Find, Frame, InputEvent, Link, Resize } from "../proto";
 import { linkCovers } from "../links";
 import { buildFrame, Screen } from "../dev/screen";
 import type { Transport } from "./types";
@@ -31,6 +31,9 @@ export class ReplayTransport implements Transport {
    * backend would. */
   links: Link[] = [];
   private sentLink: Link | null = null;
+  /** The search, as the backend would run it, over the screen only. */
+  private needle: string | null = null;
+  private findIndex: number | null = null;
   private onFrame: ((f: Frame) => void) | null = null;
   private seq = 0;
   private acked = 0;
@@ -60,6 +63,7 @@ export class ReplayTransport implements Transport {
   input(e: InputEvent): void {
     this.inputs.push(e);
     this.onInput?.(e);
+    this.onFind(e);
     if (e.kind === "hover") {
       const x = Math.floor(e.x / this.size.cell_w);
       const y = Math.floor(e.y / this.size.cell_h);
@@ -69,6 +73,48 @@ export class ReplayTransport implements Transport {
         this.send(false, link ?? { uri: "", target: "", spans: [] });
       }
     }
+  }
+
+  private findState(): Find {
+    if (this.needle === null) return { open: false, total: 0, index: null, searching: false, spans: [] };
+    const found: Array<{ y: number; x: number }> = [];
+    const n = this.needle.toLowerCase();
+    if (n && this.last) {
+      // Newest first, as libghostty orders them: bottom row up.
+      for (let y = this.last.rows - 1; y >= 0; y--) {
+        const line = this.last.cells[y].map((c) => c.text || " ").join("").toLowerCase();
+        const at: number[] = [];
+        for (let x = line.indexOf(n); x >= 0; x = line.indexOf(n, x + 1)) at.push(x);
+        for (const x of at.reverse()) found.push({ y, x });
+      }
+    }
+    if (this.findIndex !== null && this.findIndex >= found.length) this.findIndex = null;
+    return {
+      open: true,
+      total: found.length,
+      index: this.findIndex,
+      searching: false,
+      spans: found.map((f, i) => ({ y: f.y, x: f.x, len: n.length, selected: i === this.findIndex })),
+    };
+  }
+
+  private onFind(e: InputEvent): void {
+    if (e.kind === "find") {
+      if (e.needle !== this.needle) this.findIndex = null;
+      this.needle = e.needle;
+    } else if (e.kind === "find_step") {
+      const total = this.findState().total;
+      if (total > 0) {
+        const i = this.findIndex === null ? (e.older ? 0 : total - 1) : this.findIndex + (e.older ? 1 : -1);
+        this.findIndex = (i + total) % total;
+      }
+    } else if (e.kind === "find_end") {
+      this.needle = null;
+      this.findIndex = null;
+    } else {
+      return;
+    }
+    this.send(false, undefined, this.findState());
   }
 
   resize(size: Resize): void {
@@ -90,11 +136,12 @@ export class ReplayTransport implements Transport {
     this.send(true);
   }
 
-  private send(full: boolean, link?: Link): void {
+  private send(full: boolean, link?: Link, find?: Find): void {
     if (!this.onFrame) return;
     const next = this.source.build(this.size.cols, this.size.rows, this.tick);
     const frame = buildFrame(++this.seq, next, full ? null : this.last);
     if (link) frame.link = link;
+    if (find) frame.find = find;
     this.last = next;
     if (full || this.title !== this.sentTitle) {
       frame.title = this.title;

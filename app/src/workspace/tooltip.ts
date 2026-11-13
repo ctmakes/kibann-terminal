@@ -40,7 +40,12 @@ function hide(): void {
  * it: below it, or `above` (as for a bar at the bottom), or above anyway
  * when there's no room below. `label` may be a function, for a label that
  * follows state. */
-export function tooltip(el: HTMLElement, label: string | (() => string), key = "", above = false): void {
+export function tooltip(
+  el: HTMLElement,
+  label: string | (() => string),
+  key: string | (() => string) = "",
+  above = false,
+): void {
   el.addEventListener("mouseenter", () => {
     clearTimeout(timer);
     timer = window.setTimeout(() => {
@@ -48,9 +53,9 @@ export function tooltip(el: HTMLElement, label: string | (() => string), key = "
       const name = document.createElement("span");
       name.textContent = typeof label === "function" ? label() : label;
       const k = document.createElement("span");
-      k.textContent = key;
+      k.textContent = typeof key === "function" ? key() : key;
       k.style.color = "var(--k-muted)";
-      t.replaceChildren(name, ...(key ? [k] : []));
+      t.replaceChildren(name, ...(k.textContent ? [k] : []));
       t.style.display = "flex";
       const r = el.getBoundingClientRect();
       const w = t.offsetWidth;

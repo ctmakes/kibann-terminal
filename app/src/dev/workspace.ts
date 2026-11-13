@@ -12,7 +12,7 @@ import { ReplayTransport } from "../transport/replay";
 import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
 import { KIBANN_DARK, type ThemeApi } from "../workspace/theme";
-import type { Theme } from "../proto";
+import type { Settings, Theme } from "../proto";
 import { Screen } from "./screen";
 
 const params = Object.fromEntries(new URLSearchParams(location.search));
@@ -142,8 +142,8 @@ else void backend.act({ t: "new_tab", focus: true });
     windowFocused = on;
   },
   /** The config file's settings changed. */
-  setSettings(s: { font_family?: string[]; font_size?: number | null; agent_notifications?: boolean }) {
-    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, ...s });
+  setSettings(s: Partial<Settings>) {
+    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, keybind: [], restore_layout: true, ...s });
   },
   /** The font size in use, and each pane's cell size (device px). */
   font() {

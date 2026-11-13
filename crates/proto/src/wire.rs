@@ -19,7 +19,7 @@ use crate::{Frame, InputEvent, Resize};
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -124,6 +124,11 @@ pub enum ClientMsg {
     RequestFull {
         session: SessionId,
     },
+    /// With no panes open: reopen the saved layout, a fresh shell in each
+    /// pane's directory. Replied with [`Reply::Restored`].
+    Restore {
+        req: ReqId,
+    },
     /// End every session and exit.
     Shutdown,
 }
@@ -187,6 +192,11 @@ pub enum Reply {
         agent: Option<PaneStatus>,
     },
     Ok,
+    /// What [`ClientMsg::Restore`] reopened (nothing: zeros).
+    Restored {
+        tabs: u32,
+        panes: u32,
+    },
     Diff {
         diff: Diff,
     },
@@ -316,6 +326,7 @@ mod tests {
             selection_text: None,
             title: Some("zsh".into()),
             link: None,
+            find: None,
         }
     }
 

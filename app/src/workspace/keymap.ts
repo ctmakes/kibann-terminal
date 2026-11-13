@@ -3,6 +3,8 @@
 
 import type { KeyLike, Platform } from "../input/keyboard";
 import type { Dir, Direction } from "./layout";
+import { applyKeybinds } from "./keybinds";
+import { keyName, keyText } from "./shortcuts";
 
 export type Action =
   | { kind: "newTab" }
@@ -21,7 +23,11 @@ export type Action =
   /** Bigger (1), smaller (-1), or back to the config's size (0). */
   | { kind: "fontSize"; step: 1 | -1 | 0 }
   /** The theme picker (no key; View → Theme…). */
-  | { kind: "themes" };
+  | { kind: "themes" }
+  /** The find bar on the focused pane. */
+  | { kind: "find" }
+  /** The next match up the scrollback (older), or back down. */
+  | { kind: "findStep"; older: boolean };
 
 /** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
 type Mods = string;
@@ -66,6 +72,9 @@ function table(p: Platform): Binding[] {
     add("ms", "Equal", { kind: "fontSize", step: 1 }); // Cmd+Plus
     add("m", "Minus", { kind: "fontSize", step: -1 });
     add("m", "Digit0", { kind: "fontSize", step: 0 });
+    add("m", "KeyF", { kind: "find" });
+    add("m", "KeyG", { kind: "findStep", older: true });
+    add("ms", "KeyG", { kind: "findStep", older: false });
   } else {
     add("cs", "KeyT", { kind: "newTab" });
     add("cs", "KeyW", { kind: "close" });
@@ -90,17 +99,50 @@ function table(p: Platform): Binding[] {
     add("cs", "Equal", { kind: "fontSize", step: 1 });
     add("c", "Minus", { kind: "fontSize", step: -1 });
     add("c", "Digit0", { kind: "fontSize", step: 0 });
+    add("cs", "KeyF", { kind: "find" });
+    add("", "F3", { kind: "findStep", older: true });
+    add("s", "F3", { kind: "findStep", older: false });
   }
   add("c", "Tab", { kind: "tabCycle", step: 1 });
   add("cs", "Tab", { kind: "tabCycle", step: -1 });
   return b;
 }
 
+/** Normalized (sorted modifiers) per platform: the defaults, or the
+ * config's version of them. */
 const tables = new Map<Platform, Binding[]>();
+/** The config's `keybind` lines, per platform, once set. */
+const custom = new Map<Platform, Binding[]>();
 
-/** Every shortcut on `platform`, in the order they're defined. */
+/** Every shortcut on `platform`: the defaults in the order they're defined,
+ * as the config changed them. */
 export function bindings(platform: Platform): Binding[] {
+  return custom.get(platform) ?? table(platform);
+}
+
+/** The defaults, without the config's changes. */
+export function defaultBindings(platform: Platform): Binding[] {
   return table(platform);
+}
+
+/** Use the config's `keybind` lines on `platform` (none: the defaults).
+ * Returns a message per line that couldn't be used. */
+export function setKeybinds(platform: Platform, lines: string[]): string[] {
+  tables.delete(platform);
+  if (lines.length === 0) {
+    custom.delete(platform);
+    return [];
+  }
+  const { table: t, errors } = applyKeybinds(table(platform), lines);
+  custom.set(platform, t);
+  return errors;
+}
+
+/** The first key for `action` as shown (`⇧⌘B`), or "" when it has none. */
+export function keyFor(action: Action, platform: Platform): string {
+  const want = JSON.stringify(action);
+  const b = bindings(platform).find((x) => JSON.stringify(x.action) === want);
+  return b ? keyText(b.mods, keyName(b.code), platform) : "";
 }
 
 function modsOf(e: KeyLike): Mods {
@@ -115,9 +157,31 @@ export function actionFor(e: KeyLike, platform: Platform): Action | null {
   if (e.isComposing) return null;
   let t = tables.get(platform);
   if (!t) {
-    t = table(platform).map((b) => ({ ...b, mods: norm(b.mods) }));
+    t = bindings(platform).map((b) => ({ ...b, mods: norm(b.mods) }));
     tables.set(platform, t);
   }
   const m = norm(modsOf(e));
   return t.find((b) => b.code === e.code && b.mods === m)?.action ?? null;
+}
+
+const ACCEL_MODS: Array<[string, string, string]> = [
+  ["m", "Cmd", "Super"],
+  ["c", "Ctrl", "Ctrl"],
+  ["a", "Alt", "Alt"],
+  ["s", "Shift", "Shift"],
+];
+
+/** Every action's first key as a menu accelerator (`Cmd+Shift+KeyD`), by
+ * action as JSON (the menu items' ids); null for an action the config left
+ * without a key, so its menu item shows none. */
+export function menuKeys(platform: Platform): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const b of defaultBindings(platform)) out[JSON.stringify(b.action)] = null;
+  for (const b of bindings(platform)) {
+    const id = JSON.stringify(b.action);
+    if (out[id]) continue;
+    const mods = ACCEL_MODS.filter(([m]) => b.mods.includes(m)).map(([, mac, pc]) => (platform === "mac" ? mac : pc));
+    out[id] = [...mods, b.code].join("+");
+  }
+  return out;
 }

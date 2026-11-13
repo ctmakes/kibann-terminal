@@ -14,4 +14,14 @@ font_size: number | null,
  * Tell the user (a system notification) when an agent in a pane they
  * aren't looking at waits for them or finishes.
  */
-agent_notifications: boolean, };
+agent_notifications: boolean, 
+/**
+ * `keybind` lines' values in order (`trigger=action`, or `clear`),
+ * read by the app, which owns the shortcuts.
+ */
+keybind: Array<string>, 
+/**
+ * Reopen the tabs and splits (with fresh shells) after the sessions
+ * ended, as after a restart.
+ */
+restore_layout: boolean, };

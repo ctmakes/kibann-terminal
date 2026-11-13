@@ -111,6 +111,9 @@ impl Client {
     /// yet). Its sessions end with the process, as before the daemon existed.
     pub fn in_process(on_event: impl FnMut(ClientEvent<'_>) + Send + 'static) -> io::Result<Self> {
         let daemon = Daemon::new("in-process");
+        if let Some(f) = crate::layout_file(std::env::var_os("KIBANN_SOCKET").is_some()) {
+            daemon.save_layout_to(f, crate::saved::SAVE_DELAY);
+        }
         let (to_daemon, daemon_reads) = pipe();
         let (daemon_writes, from_daemon) = pipe();
         daemon.serve(daemon_reads, daemon_writes)?;
@@ -166,6 +169,15 @@ impl Client {
     pub fn layout(&self) -> io::Result<Layout> {
         match self.request(|req| ClientMsg::GetLayout { req })? {
             Reply::Layout { layout } => Ok(layout),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// With no panes open, reopen the saved layout; returns how many tabs
+    /// and panes came back (zeros: none).
+    pub fn restore(&self) -> io::Result<(u32, u32)> {
+        match self.request(|req| ClientMsg::Restore { req })? {
+            Reply::Restored { tabs, panes } => Ok((tabs, panes)),
             other => Err(unexpected(other)),
         }
     }

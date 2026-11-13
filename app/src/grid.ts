@@ -1,4 +1,4 @@
-import type { Cursor, Frame, Link, MouseTracking, Row, Scrollbar, Style } from "./proto";
+import type { Cursor, Find, Frame, Link, MouseTracking, Row, Scrollbar, Style } from "./proto";
 
 /** A run with its style resolved out of the frame's style table. */
 export interface GridRun {
@@ -52,6 +52,8 @@ export class Grid {
   title = "";
   /** The link under the pointer while the link modifier is held. */
   link: Link | null = null;
+  /** The search's results while the find bar is open. */
+  find: Find | null = null;
   lines: GridRow[] = [];
   lastSeq: number | null = null;
   awaitingFull = false;
@@ -91,6 +93,7 @@ export class Grid {
     if (frame.selection_text !== undefined) this.selectionText = frame.selection_text;
     if (frame.title !== undefined) this.title = frame.title;
     if (frame.link !== undefined) this.link = frame.link.uri ? frame.link : null;
+    if (frame.find !== undefined) this.find = frame.find.open ? frame.find : null;
     this.lastSeq = frame.seq;
 
     const dirty = new Set<number>();

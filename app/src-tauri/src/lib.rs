@@ -238,6 +238,17 @@ async fn layout_watch(state: State<'_, Term>) -> Result<Layout, String> {
     state.client.watch().map_err(|e| e.to_string())
 }
 
+/// With no panes open: reopen the saved tabs and splits, with fresh shells.
+/// Returns how many panes came back (0: none).
+#[tauri::command]
+async fn layout_restore(state: State<'_, Term>) -> Result<u32, String> {
+    state
+        .client
+        .restore()
+        .map(|(_, panes)| panes)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 struct Acted {
     pane: Option<PaneId>,
@@ -334,6 +345,9 @@ struct Looks {
     choice: proto::theme::ThemeChoice,
     /// The system appearance.
     dark: bool,
+    /// The appearance the window is held to (the theme's), or `None` when
+    /// it follows the system.
+    forced: Option<bool>,
     /// Shown by the picker, not kept yet.
     preview: Option<String>,
     /// In use now.
@@ -353,11 +367,16 @@ struct ThemeNow {
 /// back to the built-in one, with a notice.
 fn show_theme(app: &AppHandle) {
     let looks = app.state::<Mutex<Looks>>();
-    let name = {
+    let (name, one) = {
         let l = looks.lock().unwrap();
-        l.preview
+        let name = l
+            .preview
             .clone()
-            .unwrap_or_else(|| l.choice.for_appearance(l.dark).to_owned())
+            .unwrap_or_else(|| l.choice.for_appearance(l.dark).to_owned());
+        // One theme for both appearances (or a preview): the window takes
+        // the theme's. With a light/dark pair the theme already matches
+        // the system, which keeps switching it.
+        (name, l.preview.is_some() || l.choice.light == l.choice.dark)
     };
     let (name, theme) = match theme::load(&name) {
         Ok((t, errors)) => {
@@ -377,6 +396,7 @@ fn show_theme(app: &AppHandle) {
             (n.to_owned(), theme::load(n).expect("built in").0)
         }
     };
+    window_colors(app, &theme, one.then(|| theme.is_dark()));
     {
         let mut l = looks.lock().unwrap();
         if l.name == name && l.theme == theme {
@@ -392,6 +412,45 @@ fn show_theme(app: &AppHandle) {
         });
     }
     let _ = app.emit("theme", ThemeNow { name, theme });
+}
+
+/// The window around the webview in the theme's colors: the title bar's
+/// light or dark appearance, and on macOS (a transparent title bar, see
+/// `tauri.conf.json`) the strip behind the title in the tab bar's color.
+fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<bool>) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    let changed = {
+        let looks = app.state::<Mutex<Looks>>();
+        let mut l = looks.lock().unwrap();
+        std::mem::replace(&mut l.forced, force) != force
+    };
+    if changed {
+        let _ = w.set_theme(force.map(|d| {
+            if d {
+                tauri::Theme::Dark
+            } else {
+                tauri::Theme::Light
+            }
+        }));
+        // Following the system again: it may have changed meanwhile.
+        if force.is_none()
+            && let Ok(t) = w.theme()
+        {
+            let dark = t != tauri::Theme::Light;
+            let looks = app.state::<Mutex<Looks>>();
+            let was = std::mem::replace(&mut looks.lock().unwrap().dark, dark);
+            if was != dark {
+                show_theme(app);
+                return;
+            }
+        }
+    }
+    // The tab bar's color (`--k-bar` in app/src/workspace/theme.ts).
+    let bar = proto::theme::mix(theme.background, theme.foreground, 0.067);
+    let [_, r, g, b] = bar.to_be_bytes();
+    let _ = w.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
 }
 
 /// Read the config file again (it changed, or at start).
@@ -423,14 +482,71 @@ fn settings_current(
 }
 
 /// A system notification (an agent waits or finished, in a pane the user
-/// isn't looking at).
+/// isn't looking at). Clicking it shows the pane: see [`on_notification_click`].
 #[tauri::command]
-fn notify(app: AppHandle, title: String, body: String) {
+fn notify(app: AppHandle, pane: u32, title: String, body: String) {
     use tauri_plugin_notification::NotificationExt;
-    let r = app.notification().builder().title(title).body(body).show();
+    let r = app
+        .notification()
+        .builder()
+        .id(i32::try_from(pane).unwrap_or(0))
+        .title(title)
+        .body(body)
+        .show();
     if let Err(e) = r {
         eprintln!("kibann: notification: {e}");
     }
+}
+
+/// The shortcuts changed (the config's `keybind`): show each menu item's
+/// new key, or none, so a key the config moved elsewhere doesn't also run
+/// the menu item it used to. `keys` maps the items' ids (actions as JSON).
+#[tauri::command]
+fn menu_keys(app: AppHandle, keys: std::collections::HashMap<String, Option<String>>) {
+    use tauri::menu::MenuItemKind;
+    fn walk(
+        items: Vec<MenuItemKind<tauri::Wry>>,
+        keys: &std::collections::HashMap<String, Option<String>>,
+    ) {
+        for item in items {
+            match item {
+                MenuItemKind::Submenu(sub) => walk(sub.items().unwrap_or_default(), keys),
+                MenuItemKind::MenuItem(i) => {
+                    if let Some(k) = keys.get(&i.id().0)
+                        && let Err(e) = i.set_accelerator(k.as_deref())
+                    {
+                        eprintln!("kibann: menu key {k:?}: {e}");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Some(menu) = app.menu() {
+        walk(menu.items().unwrap_or_default(), &keys);
+    }
+}
+
+/// A click on one of our notifications: bring the window forward and show
+/// the pane it's about (its id is the notification's). A pane closed since
+/// does nothing.
+fn on_notification_click(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let handle = app.clone();
+    let _ = app.notification().on_action(move |done| {
+        if done.action_id() != "tap" {
+            return;
+        }
+        let Some(pane) = done.notification().map(|n| n.id()) else {
+            return;
+        };
+        if let Some(w) = handle.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        let _ = handle.emit("focus-pane", pane);
+    });
 }
 
 /// Poll the config file and the user's themes: editors save in ways
@@ -551,7 +667,22 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .separator()
         .item(&item(r#"{"kind":"close"}"#, "Close", "Cmd+W")?)
         .build()?;
-    let edit = SubmenuBuilder::new(app, "Edit").copy().paste().build()?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .copy()
+        .paste()
+        .separator()
+        .item(&item(r#"{"kind":"find"}"#, "Find…", "Cmd+F")?)
+        .item(&item(
+            r#"{"kind":"findStep","older":true}"#,
+            "Find Next",
+            "Cmd+G",
+        )?)
+        .item(&item(
+            r#"{"kind":"findStep","older":false}"#,
+            "Find Previous",
+            "Shift+Cmd+G",
+        )?)
+        .build()?;
     let view = SubmenuBuilder::new(app, "View")
         .item(&item(
             r#"{"kind":"sidebar"}"#,
@@ -671,6 +802,7 @@ pub fn run() {
             app.manage(Mutex::new(Looks {
                 choice: Default::default(),
                 dark,
+                forced: None,
                 preview: None,
                 name: String::new(),
                 theme: proto::theme::Theme::kibann_dark(),
@@ -678,12 +810,22 @@ pub fn run() {
             app.manage(Mutex::new(proto::config::Settings::default()));
             reload_choice(handle);
             watch_config(handle.clone());
+            on_notification_click(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::ThemeChanged(t) = event {
                 let app = window.app_handle();
-                app.state::<Mutex<Looks>>().lock().unwrap().dark = *t != tauri::Theme::Light;
+                {
+                    let looks = app.state::<Mutex<Looks>>();
+                    let mut l = looks.lock().unwrap();
+                    // Held to the theme's appearance: this is our own change,
+                    // not the system's.
+                    if l.forced.is_some() {
+                        return;
+                    }
+                    l.dark = *t != tauri::Theme::Light;
+                }
                 show_theme(app);
             }
         })
@@ -691,6 +833,7 @@ pub fn run() {
             app_exe,
             set_badge,
             notify,
+            menu_keys,
             settings_current,
             theme_current,
             theme_list,
@@ -703,6 +846,7 @@ pub fn run() {
             term_ack,
             term_request_full,
             layout_watch,
+            layout_restore,
             layout_act,
             app_quit,
             open_link,

@@ -698,6 +698,7 @@ dependencies = [
  "libc",
  "proto",
  "regex",
+ "serde",
  "serde_json",
  "term",
 ]

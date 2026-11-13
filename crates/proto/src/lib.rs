@@ -93,6 +93,37 @@ pub struct Frame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub link: Option<Link>,
+    /// Present only when the search's results changed, or it started or
+    /// ended (`open: false`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub find: Option<Find>,
+}
+
+/// A search's results (see [`InputEvent::Find`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Find {
+    /// Searching; false once the search ended (and nothing else is set).
+    pub open: bool,
+    /// Matches found so far, in the screen and scrollback.
+    pub total: u32,
+    /// The selected match, 0 the newest; `None` before one is selected.
+    pub index: Option<u32>,
+    /// Not done looking through the scrollback yet: `total` may grow.
+    pub searching: bool,
+    /// The matches in view, per viewport row.
+    pub spans: Vec<FindSpan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FindSpan {
+    pub y: u16,
+    pub x: u16,
+    pub len: u16,
+    /// Part of the selected match.
+    pub selected: bool,
 }
 
 /// A link under the pointer: an OSC 8 hyperlink, or a URL or existing file
@@ -293,6 +324,19 @@ pub enum InputEvent {
         by: ScrollBy,
         n: i32,
     },
+    /// Search the screen and scrollback for `needle` (ASCII letters ignore
+    /// case), keeping on as output arrives; "" finds nothing but keeps the
+    /// search open. Drives [`Frame::find`].
+    Find {
+        needle: String,
+    },
+    /// Select the next match, toward older text (`older`), or the previous
+    /// one, scrolling to it.
+    FindStep {
+        older: bool,
+    },
+    /// Stop searching and return to the bottom.
+    FindEnd,
 }
 
 /// Unit for [`InputEvent::Scroll`]. `n` is ignored for `top` and `bottom`.

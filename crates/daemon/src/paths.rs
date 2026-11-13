@@ -41,6 +41,32 @@ pub fn socket_path(dev: bool) -> PathBuf {
     }
 }
 
+/// Where the layout is kept between sessions (see [`crate::saved`]):
+/// `KIBANN_STATE_DIR` if set, else `~/Library/Application Support/kibann`
+/// on macOS, `$XDG_STATE_HOME/kibann` (`~/.local/state/kibann`) on Linux,
+/// `%APPDATA%\kibann` on Windows. Dev builds keep their own file.
+pub fn layout_file(dev: bool) -> Option<PathBuf> {
+    let name = if dev {
+        "layout-dev.json"
+    } else {
+        "layout.json"
+    };
+    if let Some(d) = std::env::var_os("KIBANN_STATE_DIR") {
+        return Some(PathBuf::from(d).join(name));
+    }
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let dir = home().map(|h| h.join("Library/Application Support/kibann"));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let dir = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home().map(|h| h.join(".local/state")))
+        .map(|d| d.join("kibann"));
+    #[cfg(windows)]
+    let dir = std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("kibann"));
+    dir.map(|d| d.join(name))
+}
+
 /// Make the socket's directory, readable by the user only, and check that
 /// nobody else owns it (another user could otherwise pre-create it).
 #[cfg(unix)]

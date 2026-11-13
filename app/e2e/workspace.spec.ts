@@ -950,3 +950,85 @@ test.describe("notifications", () => {
     expect(await notes(page)).toHaveLength(n);
   });
 });
+
+test.describe("find", () => {
+  const count = (page: Page) => page.locator(".find-count").textContent();
+
+  test("Cmd+F finds in the focused pane; Enter steps; Esc closes and types again", async ({ page }) => {
+    await open(page, { links: "1" });
+    await press(page, "Meta+f");
+    const bar = page.locator(".find-bar");
+    await expect(bar).toBeVisible();
+    await expect(page.locator(".find-input")).toBeFocused();
+
+    await page.keyboard.type("EXAMPLE");
+    await settle(page);
+    expect(await count(page)).toBe("1 found");
+    await expect(page.locator(".term-find-match")).toHaveCount(1);
+
+    await press(page, "Enter");
+    expect(await count(page)).toBe("1 of 1");
+    await expect(page.locator(".term-find-selected")).toHaveCount(1);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-find.png");
+
+    await page.keyboard.type("zzz");
+    await settle(page);
+    expect(await count(page)).toBe("No matches");
+    await expect(page.locator(".term-find-match")).toHaveCount(0);
+
+    // Cmd+G with the field empty again steps too.
+    for (let i = 0; i < 3; i++) await page.keyboard.press("Backspace");
+    await press(page, "Meta+g");
+    expect(await count(page)).toBe("1 of 1");
+
+    await press(page, "Escape");
+    await expect(bar).toBeHidden();
+    await expect(page.locator(".term-find-match")).toHaveCount(0);
+    await page.keyboard.type("a");
+    expect(await typed(page)).toEqual({ 1: "a" });
+    const kinds = await page.evaluate(() =>
+      (window as any).__ws.inputs.map((x: any) => x.e.kind).filter((k: string) => k.startsWith("find")),
+    );
+    expect(kinds.at(-1)).toBe("find_end");
+  });
+
+  test("each pane has its own bar; reopening keeps the text", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+f");
+    await page.keyboard.type("pane");
+    await settle(page);
+    expect(await count(page)).toBe("1 found");
+    await press(page, "Escape");
+    await press(page, "Meta+d");
+    await press(page, "Meta+f");
+    await expect(page.locator(".find-bar:visible")).toHaveCount(1);
+    await expect(page.locator(".find-bar:visible .find-input")).toHaveValue("");
+    await press(page, "Escape");
+    await press(page, "Meta+BracketLeft");
+    await press(page, "Meta+f");
+    await expect(page.locator(".find-bar:visible .find-input")).toHaveValue("pane");
+    expect(await page.locator(".find-bar:visible .find-count").textContent()).toBe("1 found");
+  });
+});
+
+test.describe("keybinds", () => {
+  test("the config's keybind lines change keys and the sheet, live", async ({ page }) => {
+    await open(page);
+    await page.evaluate(() =>
+      (window as any).__ws.setSettings({ keybind: ["super+shift+d=unbind", "super+e=new_split:down", "super+k=bogus"] }),
+    );
+    await expect(page.locator(".notice", { hasText: 'unknown action "bogus"' })).toHaveCount(1);
+    await press(page, "Meta+Shift+d");
+    expect((await state(page)).panes).toHaveLength(1);
+    await press(page, "Meta+e");
+    expect((await state(page)).panes).toHaveLength(2);
+    await press(page, "Meta+Slash");
+    const row = page.locator(".shortcut-row", { hasText: "Split right / down" });
+    await expect(row.locator("kbd")).toHaveText(["⌘D / ⌘E"]);
+    await press(page, "Escape");
+    // Back to the defaults when the lines go.
+    await page.evaluate(() => (window as any).__ws.setSettings({ keybind: [] }));
+    await press(page, "Meta+Shift+d");
+    expect((await state(page)).panes).toHaveLength(3);
+  });
+});

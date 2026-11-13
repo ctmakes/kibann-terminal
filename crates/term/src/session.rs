@@ -428,6 +428,9 @@ impl Pacer {
     }
 }
 
+/// How long one pass of searching may take, and the pause between passes.
+const FIND_SLICE: Duration = Duration::from_millis(4);
+
 type Recorder = CastWriter<std::fs::File>;
 
 /// `KIBANN_RECORD=path.cast` records the session for debugging: program
@@ -522,6 +525,8 @@ fn run(
     let mut deadline: Option<Instant> = None;
     // Next autoscroll step while a selection drag is held past an edge.
     let mut autoscroll: Option<Instant> = None;
+    // When to search on, while a search has more scrollback to look through.
+    let mut find_due: Option<Instant> = None;
     // Next look at the screen for an agent's state, and the last result.
     let mut agent_due: Option<Instant> = None;
     let mut foreground: Option<Foreground> = None;
@@ -536,6 +541,7 @@ fn run(
             exit_wait,
             autoscroll,
             agent_due,
+            find_due,
         ]
         .into_iter()
         .flatten()
@@ -678,6 +684,15 @@ fn run(
             }
         } else {
             autoscroll = None;
+        }
+        // Searching: a slice of work per pass (output and input go first),
+        // and again shortly while the scrollback isn't all searched.
+        if emu.finding() && (p.dirty || find_due.is_some_and(|t| now >= t)) {
+            let more = emu.find_work(FIND_SLICE);
+            find_due = more.then(|| now + FIND_SLICE);
+            p.dirty = true;
+        } else if !emu.finding() {
+            find_due = None;
         }
         deadline = p.tick(&mut emu, now);
 

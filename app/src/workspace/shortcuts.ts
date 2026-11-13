@@ -43,7 +43,7 @@ const KEY_NAMES: Record<string, string> = {
   PageDown: "PgDn",
 };
 
-function keyName(code: string): string {
+export function keyName(code: string): string {
   return KEY_NAMES[code] ?? code.replace(/^(Key|Digit)/, "");
 }
 
@@ -129,6 +129,13 @@ export function sheetFor(platform: Platform): SheetGroup[] {
       ],
     },
     {
+      title: "Find",
+      rows: [
+        row("Find", { kind: "find" }),
+        row("Next / previous match", { kind: "findStep", older: true }, { kind: "findStep", older: false }),
+      ],
+    },
+    {
       title: "Terminal",
       rows: [
         { label: "Copy / paste", keys: [mac ? `${k("m", "C")} / ${k("m", "V")}` : `${k("cs", "C")} / ${k("cs", "V")}`] },
@@ -155,7 +162,7 @@ export class ShortcutSheet {
   readonly el: HTMLDivElement;
   visible = false;
 
-  constructor(platform: Platform) {
+  constructor(private readonly platform: Platform) {
     this.el = document.createElement("div");
     this.el.className = "shortcut-sheet";
     Object.assign(this.el.style, {
@@ -174,6 +181,12 @@ export class ShortcutSheet {
       e.preventDefault();
       this.hide();
     });
+    this.rebuild();
+  }
+
+  /** Fill it from the shortcuts in use (again, after the config changed them). */
+  rebuild(): void {
+    const platform = this.platform;
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       background: "var(--k-panel)",
@@ -237,7 +250,7 @@ export class ShortcutSheet {
       cols.append(box);
     }
     panel.append(head, cols);
-    this.el.append(panel);
+    this.el.replaceChildren(panel);
   }
 
   toggle(): void {

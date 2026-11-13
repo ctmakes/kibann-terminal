@@ -84,6 +84,33 @@ export function groupPanes(panes: CardPane[], git: GitMap, status: StatusMap): G
     .map((x) => x.g);
 }
 
+/** Titles that only name the shell: a pane showing one is told apart by
+ * its directory instead. */
+const SHELLS = new Set(["shell", "sh", "bash", "zsh", "fish", "nu", "dash", "ksh", "tcsh", "pwsh", "powershell", "cmd"]);
+
+/** What a pane's rail badge is made from: the program it runs, else its
+ * directory's name. */
+export function badgeSource(title: string, place: PaneDir | undefined): string {
+  const t = title.trim().replace(/^-/, "");
+  if (t && !SHELLS.has(t.toLowerCase().replace(/\.exe$/, ""))) return t;
+  if (!place) return t || "·";
+  const name = place.shown.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  return name === "" ? "/" : name;
+}
+
+/** The rail badges for panes in order (as their sources): one letter each,
+ * two where a pane would read the same as the one before or after it. */
+export function badgeTexts(sources: string[]): string[] {
+  const chars = sources.map((s) => [...s.replace(/^[^\p{L}\p{N}~/]+/u, "") || s]);
+  const one = chars.map((c) => (c[0] ?? "·").toUpperCase());
+  return one.map((b, i) => {
+    const clash = (j: number) => j >= 0 && j < one.length && one[j] === b && sources[j] !== sources[i];
+    if (!clash(i - 1) && !clash(i + 1)) return b;
+    const rest = chars[i].slice(1).find((ch) => /[\p{L}\p{N}]/u.test(ch));
+    return rest ? b + rest.toLowerCase() : b;
+  });
+}
+
 interface Row {
   el: HTMLDivElement;
   title: HTMLSpanElement;
@@ -104,9 +131,9 @@ export interface SidebarOptions {
   onShortcuts(): void;
   onThemes?(): void;
   /** The shortcut sheet's key, shown in its button's tooltip. */
-  shortcutKey: string;
+  shortcutKey: () => string;
   /** The key that collapses and expands it, shown in its button's tooltip. */
-  sidebarKey: string;
+  sidebarKey: () => string;
 }
 
 export class Sidebar {
@@ -355,11 +382,12 @@ export class Sidebar {
             },
       );
       nodes.push(h);
-      for (const p of g.panes) {
+      const badges = badgeTexts(g.panes.map((p) => badgeSource(p.title, git[String(p.id)])));
+      g.panes.forEach((p, i) => {
         const r = this.rows.get(p.id) ?? this.makeRow(p.id);
-        this.fillRow(r, p, git[String(p.id)], status);
+        this.fillRow(r, p, git[String(p.id)], status, badges[i]);
         nodes.push(r.el);
-      }
+      });
     }
     this.list.replaceChildren(...nodes);
     if (this.previewing !== null) this.paintPreview();
@@ -406,10 +434,11 @@ export class Sidebar {
     const badge = document.createElement("span");
     badge.className = "sidebar-badge";
     Object.assign(badge.style, {
-      flex: "0 0 16px",
+      flex: "0 0 20px",
+      letterSpacing: "-0.3px",
       textAlign: "center",
       fontWeight: "600",
-      textTransform: "uppercase",
+      overflow: "hidden",
     });
     el.append(slot, badge, title, line);
     el.addEventListener("mousedown", (e) => {
@@ -424,10 +453,10 @@ export class Sidebar {
     return r;
   }
 
-  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap): void {
+  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap, badge: string): void {
     const name = p.title || "shell";
     r.title.textContent = name;
-    r.badge.textContent = [...name.trim()][0] ?? "·";
+    r.badge.textContent = badge;
     const full = this.expanded;
     r.el.title = full ? (place?.dir ?? "") : [name, place?.shown].filter(Boolean).join(" — ");
     r.badge.style.display = full ? "none" : "";

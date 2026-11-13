@@ -16,7 +16,9 @@ use crate::vt::color::{Palette, Rgb};
 use crate::vt::error::{Error, Result};
 use crate::vt::key::{self, Mods};
 use crate::vt::mode::Mode;
+use crate::vt::point::Space;
 use crate::vt::screen::Screen;
+use crate::vt::search::{MatchBuffer, Search, Status};
 use crate::vt::terminal::ScrollViewport;
 use crate::vt::{Terminal, focus, mouse, paste};
 
@@ -58,6 +60,11 @@ pub struct Emulator {
     cwd: Option<std::path::PathBuf>,
     /// The link the frontend last received (`None`: none).
     sent_link: Option<proto::Link>,
+    /// The find bar's search, while it's open.
+    search: Option<Search<'static, 'static>>,
+    matches: MatchBuffer,
+    /// The results the frontend last received (`None`: no search).
+    sent_find: Option<proto::Find>,
 }
 
 /// Keys that only change modifiers; pressing them isn't typing.
@@ -159,6 +166,9 @@ impl Emulator {
             hover: None,
             cwd: None,
             sent_link: None,
+            search: None,
+            matches: MatchBuffer::new(),
+            sent_find: None,
         })
     }
 
@@ -275,15 +285,106 @@ impl Emulator {
         } else {
             None
         };
+        let now = self.find_state();
+        let find = if now != self.sent_find {
+            self.sent_find.clone_from(&now);
+            Some(now.unwrap_or_default())
+        } else if force_full {
+            now
+        } else {
+            None
+        };
         let extra = Extra {
             selection_text: text,
             title,
             link,
+            find,
         };
         self.shared
             .builder
             .borrow_mut()
             .build(&self.term, force_full, extra)
+    }
+
+    /// The search's results now, with the matches in view.
+    fn find_state(&mut self) -> Option<proto::Find> {
+        let search = self.search.as_mut()?;
+        let total = search.total_matches().unwrap_or(0);
+        let index = search.selected_index().ok().flatten();
+        let searching = search.status().is_ok_and(|s| s != Status::Complete);
+        let cols = self.size.cols;
+        let top = self.term.scrollbar().map(|s| s.offset).unwrap_or(0);
+        let rows = u64::from(self.size.rows);
+        let mut spans = Vec::new();
+        if let Ok(snap) = search.snapshot(&mut self.term) {
+            let term = snap.terminal();
+            // Where a match starts and ends, as screen rows and columns.
+            let at = |sel: &crate::vt::selection::Selection<'_>| {
+                let p = |g| term.point_from_grid_ref(g, Space::Screen).ok().flatten();
+                Some((p(&sel.start())?, p(&sel.end())?))
+            };
+            let selected = snap.selected_match().ok().flatten().and_then(|s| at(&s));
+            if let Ok(found) = snap.viewport_matches(&mut self.matches) {
+                for m in found {
+                    let Some((a, b)) = at(&m) else { continue };
+                    let is_selected = selected == Some((a, b));
+                    for y in a.y..=b.y {
+                        let Some(vy) = u64::from(y).checked_sub(top).filter(|v| *v < rows) else {
+                            continue;
+                        };
+                        let x0 = if y == a.y { a.x } else { 0 };
+                        let x1 = if y == b.y {
+                            b.x
+                        } else {
+                            cols.saturating_sub(1)
+                        };
+                        spans.push(proto::FindSpan {
+                            y: vy as u16,
+                            x: x0,
+                            len: x1.saturating_sub(x0) + 1,
+                            selected: is_selected,
+                        });
+                    }
+                }
+            }
+        }
+        spans.sort_by_key(|s| (s.y, s.x));
+        Some(proto::Find {
+            open: true,
+            total: u32::try_from(total).unwrap_or(u32::MAX),
+            index: index.and_then(|i| u32::try_from(i).ok()),
+            searching,
+            spans,
+        })
+    }
+
+    /// Searching: look through more of the terminal, for at most `budget`.
+    /// True while there's more to do.
+    pub fn find_work(&mut self, budget: Duration) -> bool {
+        let Some(search) = self.search.as_mut() else {
+            return false;
+        };
+        let end = Instant::now() + budget;
+        loop {
+            if search.feed(&mut self.term).is_err() {
+                return false;
+            }
+            let mut status = search.status().unwrap_or(Status::Complete);
+            while status == Status::Running && Instant::now() < end {
+                status = search.tick().unwrap_or(Status::Complete);
+            }
+            if status == Status::Complete {
+                return false;
+            }
+            if Instant::now() >= end {
+                return true;
+            }
+        }
+    }
+
+    /// The find bar is open.
+    pub fn finding(&self) -> bool {
+        self.search.is_some()
     }
 
     /// The pointer is over the grid with the link modifier held.
@@ -496,6 +597,29 @@ impl Emulator {
                     ScrollBy::Top => ScrollViewport::Top,
                     ScrollBy::Bottom => ScrollViewport::Bottom,
                 });
+                Ok(())
+            }
+            InputEvent::Find { needle } => {
+                if self.search.is_none() {
+                    self.search = Some(Search::new(&mut self.term)?);
+                }
+                let search = self.search.as_mut().expect("just made");
+                search.set_needle(&mut self.term, needle.as_bytes())?;
+                Ok(())
+            }
+            InputEvent::FindStep { older } => {
+                if let Some(search) = self.search.as_mut() {
+                    if *older {
+                        search.select_next(&mut self.term)?;
+                    } else {
+                        search.select_prev(&mut self.term)?;
+                    }
+                }
+                Ok(())
+            }
+            InputEvent::FindEnd => {
+                self.search = None;
+                self.term.scroll_viewport(ScrollViewport::Bottom);
                 Ok(())
             }
             InputEvent::Hover { x, y, on } => {

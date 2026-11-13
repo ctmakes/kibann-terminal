@@ -18,7 +18,8 @@
         "height": 600,
         "minWidth": 320,
         "minHeight": 200,
-        "backgroundColor": "#181818"
+        "backgroundColor": "#181818",
+        "titleBarStyle": "Transparent"
       }
     ],
     "security": {

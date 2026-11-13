@@ -42,10 +42,11 @@ Tabs and splits use Ghostty's default shortcuts:
 | Sidebar | Cmd+Shift+B | Ctrl+Shift+B |
 | All shortcuts | Cmd+/ | Ctrl+Shift+/ |
 | Bigger / smaller text, default size | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
+| Find, next / previous match | Cmd+F, Cmd+G / Cmd+Shift+G | Ctrl+Shift+F, F3 / Shift+F3 |
 
-Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app; any key closes it. Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
+Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app; any key closes it. Every shortcut can be changed in the config file (see [Keyboard shortcuts](#keyboard-shortcuts)). Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
 
-Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon, which also owns the tabs and splits; opening the app again brings them back, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells.
+Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon, which also owns the tabs and splits; opening the app again brings them back, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells. After that, the app opens with the same tabs and splits, at the same sizes and with the same pane focused, each a fresh shell in the directory it was in (scrollback and running programs don't come back). The daemon keeps the layout in `~/Library/Application Support/kibann/layout.json` (`$XDG_STATE_HOME/kibann/` on Linux), written a few seconds after each change; `restore-layout = false` in the config turns it off. Closing the last pane on purpose starts fresh next time.
 
 The daemon is the app's own executable run with `--daemon`, listening on a socket only your user can open (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux; its log is beside it). Dev builds use `daemon-dev.sock` and replace a daemon from an earlier build, which ends dev sessions after a Rust rebuild. On Windows (not yet supported by the daemon) sessions run inside the app and end with it.
 
@@ -85,11 +86,11 @@ Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane
 
 The sidebar lists every pane of every tab on the left, one compact row each (agent dot, title, branch, `●5`), grouped by repository (panes outside one by directory). Hover a row to see a live preview of the pane beside the sidebar. Groups with an agent waiting for you come first, then finished, then working. Click a row to go to its pane; click its `●5` for the diff.
 
-It's never hidden. **Cmd+Shift+B** (Ctrl+Shift+B elsewhere, View → Toggle Sidebar, or the sidebar button at its bottom) folds it to a narrow rail, one badge per pane (its agent dot and first letter), which still click and preview, and opens it again. Drag its edge to resize it; dragging it nearly shut folds it. Its state and width are remembered. Its bottom row also has buttons for the theme picker and the shortcut sheet (hover one for its name and key), and the `?` at the end of the tab bar opens the shortcut sheet too.
+It's never hidden. **Cmd+Shift+B** (Ctrl+Shift+B elsewhere, View → Toggle Sidebar, or the sidebar button at its bottom) folds it to a narrow rail, one badge per pane, which still click and preview, and opens it again. A badge is the pane's agent dot and a letter: the program's (`V` for vim), or for a shell the directory's (`K` for `~/src/kibann`); two neighbours that would look alike get two letters. Drag its edge to resize it; dragging it nearly shut folds it. Its state and width are remembered. Its bottom row also has buttons for the theme picker and the shortcut sheet (hover one for its name and key), and the `?` at the end of the tab bar opens the shortcut sheet too.
 
 ### Themes
 
-View → Theme… (or the half-circle button at the bottom of the sidebar) opens a searchable list of about 900 themes, the [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) collection with the same names as Ghostty's. Moving through it shows each theme live on every pane; Enter keeps it, Esc goes back. A theme colors the terminals (programs asking for the background color get the theme's) and the window around them: a light theme makes the tab bar, sidebar and headers light too. Colors a program sets itself still win.
+View → Theme… (or the half-circle button at the bottom of the sidebar) opens a searchable list of about 900 themes, the [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) collection with the same names as Ghostty's. Moving through it shows each theme live on every pane; Enter keeps it, Esc goes back. A theme colors the terminals (programs asking for the background color get the theme's) and the window around them: a light theme makes the tab bar, sidebar, headers and title bar light too, even on a dark system. Colors a program sets itself still win.
 
 The choice is saved in `~/.config/kibann/config` (or `$XDG_CONFIG_HOME/kibann/config`), Ghostty syntax, which can be edited by hand and applies when saved:
 
@@ -115,7 +116,23 @@ Fonts named here are tried first, then the bundled JetBrains Mono, then the syst
 
 ### Notifications
 
-When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so ("Claude Code is waiting for you", with the repo, branch and pane title). A pane counts as looked at when it's the focused pane and the window is in front; with the window behind, every pane counts. Turn them off with `agent-notifications = false`.
+When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so ("Claude Code is waiting for you", with the repo, branch and pane title). A pane counts as looked at when it's the focused pane and the window is in front; with the window behind, every pane counts. Clicking one brings the window forward and shows that pane. Turn them off with `agent-notifications = false`.
+
+### Find
+
+**Cmd+F** (Ctrl+Shift+F elsewhere, Edit → Find…) opens a find bar on the focused pane. It searches the screen and the whole scrollback as you type (letters match either case) and keeps searching as output arrives; every match in view is highlighted and the bar counts them ("3 of 17"). Enter or Cmd+G goes to the next match up the scrollback, Shift+Enter or Cmd+Shift+G back down, scrolling to it. Esc closes the bar and returns to the bottom. Each pane has its own bar and remembers its text.
+
+### Keyboard shortcuts
+
+`keybind` lines in the config change the shortcuts, in Ghostty's syntax and with Ghostty's action names, so most of a Ghostty config's keybinds work as they are. They apply when the file is saved; the shortcut sheet and the menu bar follow.
+
+```
+keybind = super+shift+d=new_split:down
+keybind = super+k=unbind
+keybind = clear                    # drop every default first
+```
+
+Triggers are modifiers (`super`/`cmd`, `ctrl`, `alt`/`opt`, `shift`) and a key (`a`, `1`, `equal`, `bracket_left`, `arrow_up`, `enter`, `f3`, …). Actions: `new_tab`, `close_surface`, `new_split:right|down`, `goto_split:previous|next|left|right|up|down`, `resize_split:left|right|up|down`, `equalize_splits`, `toggle_split_zoom`, `previous_tab`, `next_tab`, `goto_tab:N`, `last_tab`, `increase_font_size`, `decrease_font_size`, `reset_font_size`, `start_search`, `navigate_search:next|previous`, `unbind`, and Kibann's own `toggle_sidebar`, `show_shortcuts`, `open_theme_picker`. Key sequences (`a>b`) and `global:` bindings aren't supported; a line that can't be used is named in a notice and skipped.
 
 ### Agent status at a glance
 

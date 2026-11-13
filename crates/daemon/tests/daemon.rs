@@ -843,3 +843,85 @@ fn a_theme_reaches_every_session_and_new_ones() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+#[test]
+fn the_layout_comes_back_after_the_sessions_ended() {
+    let path = socket();
+    let dir = path.parent().unwrap().join("work");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let file = path.parent().unwrap().join("state").join("layout.json");
+
+    let (d, h) = start(&path, Duration::from_secs(60));
+    d.save_layout_to(file.clone(), Duration::from_millis(100));
+    let (f, _rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    // Nothing saved yet: nothing to restore.
+    assert_eq!(c.restore().unwrap(), (0, 0));
+    let (a, _) = c
+        .act(Action::NewTab {
+            near: None,
+            cwd: Some(dir.to_string_lossy().into_owned()),
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: true,
+        })
+        .unwrap();
+    let (b, _) = c
+        .act(Action::Split {
+            pane: a.unwrap(),
+            dir: Dir::Row,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: true,
+        })
+        .unwrap();
+    c.act(Action::NewTab {
+        near: None,
+        cwd: None,
+        argv: Some(vec!["/bin/sh".into()]),
+        focus: false,
+    })
+    .unwrap();
+    // Restoring with panes open does nothing.
+    assert_eq!(c.restore().unwrap(), (0, 0));
+    let want = dir.to_string_lossy().into_owned();
+    eventually("the layout saved with the directory", || {
+        daemon::saved::load(&file)
+            .is_some_and(|s| s.panes() == 3 && s.dirs.values().any(|d| *d == want))
+    });
+    // Ending everything on purpose keeps the file as it was.
+    drop(c);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(daemon::saved::load(&file).map(|s| s.panes()), Some(3));
+
+    let (d, h) = start(&path, Duration::from_secs(60));
+    d.save_layout_to(file.clone(), Duration::from_millis(100));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    assert!(c.watch().unwrap().tabs.is_empty());
+    assert!(next_layout(&rx).tabs.is_empty()); // the same, as an event
+    assert_eq!(c.restore().unwrap(), (2, 3));
+    let l = next_layout(&rx);
+    assert_eq!(l.tabs.len(), 2);
+    assert_eq!(l.tabs[0].tree.panes().len(), 2);
+    assert_eq!(l.active, Some(l.tabs[0].id), "the shown tab is shown again");
+    assert_eq!(
+        l.tabs[0].focused,
+        l.tabs[0].tree.panes()[1],
+        "and its focused pane"
+    );
+    let _ = b;
+    let first = l.tabs[0].tree.panes()[0];
+    eventually("the first pane starts in its directory", || {
+        let Ok(Reply::Panes { panes }) = c.request(|req| ClientMsg::Panes { req }) else {
+            return false;
+        };
+        panes
+            .iter()
+            .any(|p| p.id == first && p.cwd.as_deref() == Some(want.as_str()))
+    });
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

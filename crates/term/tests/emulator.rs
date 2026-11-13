@@ -903,3 +903,76 @@ fn a_theme_colors_the_selection() {
         "the text keeps its color without selection-foreground"
     );
 }
+
+/// Search until the whole scrollback is looked through, then a frame.
+fn find_frame(e: &mut Emulator) -> Frame {
+    while e.find_work(std::time::Duration::from_millis(50)) {}
+    e.build_frame(false).unwrap().expect("a frame")
+}
+
+#[test]
+fn find_counts_matches_in_scrollback_and_scrolls_to_them() {
+    let mut e = emu();
+    e.build_frame(true).unwrap();
+    // "Needle" near the top of 40 lines, far above the 5-row screen.
+    let mut text = String::from("a Needle here\r\n");
+    for i in 0..40 {
+        text.push_str(&format!("line {i}\r\n"));
+    }
+    text.push_str("needle at the end");
+    e.write(text.as_bytes());
+    e.input(&InputEvent::Find {
+        needle: "NEEDLE".into(),
+    })
+    .unwrap();
+    let f = find_frame(&mut e);
+    let find = f.find.expect("results");
+    assert!(find.open);
+    assert_eq!(find.total, 2, "ASCII letters ignore case");
+    assert!(!find.searching);
+    // The match on screen is highlighted; nothing is selected yet.
+    assert_eq!(find.index, None);
+    assert_eq!(find.spans.len(), 1);
+    assert_eq!(
+        (find.spans[0].y, find.spans[0].x, find.spans[0].len),
+        (4, 0, 6)
+    );
+
+    // Next: the newest match, on screen already.
+    e.input(&InputEvent::FindStep { older: true }).unwrap();
+    let find = find_frame(&mut e).find.expect("results");
+    assert_eq!(find.index, Some(0));
+    assert!(find.spans[0].selected);
+
+    // Next again: the old one, up in the scrollback, scrolled into view.
+    e.input(&InputEvent::FindStep { older: true }).unwrap();
+    let f = find_frame(&mut e);
+    let find = f.find.clone().expect("results");
+    assert_eq!(find.index, Some(1));
+    assert!(f.scrollbar.offset < 10, "scrolled up: {:?}", f.scrollbar);
+    let s = find
+        .spans
+        .iter()
+        .find(|s| s.selected)
+        .expect("selected in view");
+    assert_eq!((s.x, s.len), (2, 6));
+    assert!(row_text(&f, s.y).contains("Needle"));
+
+    // New output is searched too.
+    e.write(b"\r\nanother needle");
+    assert_eq!(find_frame(&mut e).find.expect("results").total, 3);
+
+    // Ending returns to the bottom and says so once.
+    e.input(&InputEvent::FindEnd).unwrap();
+    let f = e.build_frame(false).unwrap().expect("a frame");
+    assert!(!f.find.expect("ended").open);
+    assert_eq!(f.scrollbar.offset + f.scrollbar.len, f.scrollbar.total);
+    e.write(b"x");
+    assert!(
+        e.build_frame(false)
+            .unwrap()
+            .expect("a frame")
+            .find
+            .is_none()
+    );
+}

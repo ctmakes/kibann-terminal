@@ -121,6 +121,7 @@ impl FrameBuilder {
             selection_text,
             title,
             link,
+            find,
         } = extra;
         let mouse_tracking = mouse_tracking(term);
         let sb = term.scrollbar()?;
@@ -297,6 +298,7 @@ impl FrameBuilder {
             && selection_text.is_none()
             && title.is_none()
             && link.is_none()
+            && find.is_none()
             && self.last.as_ref() == Some(&meta)
         {
             snap.clean()?;
@@ -321,6 +323,7 @@ impl FrameBuilder {
             selection_text,
             title,
             link,
+            find,
         }))
     }
 }
@@ -332,6 +335,7 @@ pub struct Extra {
     pub selection_text: Option<String>,
     pub title: Option<String>,
     pub link: Option<Link>,
+    pub find: Option<proto::Find>,
 }
 
 /// Split a row into runs of one style each.

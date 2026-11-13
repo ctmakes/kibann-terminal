@@ -6,6 +6,8 @@
 //! font-family = Symbols Nerd Font   # repeated: fallbacks, in order
 //! font-size = 13
 //! agent-notifications = false
+//! keybind = super+shift+d=new_split:down   # repeated; see app/src/workspace/keybinds.ts
+//! restore-layout = false
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,12 @@ pub struct Settings {
     /// Tell the user (a system notification) when an agent in a pane they
     /// aren't looking at waits for them or finishes.
     pub agent_notifications: bool,
+    /// `keybind` lines' values in order (`trigger=action`, or `clear`),
+    /// read by the app, which owns the shortcuts.
+    pub keybind: Vec<String>,
+    /// Reopen the tabs and splits (with fresh shells) after the sessions
+    /// ended, as after a restart.
+    pub restore_layout: bool,
 }
 
 impl Default for Settings {
@@ -34,6 +42,8 @@ impl Default for Settings {
             font_family: Vec::new(),
             font_size: None,
             agent_notifications: true,
+            keybind: Vec::new(),
+            restore_layout: true,
         }
     }
 }
@@ -79,6 +89,12 @@ impl Settings {
                     "false" => s.agent_notifications = false,
                     _ => errors.push(bad("agent-notifications (true or false)")),
                 },
+                "keybind" if !v.is_empty() => s.keybind.push(v.to_owned()),
+                "restore-layout" => match v {
+                    "true" => s.restore_layout = true,
+                    "false" => s.restore_layout = false,
+                    _ => errors.push(bad("restore-layout (true or false)")),
+                },
                 _ => {}
             }
         }
@@ -93,12 +109,14 @@ mod tests {
     #[test]
     fn parses_fonts_and_switches() {
         let (s, e) = Settings::parse(
-            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\n",
+            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\nkeybind = clear\nkeybind = super+d=new_split:down # mine\nrestore-layout = false\n",
         );
         assert!(e.is_empty(), "{e:?}");
         assert_eq!(s.font_family, ["Berkeley Mono", "Symbols Nerd Font"]);
         assert_eq!(s.font_size, Some(13.5));
         assert!(!s.agent_notifications);
+        assert_eq!(s.keybind, ["clear", "super+d=new_split:down"]);
+        assert!(!s.restore_layout);
     }
 
     #[test]

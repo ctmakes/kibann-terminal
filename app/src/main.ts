@@ -74,8 +74,9 @@ async function start(): Promise<void> {
     // The Dock icon shows how many agents wait for the user (macOS).
     onBlocked: (count) => void invoke("set_badge", { count }),
     onDiff: (pane) => void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
-    onNotify: ({ title, body }) => void invoke("notify", { title, body }),
+    onNotify: ({ pane, title, body }) => void invoke("notify", { pane, title, body }),
     windowFocused: () => document.hasFocus(),
+    onKeys: (keys) => void invoke("menu_keys", { keys }),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
@@ -88,6 +89,8 @@ async function start(): Promise<void> {
     ws.setTheme(e.payload.theme);
   });
   await listen<string>("notice", (e) => ws.notice(e.payload));
+  // A notification was clicked: show the pane it's about.
+  await listen<number>("focus-pane", (e) => ws.show(e.payload));
 
   // Menu bar items (macOS) carry the action as JSON in their id.
   await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));
@@ -102,7 +105,18 @@ async function start(): Promise<void> {
   await listen<GitMap>("pane-git", (e) => ws.setGit(e.payload));
   const layout = await invoke<Layout>("layout_watch");
 
-  if (layout.tabs.length === 0) {
+  // Nothing open (the sessions ended: a restart, or Quit and End
+  // Sessions): the saved tabs and splits come back, with fresh shells.
+  const settings = await invoke<Settings>("settings_current");
+  const restored =
+    layout.tabs.length === 0 && settings.restore_layout && !(await invoke<string | null>("dev_layout"))
+      ? await invoke<number>("layout_restore").catch((e) => {
+          console.warn("kibann: restore:", e);
+          return 0;
+        })
+      : 0;
+  if (restored > 0) ws.notice(`Reopened ${restored === 1 ? "1 pane" : `${restored} panes`} where you left off.`, 6000);
+  if (layout.tabs.length === 0 && restored === 0) {
     const first = await backend.act({ t: "new_tab", focus: true });
     // KIBANN_LAYOUT: splits and tabs to start with.
     let last = first.pane;
