@@ -629,6 +629,8 @@ fn quit_ending_sessions(app: &AppHandle) {
 /// Menu item id for [`quit_ending_sessions`].
 #[cfg(target_os = "macos")]
 const QUIT_END_SESSIONS: &str = "quit-end-sessions";
+/// Menu item id for Check for Updates….
+#[cfg(target_os = "macos")]
 const CHECK_UPDATES: &str = "check-updates";
 
 /// The macOS menu bar: the standard menus plus the workspace actions with
