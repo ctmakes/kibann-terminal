@@ -696,3 +696,37 @@ test.describe("sidebar", () => {
     await expect(preview).toBeHidden();
   });
 });
+
+test.describe("shortcut sheet", () => {
+  const sheet = (page: Page) => page.evaluate(() => (window as any).__ws.shortcuts());
+
+  test("Cmd+/ shows every shortcut; a key closes it and goes nowhere", async ({ page }) => {
+    await open(page, { w: "900", h: "560" });
+    expect((await sheet(page)).visible).toBe(false);
+    await press(page, "Meta+/");
+    const s = await sheet(page);
+    expect(s.visible).toBe(true);
+    expect(s.rows).toContain("Sidebar: ⇧⌘B");
+    expect(s.rows).toContain("Pane in a direction: ⌥⌘ Arrows");
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-shortcuts.png");
+
+    // Esc closes it without reaching the terminal.
+    await press(page, "Escape");
+    expect((await sheet(page)).visible).toBe(false);
+    expect((await typed(page))[1] ?? "").toBe("");
+
+    // Cmd+/ again toggles; a click anywhere closes.
+    await press(page, "Meta+/");
+    await press(page, "Meta+/");
+    expect((await sheet(page)).visible).toBe(false);
+    await press(page, "Meta+/");
+    await page.mouse.click(450, 280);
+    expect((await sheet(page)).visible).toBe(false);
+
+    // A shortcut pressed while it's open closes it and runs.
+    await press(page, "Meta+/");
+    await press(page, "Meta+Shift+b");
+    expect((await sheet(page)).visible).toBe(false);
+    expect((await page.evaluate(() => (window as any).__ws.sidebar())).visible).toBe(true);
+  });
+});

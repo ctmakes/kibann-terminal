@@ -93,6 +93,16 @@ else void backend.act({ t: "new_tab", focus: true });
     return badge;
   },
   diffs,
+  /** The shortcut sheet: shown or not, and each row as "label: keys". */
+  shortcuts() {
+    const el = document.querySelector<HTMLElement>(".shortcut-sheet")!;
+    return {
+      visible: el.style.display !== "none",
+      rows: [...el.querySelectorAll(".shortcut-row")].map(
+        (r) => `${r.querySelector("span")!.textContent}: ${[...r.querySelectorAll("kbd")].map((k) => k.textContent).join(" | ")}`,
+      ),
+    };
+  },
   /** The sidebar's groups and cards, in order. */
   sidebar() {
     const els = [...ws.sidebar.el.querySelectorAll<HTMLElement>(".sidebar-group, .sidebar-card")];

@@ -15,6 +15,7 @@ import type { Layout, LayoutAction } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
+import { ShortcutSheet } from "./shortcuts";
 import { Sidebar } from "./sidebar";
 import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
 import {
@@ -92,6 +93,7 @@ export interface WorkspaceOptions {
 export class Workspace {
   readonly root: HTMLDivElement;
   readonly sidebar: Sidebar;
+  private readonly shortcuts: ShortcutSheet;
   readonly bar: HTMLDivElement;
   readonly stage: HTMLDivElement;
   readonly tabs: Tab[] = [];
@@ -146,7 +148,8 @@ export class Workspace {
     this.stage.className = "stage";
     Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden" });
     main.append(this.bar, this.stage);
-    this.root.append(this.sidebar.el, main);
+    this.shortcuts = new ShortcutSheet(this.platform);
+    this.root.append(this.sidebar.el, main, this.shortcuts.el);
     container.append(this.root);
 
     installStyle();
@@ -189,6 +192,10 @@ export class Workspace {
           this.activate(this.tabs[(i + action.step + this.tabs.length) % this.tabs.length]);
         }
         return;
+    }
+    if (action.kind === "shortcuts") {
+      this.shortcuts.toggle();
+      return;
     }
     if (action.kind === "sidebar") {
       this.sidebar.toggle();
@@ -280,6 +287,17 @@ export class Workspace {
 
   private onKeyDown(e: KeyboardEvent): void {
     const action = actionFor(e, this.platform);
+    // While the shortcut sheet is open, a key closes it and goes nowhere
+    // else (modifiers alone don't, so a shortcut can be pressed to try it).
+    if (this.shortcuts.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Its own shortcut toggles it closed through runOnce, so the menu
+      // item's echo of the same key is skipped instead of reopening it.
+      if (action?.kind !== "shortcuts") this.shortcuts.hide();
+      if (action) this.runOnce(action, "key");
+      return;
+    }
     if (!action) return;
     e.preventDefault();
     e.stopPropagation();

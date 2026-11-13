@@ -40,8 +40,9 @@ Tabs and splits use Ghostty's default shortcuts:
 | Previous / next tab | Cmd+Shift+[ / ] | Ctrl+PageUp / PageDown |
 | Tab 1–8, last tab | Cmd+1–8, Cmd+9 | Alt+1–8, Alt+9 |
 | Sidebar | Cmd+Shift+B | Ctrl+Shift+B |
+| All shortcuts | Cmd+/ | Ctrl+Shift+/ |
 
-Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
+Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app; any key closes it. Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
 
 Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon, which also owns the tabs and splits; opening the app again brings them back, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells.
 

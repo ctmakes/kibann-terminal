@@ -16,12 +16,13 @@ export type Action =
   | { kind: "tabCycle"; step: 1 | -1 }
   /** 0-based; -1 is the last tab. */
   | { kind: "goToTab"; index: number }
-  | { kind: "sidebar" };
+  | { kind: "sidebar" }
+  | { kind: "shortcuts" };
 
 /** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
 type Mods = string;
 
-interface Binding {
+export interface Binding {
   mods: Mods;
   code: string;
   action: Action;
@@ -56,6 +57,7 @@ function table(p: Platform): Binding[] {
     add("ms", "BracketRight", { kind: "tabCycle", step: 1 });
     DIGITS.forEach((code, i) => add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
     add("ms", "KeyB", { kind: "sidebar" });
+    add("m", "Slash", { kind: "shortcuts" });
   } else {
     add("cs", "KeyT", { kind: "newTab" });
     add("cs", "KeyW", { kind: "close" });
@@ -73,6 +75,8 @@ function table(p: Platform): Binding[] {
     add("c", "PageDown", { kind: "tabCycle", step: 1 });
     DIGITS.forEach((code, i) => add("a", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
     add("cs", "KeyB", { kind: "sidebar" });
+    // Not Ctrl+/: shells and editors take it (undo).
+    add("cs", "Slash", { kind: "shortcuts" });
   }
   add("c", "Tab", { kind: "tabCycle", step: 1 });
   add("cs", "Tab", { kind: "tabCycle", step: -1 });
@@ -80,6 +84,11 @@ function table(p: Platform): Binding[] {
 }
 
 const tables = new Map<Platform, Binding[]>();
+
+/** Every shortcut on `platform`, in the order they're defined. */
+export function bindings(platform: Platform): Binding[] {
+  return table(platform);
+}
 
 function modsOf(e: KeyLike): Mods {
   return (e.ctrlKey ? "c" : "") + (e.altKey ? "a" : "") + (e.metaKey ? "m" : "") + (e.shiftKey ? "s" : "");

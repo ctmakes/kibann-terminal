@@ -431,8 +431,15 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             "Cmd+]",
         )?)
         .build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(&item(
+            r#"{"kind":"shortcuts"}"#,
+            "Keyboard Shortcuts",
+            "Cmd+/",
+        )?)
+        .build()?;
     MenuBuilder::new(app)
-        .items(&[&app_menu, &shell, &edit, &view, &window])
+        .items(&[&app_menu, &shell, &edit, &view, &window, &help])
         .build()
 }
 
