@@ -72,13 +72,16 @@ struct State {
     checkouts: HashMap<PathBuf, Entry>,
     /// How many checkouts watch each path.
     watches: HashMap<PathBuf, usize>,
-    fs: Option<RecommendedWatcher>,
     global_excludes: Option<Option<PathBuf>>,
     stop: bool,
 }
 
 struct Shared {
     state: Mutex<State>,
+    /// Kept apart from `state`, and taken before it: notify calls back on
+    /// its own thread, which takes `state`, and with inotify `watch` and
+    /// `unwatch` wait for that thread. Calling them under `state` deadlocks.
+    fs: Mutex<Option<RecommendedWatcher>>,
     wake: Condvar,
     on_change: OnChange,
     runs: AtomicU64,
@@ -88,6 +91,10 @@ impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    fn fs(&self) -> MutexGuard<'_, Option<RecommendedWatcher>> {
+        self.fs.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 pub struct Watcher {
@@ -96,11 +103,9 @@ pub struct Watcher {
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        let mut st = self.shared.lock();
-        st.stop = true;
-        st.fs = None;
-        drop(st);
+        self.shared.lock().stop = true;
         self.shared.wake.notify_all();
+        *self.shared.fs() = None;
     }
 }
 
@@ -108,6 +113,7 @@ impl Watcher {
     pub fn new(on_change: impl Fn(&Path, Option<&GitInfo>) + Send + Sync + 'static) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::default(),
+            fs: Mutex::default(),
             wake: Condvar::new(),
             on_change: Box::new(on_change),
             runs: AtomicU64::new(0),
@@ -119,7 +125,7 @@ impl Watcher {
             }
         })
         .ok();
-        shared.lock().fs = fs;
+        *shared.fs() = fs;
         for i in 0..WORKERS {
             let s = shared.clone();
             let _ = thread::Builder::new()
@@ -132,6 +138,7 @@ impl Watcher {
     /// A pane is in `checkout`: watch it (the first pane starts a run at
     /// once). Returns its info if already known.
     pub fn add(&self, checkout: &Checkout) -> Option<GitInfo> {
+        let mut fs = self.shared.fs();
         let mut st = self.shared.lock();
         if let Some(e) = st.checkouts.get_mut(&checkout.root) {
             e.refs += 1;
@@ -147,13 +154,12 @@ impl Watcher {
                 watched.push(d.clone());
             }
         }
+        let mut new = Vec::new();
         for p in &watched {
             let n = st.watches.entry(p.clone()).or_default();
             *n += 1;
-            if *n == 1
-                && let Some(fs) = st.fs.as_mut()
-            {
-                let _ = fs.watch(p, RecursiveMode::Recursive);
+            if *n == 1 {
+                new.push(p.clone());
             }
         }
         st.checkouts.insert(
@@ -172,12 +178,18 @@ impl Watcher {
             },
         );
         drop(st);
+        if let Some(fs) = fs.as_mut() {
+            for p in &new {
+                let _ = fs.watch(p, RecursiveMode::Recursive);
+            }
+        }
         self.shared.wake.notify_all();
         None
     }
 
     /// A pane left the checkout at `root`; the last one stops watching it.
     pub fn remove(&self, root: &Path) {
+        let mut fs = self.shared.fs();
         let mut st = self.shared.lock();
         let Some(e) = st.checkouts.get_mut(root) else {
             return;
@@ -187,14 +199,19 @@ impl Watcher {
             return;
         }
         let e = st.checkouts.remove(root).expect("present");
+        let mut gone = Vec::new();
         for p in e.watched {
             let n = st.watches.get_mut(&p).expect("counted");
             *n -= 1;
             if *n == 0 {
                 st.watches.remove(&p);
-                if let Some(fs) = st.fs.as_mut() {
-                    let _ = fs.unwatch(&p);
-                }
+                gone.push(p);
+            }
+        }
+        drop(st);
+        if let Some(fs) = fs.as_mut() {
+            for p in &gone {
+                let _ = fs.unwatch(p);
             }
         }
     }
