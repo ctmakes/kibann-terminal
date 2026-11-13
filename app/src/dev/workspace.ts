@@ -120,7 +120,7 @@ const diffs: number[] = [];
 if (params.saved) ws.apply(backend.layout);
 else void backend.act({ t: "new_tab", focus: true });
 
-(window as any).__ws = {
+const api = {
   ws,
   transports,
   inputs,
@@ -137,6 +137,11 @@ else void backend.act({ t: "new_tab", focus: true });
   diffs,
   previews,
   notes,
+  /** A notice with a button (as "update ready"); `clicked` counts uses. */
+  clicked: 0,
+  noticeWithButton(text: string, label: string) {
+    ws.notice(text, 0, { label, run: () => (api.clicked += 1) });
+  },
   /** The window gains or loses focus (as far as notifications care). */
   setWindowFocused(on: boolean) {
     windowFocused = on;
@@ -233,3 +238,4 @@ else void backend.act({ t: "new_tab", focus: true });
     return [...ws.panes.values()].every((p) => p.view !== null);
   },
 };
+(window as any).__ws = api;

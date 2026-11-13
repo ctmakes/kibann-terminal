@@ -1,0 +1,140 @@
+name: Release
+run-name: Release ${{ github.ref_name }}
+
+# A version tag (scripts/bump-version.sh pushes one) builds, signs and
+# notarizes the macOS app and attaches it, with the updater's latest.json,
+# to a draft GitHub release. Publishing the draft is by hand (RELEASE.md).
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (Apple silicon)
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Install npm packages
+        working-directory: app
+        run: npm ci
+
+      - name: The tag matches the app's version
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          if [ "$want" != "$have" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but tauri.conf.json says $have (use scripts/bump-version.sh)"
+            exit 1
+          fi
+
+      - name: Tests
+        shell: bash
+        run: |
+          cargo test --workspace
+          cd app && npm run typecheck && npm test
+
+      # This version's CHANGELOG.md section (a release candidate takes the
+      # version it leads to), then sections marked "Included in <version>".
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          base="${version%%-*}"
+          notes=$(awk -v v="$base" '
+            /^## / {
+              included = "Included in " v
+              take = index($0, "## [" v "]") == 1
+              if (!take && substr($0, length($0) - length(included) + 1) == included) {
+                take = 1
+                print "## Also in this release"
+              }
+              next
+            }
+            take { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
+            echo "::warning::CHANGELOG.md has no section for $base"
+            notes="See the assets to download and install this version."
+          fi
+          {
+            echo "body<<NOTES_EOF"
+            echo "$notes"
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Import the signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -v -p codesigning build.keychain
+          rm certificate.p12
+
+      - name: Build, sign, notarize and upload
+        uses: tauri-apps/tauri-action@v1
+        timeout-minutes: 45
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: Kibann Terminal ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          prerelease: ${{ steps.notes.outputs.prerelease }}
+          uploadUpdaterJson: true
+          args: --target aarch64-apple-darwin --config src-tauri/tauri.release.conf.json
+
+      # An unsigned or unnotarized build must never reach the draft
+      # unnoticed (the upload already happened; this fails the run).
+      - name: Check the signature and notarization
+        shell: bash
+        run: |
+          bundle=target/aarch64-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app | head -1)
+          dmg=$(ls "$bundle"/dmg/*.dmg | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose "$app"
+          xcrun stapler validate "$app"
+          xcrun stapler validate "$dmg" || echo "::warning::the dmg itself isn't stapled (the app inside is)"

@@ -191,3 +191,7 @@ cargo run -p term --bin vt-replay -- out.cast -o out.jsonl # frames a session wo
 
 Screenshot baselines in `app/e2e/__screenshots__` were made on macOS; regenerate them with
 `npm run test:e2e:update` on other platforms.
+
+## License
+
+MIT; see [LICENSE](LICENSE). The bundled themes come from [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) (MIT).

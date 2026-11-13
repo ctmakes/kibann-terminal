@@ -6,6 +6,7 @@
 
 mod open;
 mod theme;
+mod update;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -628,6 +629,7 @@ fn quit_ending_sessions(app: &AppHandle) {
 /// Menu item id for [`quit_ending_sessions`].
 #[cfg(target_os = "macos")]
 const QUIT_END_SESSIONS: &str = "quit-end-sessions";
+const CHECK_UPDATES: &str = "check-updates";
 
 /// The macOS menu bar: the standard menus plus the workspace actions with
 /// their shortcuts. An item's id is the frontend action as JSON.
@@ -647,6 +649,8 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .hide()
         .hide_others()
         .show_all()
+        .separator()
+        .item(&MenuItemBuilder::with_id(CHECK_UPDATES, "Check for Updates…").build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id(QUIT_END_SESSIONS, "Quit and End Sessions").build(app)?)
         .quit()
@@ -767,12 +771,16 @@ pub fn run() {
             let _ = app.emit("menu-action", id);
         } else if id == QUIT_END_SESSIONS {
             quit_ending_sessions(app);
+        } else if id == CHECK_UPDATES {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move { update::check(&app, true).await });
         }
     });
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let channels = Channels::default();
             let handle = app.handle();
@@ -811,6 +819,7 @@ pub fn run() {
             reload_choice(handle);
             watch_config(handle.clone());
             on_notification_click(handle);
+            update::start(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -834,6 +843,8 @@ pub fn run() {
             set_badge,
             notify,
             menu_keys,
+            update::update_install,
+            update::update_check,
             settings_current,
             theme_current,
             theme_list,

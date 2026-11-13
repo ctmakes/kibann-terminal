@@ -640,10 +640,37 @@ export class Workspace {
   }
 
   /** Show `text` in the corner for a while. */
-  notice(text: string, ms = 8000): void {
+  notice(text: string, ms = 8000, action?: { label: string; run(): void }): void {
     const n = document.createElement("div");
     n.className = "notice";
     n.textContent = text;
+    if (action) {
+      // A notice with a button stays until it's used or dismissed.
+      const b = document.createElement("button");
+      b.className = "notice-action";
+      b.textContent = action.label;
+      Object.assign(b.style, {
+        marginLeft: "10px",
+        padding: "2px 10px",
+        border: "1px solid var(--k-divider)",
+        borderRadius: "5px",
+        background: "var(--k-current)",
+        color: "var(--k-current-text)",
+        font: "12px -apple-system, system-ui, sans-serif",
+      });
+      b.addEventListener("click", () => {
+        n.remove();
+        action.run();
+      });
+      const x = document.createElement("button");
+      x.className = "notice-close";
+      x.textContent = "✕";
+      x.setAttribute("aria-label", "Dismiss");
+      Object.assign(x.style, { marginLeft: "6px", border: "0", background: "transparent", color: "var(--k-muted)" });
+      x.addEventListener("click", () => n.remove());
+      n.append(b, x);
+      n.style.pointerEvents = "auto";
+    }
     Object.assign(n.style, {
       maxWidth: "420px",
       padding: "7px 10px",
@@ -654,7 +681,7 @@ export class Workspace {
       boxShadow: "0 4px 16px var(--k-shadow)",
     });
     this.notices.append(n);
-    window.setTimeout(() => n.remove(), ms);
+    if (!action) window.setTimeout(() => n.remove(), ms);
   }
 
   private firstRunHint(key: string): void {

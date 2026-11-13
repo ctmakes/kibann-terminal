@@ -89,6 +89,14 @@ async function start(): Promise<void> {
     ws.setTheme(e.payload.theme);
   });
   await listen<string>("notice", (e) => ws.notice(e.payload));
+  // A new version is downloaded: offer to restart into it (shells keep
+  // running in the daemon).
+  await listen<{ version: string }>("update-ready", (e) =>
+    ws.notice(`Kibann Terminal ${e.payload.version} is ready.`, 0, {
+      label: "Restart to update",
+      run: () => void invoke("update_install").catch((err) => ws.notice(`Couldn't update: ${err}`)),
+    }),
+  );
   // A notification was clicked: show the pane it's about.
   await listen<number>("focus-pane", (e) => ws.show(e.payload));
 

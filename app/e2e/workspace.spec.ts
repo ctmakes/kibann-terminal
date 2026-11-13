@@ -1032,3 +1032,20 @@ test.describe("keybinds", () => {
     expect((await state(page)).panes).toHaveLength(3);
   });
 });
+
+test.describe("notices", () => {
+  test("a notice with a button stays until used or dismissed", async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => (window as any).__ws.noticeWithButton("Kibann Terminal 0.2.0 is ready.", "Restart to update"));
+    const n = page.locator(".notice", { hasText: "0.2.0 is ready" });
+    await expect(n).toBeVisible();
+    await page.waitForTimeout(300);
+    await n.locator(".notice-action").click();
+    await expect(n).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__ws.clicked)).toBe(1);
+    await page.evaluate(() => (window as any).__ws.noticeWithButton("again", "Go"));
+    await page.locator(".notice", { hasText: "again" }).locator(".notice-close").click();
+    await expect(page.locator(".notice", { hasText: "again" })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__ws.clicked)).toBe(1);
+  });
+});
