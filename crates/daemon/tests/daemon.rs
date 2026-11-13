@@ -540,15 +540,15 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: SessionId) -> Duration {
         // machine) are acked and applied too: dropping them unacked stops
         // the session sending at two outstanding, and nothing would echo.
         while let Ok(ev) = rx.try_recv() {
-            if let Ev::Frame(id, f) = ev {
-                if id == s {
-                    c.send(&ClientMsg::Ack {
-                        session: s,
-                        seq: f.seq,
-                    })
-                    .unwrap();
-                    screen.apply(&f);
-                }
+            if let Ev::Frame(id, f) = ev
+                && id == s
+            {
+                c.send(&ClientMsg::Ack {
+                    session: s,
+                    seq: f.seq,
+                })
+                .unwrap();
+                screen.apply(&f);
             }
         }
         let ch = char::from(b'a' + (i % 26) as u8).to_string();

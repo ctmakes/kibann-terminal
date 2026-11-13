@@ -904,9 +904,15 @@ test.describe("settings", () => {
     await press(page, "Meta+Equal");
     await press(page, "Meta+0");
     expect((await font(page)).size).toBe(18);
-    // A family the system has (a wide one, so the cells change).
+    // A family the system has (a wide one, so the cells change): Verdana on
+    // macOS, one of the others on Linux (CI).
     const mono = (await font(page)).cells[0]![0];
-    await page.evaluate(() => (window as any).__ws.setSettings({ font_size: 18, font_family: ["Verdana"] }));
+    await page.evaluate(() =>
+      (window as any).__ws.setSettings({
+        font_size: 18,
+        font_family: ["Verdana", "DejaVu Sans", "Liberation Sans", "FreeSans"],
+      }),
+    );
     await expect.poll(async () => (await font(page)).cells[0]![0]).not.toBe(mono);
   });
 });
