@@ -12,6 +12,8 @@ export const SIDEBAR = { min: 160, max: 480, default: 240 };
 const THUMB_MS = 500;
 /** Text smaller than this is a grey smear; crop instead of shrinking. */
 const MIN_SCALE = 0.4;
+/** Largest thumbnail scale: past it a lone narrow pane's text looks full size. */
+const MAX_SCALE = 0.6;
 const THUMB_MAX_H = 120;
 const STORE = "kibann.sidebar";
 
@@ -69,6 +71,8 @@ interface Card {
   dot: HTMLSpanElement;
   timer: number;
   dirty: boolean;
+  /** The scale it was last sized at. */
+  scale: number;
 }
 
 export interface SidebarOptions {
@@ -258,7 +262,7 @@ export class Sidebar {
       if (t.classList.contains("pane-changed")) this.opts.onDiff(id);
       else this.opts.onPick(id);
     });
-    const c: Card = { el, thumb, line, title, dot, timer: 0, dirty: true };
+    const c: Card = { el, thumb, line, title, dot, timer: 0, dirty: true, scale: 0 };
     this.cards.set(id, c);
     return c;
   }
@@ -296,16 +300,29 @@ export class Sidebar {
     return this.panes.find((p) => p.id === id);
   }
 
+  /**
+   * One scale for every card, so text is the same size in all of them: the
+   * widest pane fits the card (within MIN_SCALE..MAX_SCALE); narrower ones
+   * leave room on the right.
+   */
+  private scale(): number {
+    const thumb = Math.max(1, this.width - 26) * (window.devicePixelRatio || 1);
+    const widest = Math.max(0, ...this.panes.map((p) => p.canvas?.width ?? 0));
+    if (widest === 0) return MIN_SCALE;
+    return Math.min(MAX_SCALE, Math.max(MIN_SCALE, thumb / widest));
+  }
+
   private sizeThumb(id: PaneId): void {
     const c = this.cards.get(id);
     const src = this.pane(id)?.canvas;
     if (!c) return;
     const w = Math.max(1, this.width - 26);
-    const scale = src && src.width > 0 ? Math.max((w * (window.devicePixelRatio || 1)) / src.width, MIN_SCALE) : 1;
+    const scale = this.scale();
     const aspect = src && src.width > 0 ? (src.height * scale) / (w * (window.devicePixelRatio || 1)) : 0.6;
     const h = Math.max(24, Math.min(THUMB_MAX_H, Math.round(w * aspect)));
     const dpr = window.devicePixelRatio || 1;
-    if (c.thumb.width !== Math.round(w * dpr) || c.thumb.height !== Math.round(h * dpr)) {
+    if (c.scale !== scale || c.thumb.width !== Math.round(w * dpr) || c.thumb.height !== Math.round(h * dpr)) {
+      c.scale = scale;
       c.thumb.width = Math.round(w * dpr);
       c.thumb.height = Math.round(h * dpr);
       c.thumb.style.height = `${h}px`;
@@ -334,10 +351,10 @@ export class Sidebar {
     const ctx = c.thumb.getContext("2d");
     if (!ctx || src.width === 0 || src.height === 0) return;
     ctx.clearRect(0, 0, c.thumb.width, c.thumb.height);
-    // Shrink to the card's width, but not past MIN_SCALE (then the left
-    // part shows). Vertically, show the part around the cursor, where the
+    // The shared scale (the left part shows if the pane is wider than the
+    // card). Vertically, show the part around the cursor, where the
     // activity is: a prompt, an agent's input box.
-    const scale = Math.max(c.thumb.width / src.width, MIN_SCALE);
+    const scale = this.scale();
     const w = Math.min(src.width, c.thumb.width / scale);
     const h = Math.min(src.height, c.thumb.height / scale);
     const at = this.pane(id)?.cursor() ?? 1;
