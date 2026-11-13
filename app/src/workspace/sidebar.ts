@@ -1,20 +1,21 @@
-// The sidebar: every pane in every tab as a card (a live thumbnail, where it
-// is, its agent dot), grouped by repository, the groups needing attention
-// first. Clicking a card shows its pane; clicking ●N opens its diff.
+// The sidebar: every pane in every tab as one compact row (agent dot, title,
+// branch, ●N), grouped by repository, the groups needing attention first.
+// Hovering a row shows a live preview of the pane beside the sidebar.
+// Clicking a row shows its pane; clicking ●N opens its diff.
 
 import type { AgentState, PaneDir } from "../proto";
 import type { PaneId } from "./layout";
 import { headerParts, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
 
-export const SIDEBAR = { min: 160, max: 480, default: 240 };
-/** Thumbnails redraw at most this often per pane. */
-const THUMB_MS = 500;
-/** Text smaller than this is a grey smear; crop instead of shrinking. */
-const MIN_SCALE = 0.4;
-/** Largest thumbnail scale: past it a lone narrow pane's text looks full size. */
-const MAX_SCALE = 0.6;
-const THUMB_MAX_H = 120;
+export const SIDEBAR = { min: 140, max: 480, default: 220 };
+/** The preview redraws at most this often. */
+const PREVIEW_MS = 250;
+/** The preview's scale: half size is small but still readable. */
+const PREVIEW_SCALE = 0.5;
+/** The preview's largest size (CSS px); a bigger pane is cropped. */
+const PREVIEW_MAX = { w: 440, h: 260 };
+const ROW_H = 24;
 const STORE = "kibann.sidebar";
 
 /** A pane as the sidebar needs it. */
@@ -63,22 +64,17 @@ export function groupPanes(panes: CardPane[], git: GitMap, status: StatusMap): G
     .map((x) => x.g);
 }
 
-interface Card {
+interface Row {
   el: HTMLDivElement;
-  thumb: HTMLCanvasElement;
-  line: HTMLDivElement;
-  title: HTMLDivElement;
+  title: HTMLSpanElement;
   dot: HTMLSpanElement;
-  timer: number;
-  dirty: boolean;
-  /** The scale it was last sized at. */
-  scale: number;
+  line: HTMLSpanElement;
 }
 
 export interface SidebarOptions {
   /** Show this pane (its tab, focused). */
   onPick(pane: PaneId): void;
-  /** ●N was clicked on this pane's card. */
+  /** ●N was clicked on this pane's row. */
   onDiff(pane: PaneId): void;
   /** The sidebar opened, closed or changed width. */
   onResize(): void;
@@ -87,8 +83,12 @@ export interface SidebarOptions {
 export class Sidebar {
   readonly el: HTMLDivElement;
   private readonly list: HTMLDivElement;
-  private readonly cards = new Map<PaneId, Card>();
+  private readonly rows = new Map<PaneId, Row>();
   private panes: CardPane[] = [];
+  /** The hover preview: one canvas, for the pane under the pointer. */
+  private readonly preview: HTMLCanvasElement;
+  private previewing: PaneId | null = null;
+  private previewTimer = 0;
   visible = false;
   width = SIDEBAR.default;
 
@@ -102,7 +102,7 @@ export class Sidebar {
       background: "#101010",
       boxSizing: "border-box",
       color: "#9a9a9a",
-      font: "11px -apple-system, system-ui, sans-serif",
+      font: "12px -apple-system, system-ui, sans-serif",
       overflow: "hidden",
     });
     this.list = document.createElement("div");
@@ -111,9 +111,10 @@ export class Sidebar {
       position: "absolute",
       inset: "0",
       overflowY: "auto",
-      padding: "8px",
+      padding: "6px 4px",
       boxSizing: "border-box",
     });
+    this.list.addEventListener("mouseleave", () => this.hidePreview());
     const grip = document.createElement("div");
     grip.className = "sidebar-grip";
     Object.assign(grip.style, {
@@ -130,6 +131,7 @@ export class Sidebar {
     });
     grip.addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      this.hidePreview();
       grip.setPointerCapture(e.pointerId);
       const left = this.el.getBoundingClientRect().left;
       const move = (ev: PointerEvent) => this.setWidth(ev.clientX - left);
@@ -141,7 +143,20 @@ export class Sidebar {
       grip.addEventListener("pointermove", move);
       grip.addEventListener("pointerup", up);
     });
-    this.el.append(this.list, grip);
+    // Fixed, so the sidebar's overflow doesn't clip it; it floats over the
+    // panes beside the sidebar and never takes the pointer.
+    this.preview = document.createElement("canvas");
+    this.preview.className = "sidebar-preview";
+    Object.assign(this.preview.style, {
+      position: "fixed",
+      display: "none",
+      zIndex: "20",
+      pointerEvents: "none",
+      borderRadius: "6px",
+      border: "1px solid #3a3a3a",
+      boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+    });
+    this.el.append(this.list, grip, this.preview);
     this.load();
     this.apply();
   }
@@ -150,9 +165,9 @@ export class Sidebar {
 
   toggle(): void {
     this.visible = !this.visible;
+    this.hidePreview();
     this.apply();
     this.save();
-    if (this.visible) for (const id of this.cards.keys()) this.paintNow(id);
   }
 
   setWidth(w: number): void {
@@ -163,7 +178,6 @@ export class Sidebar {
   private apply(): void {
     this.el.style.display = this.visible ? "block" : "none";
     this.el.style.width = `${this.width}px`;
-    for (const id of this.cards.keys()) this.sizeThumb(id);
     this.opts.onResize();
   }
 
@@ -194,20 +208,21 @@ export class Sidebar {
     this.panes = panes;
     const groups = groupPanes(panes, git, status);
     const keep = new Set(panes.map((p) => p.id));
-    for (const [id, c] of this.cards) {
+    for (const [id, r] of this.rows) {
       if (keep.has(id)) continue;
-      clearTimeout(c.timer);
-      c.el.remove();
-      this.cards.delete(id);
+      r.el.remove();
+      this.rows.delete(id);
     }
+    if (this.previewing !== null && !keep.has(this.previewing)) this.hidePreview();
     const nodes: HTMLElement[] = [];
     for (const g of groups) {
       const h = document.createElement("div");
       h.className = "sidebar-group";
       h.textContent = g.label;
       Object.assign(h.style, {
-        margin: "6px 2px 4px",
-        color: "#d0d0d0",
+        margin: nodes.length ? "8px 6px 2px" : "0 6px 2px",
+        color: "#7d7d7d",
+        fontSize: "11px",
         fontWeight: "600",
         overflow: "hidden",
         textOverflow: "ellipsis",
@@ -215,68 +230,77 @@ export class Sidebar {
       });
       nodes.push(h);
       for (const p of g.panes) {
-        const c = this.cards.get(p.id) ?? this.makeCard(p.id);
-        this.fillCard(c, p, git[String(p.id)], status);
-        nodes.push(c.el);
+        const r = this.rows.get(p.id) ?? this.makeRow(p.id);
+        this.fillRow(r, p, git[String(p.id)], status);
+        nodes.push(r.el);
       }
     }
     this.list.replaceChildren(...nodes);
-    for (const p of panes) this.sizeThumb(p.id);
+    if (this.previewing !== null) this.paintPreview();
   }
 
-  private makeCard(id: PaneId): Card {
+  private makeRow(id: PaneId): Row {
     const el = document.createElement("div");
     el.className = "sidebar-card";
     el.dataset.pane = String(id);
     Object.assign(el.style, {
-      marginBottom: "8px",
-      padding: "4px",
-      borderRadius: "5px",
-      border: "1px solid transparent",
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      height: `${ROW_H}px`,
+      padding: "0 6px",
+      borderRadius: "4px",
       cursor: "default",
+      whiteSpace: "nowrap",
     });
-    const thumb = document.createElement("canvas");
-    thumb.className = "sidebar-thumb";
-    Object.assign(thumb.style, { display: "block", width: "100%", borderRadius: "3px" });
-    const row = document.createElement("div");
-    Object.assign(row.style, { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" });
-    const title = document.createElement("div");
+    // The dot's slot keeps titles aligned whether or not there's an agent.
+    const slot = document.createElement("span");
+    Object.assign(slot.style, { flex: "0 0 8px", display: "flex", justifyContent: "center" });
+    const dot = makeDot();
+    slot.append(dot);
+    const title = document.createElement("span");
     title.className = "sidebar-title";
     Object.assign(title.style, {
       flex: "1 1 auto",
-      minWidth: "0",
+      minWidth: "24px",
       overflow: "hidden",
       textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
-      color: "#c8c8c8",
     });
-    const dot = makeDot();
-    row.append(title, dot);
-    const line = document.createElement("div");
+    const line = document.createElement("span");
     line.className = "sidebar-line";
-    Object.assign(line.style, { display: "flex", gap: "6px", overflow: "hidden", whiteSpace: "nowrap", marginTop: "2px" });
-    el.append(thumb, row, line);
+    Object.assign(line.style, {
+      flex: "0 1 auto",
+      display: "flex",
+      gap: "5px",
+      minWidth: "0",
+      maxWidth: "60%",
+      overflow: "hidden",
+      fontSize: "11px",
+    });
+    el.append(slot, title, line);
     el.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       const t = e.target as HTMLElement;
       if (t.classList.contains("pane-changed")) this.opts.onDiff(id);
       else this.opts.onPick(id);
     });
-    const c: Card = { el, thumb, line, title, dot, timer: 0, dirty: true, scale: 0 };
-    this.cards.set(id, c);
-    return c;
+    el.addEventListener("mouseenter", () => this.showPreview(id));
+    const r: Row = { el, title, dot, line };
+    this.rows.set(id, r);
+    return r;
   }
 
-  private fillCard(c: Card, p: CardPane, place: PaneDir | undefined, status: StatusMap): void {
-    c.title.textContent = p.title || "shell";
-    c.el.title = place?.dir ?? "";
-    c.el.style.borderColor = p.focused && p.shown ? "#4a7dff" : "transparent";
-    c.el.style.background = p.shown ? "#1b1b1b" : "transparent";
+  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap): void {
+    r.title.textContent = p.title || "shell";
+    r.el.title = place?.dir ?? "";
+    const current = p.focused && p.shown;
+    r.el.style.background = current ? "#24324f" : "";
+    r.title.style.color = current ? "#ffffff" : p.shown ? "#d8d8d8" : "#a8a8a8";
     const s = status[String(p.id)];
-    showDot(c.dot, s && s.state !== "idle" ? s.state : null, s?.agent);
+    showDot(r.dot, s && s.state !== "idle" ? s.state : null, s?.agent);
     // The header's parts without the repo or directory (the group says it).
     const parts = headerParts(place).filter((x) => x.kind !== "place");
-    c.line.replaceChildren(
+    r.line.replaceChildren(
       ...parts.map((x) => {
         const span = document.createElement("span");
         span.className = `pane-${x.kind}`;
@@ -285,85 +309,83 @@ export class Sidebar {
           overflow: "hidden",
           textOverflow: "ellipsis",
           flex: x.kind === "branch" ? "0 1 auto" : "0 0 auto",
-          color: x.kind === "changed" ? "#d29922" : x.kind === "conflicts" ? "#f85149" : "",
+          minWidth: x.kind === "branch" ? "0" : "",
+          color: x.kind === "changed" ? "#d29922" : x.kind === "conflicts" ? "#f85149" : "#7d7d7d",
           cursor: x.kind === "changed" ? "pointer" : "",
         });
         return span;
       }),
     );
-    c.thumb.style.background = p.bg;
   }
 
-  // ---- thumbnails ----
+  // ---- the hover preview ----
 
   private pane(id: PaneId): CardPane | undefined {
     return this.panes.find((p) => p.id === id);
   }
 
-  /**
-   * One scale for every card, so text is the same size in all of them: the
-   * widest pane fits the card (within MIN_SCALE..MAX_SCALE); narrower ones
-   * leave room on the right.
-   */
-  private scale(): number {
-    const thumb = Math.max(1, this.width - 26) * (window.devicePixelRatio || 1);
-    const widest = Math.max(0, ...this.panes.map((p) => p.canvas?.width ?? 0));
-    if (widest === 0) return MIN_SCALE;
-    return Math.min(MAX_SCALE, Math.max(MIN_SCALE, thumb / widest));
+  private showPreview(id: PaneId): void {
+    this.previewing = id;
+    this.paintPreview();
   }
 
-  private sizeThumb(id: PaneId): void {
-    const c = this.cards.get(id);
-    const src = this.pane(id)?.canvas;
-    if (!c) return;
-    const w = Math.max(1, this.width - 26);
-    const scale = this.scale();
-    const aspect = src && src.width > 0 ? (src.height * scale) / (w * (window.devicePixelRatio || 1)) : 0.6;
-    const h = Math.max(24, Math.min(THUMB_MAX_H, Math.round(w * aspect)));
-    const dpr = window.devicePixelRatio || 1;
-    if (c.scale !== scale || c.thumb.width !== Math.round(w * dpr) || c.thumb.height !== Math.round(h * dpr)) {
-      c.scale = scale;
-      c.thumb.width = Math.round(w * dpr);
-      c.thumb.height = Math.round(h * dpr);
-      c.thumb.style.height = `${h}px`;
-      c.dirty = true;
-      this.paintNow(id);
-    }
+  private hidePreview(): void {
+    this.previewing = null;
+    clearTimeout(this.previewTimer);
+    this.previewTimer = 0;
+    this.preview.style.display = "none";
   }
 
-  /** The pane painted: redraw its thumbnail soon (at most twice a second). */
+  /** The pane painted: if it's the one previewed, redraw soon. */
   painted(id: PaneId): void {
-    const c = this.cards.get(id);
-    if (!c) return;
-    c.dirty = true;
-    if (!this.visible || c.timer) return;
-    c.timer = window.setTimeout(() => {
-      c.timer = 0;
-      this.paintNow(id);
-    }, THUMB_MS);
+    if (id !== this.previewing || this.previewTimer) return;
+    this.previewTimer = window.setTimeout(() => {
+      this.previewTimer = 0;
+      this.paintPreview();
+    }, PREVIEW_MS);
   }
 
-  private paintNow(id: PaneId): void {
-    const c = this.cards.get(id);
-    const src = this.pane(id)?.canvas;
-    if (!c || !src || !this.visible || !c.dirty) return;
-    c.dirty = false;
-    const ctx = c.thumb.getContext("2d");
-    if (!ctx || src.width === 0 || src.height === 0) return;
-    ctx.clearRect(0, 0, c.thumb.width, c.thumb.height);
-    // The shared scale (the left part shows if the pane is wider than the
-    // card). Vertically, show the part around the cursor, where the
-    // activity is: a prompt, an agent's input box.
-    const scale = this.scale();
-    const w = Math.min(src.width, c.thumb.width / scale);
-    const h = Math.min(src.height, c.thumb.height / scale);
-    const at = this.pane(id)?.cursor() ?? 1;
-    const top = Math.max(0, Math.min(src.height - h, at * src.height - h * 0.7));
+  /** Draw the previewed pane at half size beside its row; a pane bigger
+   * than the preview shows its left part, around the cursor vertically
+   * (where the activity is: a prompt, an agent's input box). */
+  private paintPreview(): void {
+    const id = this.previewing;
+    const p = id === null ? undefined : this.pane(id);
+    const row = id === null ? undefined : this.rows.get(id);
+    const src = p?.canvas;
+    if (!this.visible || !p || !row || !src || src.width === 0 || src.height === 0) {
+      this.preview.style.display = "none";
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.min(PREVIEW_MAX.w, Math.round((src.width / dpr) * PREVIEW_SCALE));
+    const h = Math.min(PREVIEW_MAX.h, Math.round((src.height / dpr) * PREVIEW_SCALE));
+    const c = this.preview;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      c.style.width = `${w}px`;
+      c.style.height = `${h}px`;
+    }
+    const side = this.el.getBoundingClientRect();
+    const at = row.el.getBoundingClientRect();
+    const top = Math.max(4, Math.min(window.innerHeight - h - 6, at.top + at.height / 2 - h / 2));
+    c.style.left = `${side.right + 6}px`;
+    c.style.top = `${top}px`;
+    c.style.background = p.bg;
+    c.style.display = "block";
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    const sw = Math.min(src.width, c.width / PREVIEW_SCALE);
+    const sh = Math.min(src.height, c.height / PREVIEW_SCALE);
+    const cursor = p.cursor();
+    const sy = Math.max(0, Math.min(src.height - sh, cursor * src.height - sh * 0.7));
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, top, w, h, 0, 0, w * scale, h * scale);
+    ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * PREVIEW_SCALE, sh * PREVIEW_SCALE);
   }
 
   dispose(): void {
-    for (const c of this.cards.values()) clearTimeout(c.timer);
+    this.hidePreview();
   }
 }

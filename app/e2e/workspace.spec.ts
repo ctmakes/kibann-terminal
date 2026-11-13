@@ -662,22 +662,37 @@ test.describe("sidebar", () => {
     expect(s.width).toBeGreaterThan(300);
   });
 
-  test("thumbnails show the panes", async ({ page }) => {
+  test("rows are compact; hovering one previews its pane", async ({ page }) => {
     await three(page);
     await press(page, "Meta+Shift+b");
-    await page.waitForTimeout(700);
-    // Every thumbnail has something drawn (the pane's text).
-    const drawn = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLCanvasElement>(".sidebar-thumb")].map((c) => {
-        const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
-        let lit = 0;
-        // Pixels clearly off the background (#181818): text, shrunk.
-        for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] + d[i + 1] + d[i + 2] > 140) lit++;
-        return lit;
-      }),
+    const rows = await page.locator(".sidebar-card").evaluateAll((els) =>
+      els.map((e) => e.getBoundingClientRect().height),
     );
-    expect(drawn.length).toBe(4);
-    for (const n of drawn) expect(n).toBeGreaterThan(20);
+    expect(rows.length).toBe(4);
+    for (const h of rows) expect(h).toBeLessThanOrEqual(26);
+
+    const preview = page.locator(".sidebar-preview");
+    await expect(preview).toBeHidden();
+    await page.locator('.sidebar-card[data-pane="3"]').hover();
+    await expect(preview).toBeVisible();
+    // Beside the sidebar, with the pane's text drawn in it.
+    const side = (await page.locator(".sidebar").boundingBox())!;
+    const box = (await preview.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(side.x + side.width);
+    const lit = await preview.evaluate((c: HTMLCanvasElement) => {
+      const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] + d[i + 1] + d[i + 2] > 300) n++;
+      return n;
+    });
+    expect(lit).toBeGreaterThan(50);
     await expect(page.locator("#ws")).toHaveScreenshot("workspace-sidebar.png");
+
+    // It follows the pointer, and goes away when the pointer leaves.
+    await page.locator('.sidebar-card[data-pane="1"]').hover();
+    const moved = (await preview.boundingBox())!;
+    expect(moved.y).not.toBe(box.y);
+    await page.mouse.move(side.x + side.width + 300, side.y + 300);
+    await expect(preview).toBeHidden();
   });
 });

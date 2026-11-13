@@ -81,7 +81,7 @@ Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane
 
 ### The sidebar
 
-**Cmd+Shift+B** (Ctrl+Shift+B elsewhere, or View → Toggle Sidebar) shows every pane of every tab on the left, grouped by repository (panes outside one by directory). Each card has a live thumbnail of the pane's screen, its title, agent dot and branch line. Groups with an agent waiting for you come first, then finished, then working. Click a card to go to its pane; click its `●5` for the diff. Drag the sidebar's edge to resize it; whether it's shown and its width are remembered.
+**Cmd+Shift+B** (Ctrl+Shift+B elsewhere, or View → Toggle Sidebar) lists every pane of every tab on the left, one compact row each (agent dot, title, branch, `●5`), grouped by repository (panes outside one by directory). Hover a row to see a live preview of the pane beside the sidebar. Groups with an agent waiting for you come first, then finished, then working. Click a row to go to its pane; click its `●5` for the diff. Drag the sidebar's edge to resize it; whether it's shown and its width are remembered.
 
 ### Agent status at a glance
 
