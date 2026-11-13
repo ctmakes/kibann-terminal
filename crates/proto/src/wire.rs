@@ -19,7 +19,7 @@ use crate::{Frame, InputEvent, Resize};
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -94,6 +94,12 @@ pub enum ClientMsg {
     Release {
         req: ReqId,
         pane: PaneId,
+    },
+    /// Color every session (and every new one) with `theme`. Replied with
+    /// [`Reply::Ok`].
+    SetTheme {
+        req: ReqId,
+        theme: crate::theme::Theme,
     },
     /// Send this session's frames to this connection, starting with a full
     /// frame. Takes the session over from another connection.

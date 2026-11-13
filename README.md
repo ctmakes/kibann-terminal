@@ -82,7 +82,23 @@ Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane
 
 ### The sidebar
 
-**Cmd+Shift+B** (Ctrl+Shift+B elsewhere, or View → Toggle Sidebar) lists every pane of every tab on the left, one compact row each (agent dot, title, branch, `●5`), grouped by repository (panes outside one by directory). Hover a row to see a live preview of the pane beside the sidebar. Groups with an agent waiting for you come first, then finished, then working. Click a row to go to its pane; click its `●5` for the diff. Drag the sidebar's edge to resize it; whether it's shown and its width are remembered.
+The sidebar lists every pane of every tab on the left, one compact row each (agent dot, title, branch, `●5`), grouped by repository (panes outside one by directory). Hover a row to see a live preview of the pane beside the sidebar. Groups with an agent waiting for you come first, then finished, then working. Click a row to go to its pane; click its `●5` for the diff.
+
+It's never hidden. **Cmd+Shift+B** (Ctrl+Shift+B elsewhere, View → Toggle Sidebar, or the sidebar button at its bottom) folds it to a narrow rail, one badge per pane (its agent dot and first letter), which still click and preview, and opens it again. Drag its edge to resize it; dragging it nearly shut folds it. Its state and width are remembered. Its bottom row also has buttons for the theme picker and the shortcut sheet (hover one for its name and key), and the `?` at the end of the tab bar opens the shortcut sheet too.
+
+### Themes
+
+View → Theme… (or the half-circle button at the bottom of the sidebar) opens a searchable list of about 900 themes, the [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) collection with the same names as Ghostty's. Moving through it shows each theme live on every pane; Enter keeps it, Esc goes back. A theme colors the terminals (programs asking for the background color get the theme's) and the window around them: a light theme makes the tab bar, sidebar and headers light too. Colors a program sets itself still win.
+
+The choice is saved in `~/.config/kibann/config` (or `$XDG_CONFIG_HOME/kibann/config`), Ghostty syntax, which can be edited by hand and applies when saved:
+
+```
+theme = Dracula
+# or one for each system appearance:
+theme = light:Kibann Light,dark:Kibann Dark
+```
+
+The picker sets the theme for the appearance in use. Your own themes go in `~/.config/kibann/themes/`, one file per theme in Ghostty's format, named as the theme; they win over a bundled one of the same name. A bad name or line shows a notice and the default is used. The defaults are Kibann Dark and Kibann Light.
 
 ### Agent status at a glance
 

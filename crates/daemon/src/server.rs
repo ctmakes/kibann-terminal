@@ -110,6 +110,9 @@ struct State {
     places: HashMap<PaneId, Place>,
     /// The git map watchers last got.
     git_sent: BTreeMap<PaneId, PaneDir>,
+    /// The app's theme; `None` until it sends one (libghostty's defaults,
+    /// the same colors as the built-in dark theme).
+    theme: Option<proto::theme::Theme>,
     shutdown: bool,
 }
 
@@ -492,6 +495,15 @@ impl Daemon {
                         Self::reply(&out, req, reply);
                     });
             }
+            ClientMsg::SetTheme { req, theme } => {
+                let mut st = self.lock();
+                for e in st.sessions.values() {
+                    e.session.set_theme(theme.clone());
+                }
+                st.theme = Some(theme);
+                drop(st);
+                Self::reply(out, req, Reply::Ok);
+            }
             ClientMsg::Release { req, pane } => {
                 let mut st = self.lock();
                 let reply = if st.sessions.contains_key(&pane) {
@@ -703,7 +715,12 @@ impl Daemon {
         )?;
         let exited = Arc::new(AtomicBool::new(false));
         session.attach(sink(id, None, exited.clone(), self.me.clone()));
-        self.lock().sessions.insert(
+        let mut st = self.lock();
+        // Under the lock, so a theme set meanwhile isn't missed.
+        if let Some(t) = &st.theme {
+            session.set_theme(t.clone());
+        }
+        st.sessions.insert(
             id,
             Entry {
                 session: Arc::new(session),

@@ -795,3 +795,51 @@ fn panes_know_their_checkout() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+/// The next frame for `session` whose default background is `bg`.
+fn frame_with_bg(c: &Client, rx: &Receiver<Ev>, session: SessionId, bg: u32) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(Ev::Frame(s, f)) = rx.recv_timeout(Duration::from_millis(100))
+            && s == session
+        {
+            c.send(&ClientMsg::Ack {
+                session,
+                seq: f.seq,
+            })
+            .unwrap();
+            if f.default_bg == bg {
+                assert!(f.full, "a theme change redraws everything");
+                return;
+            }
+        }
+    }
+    panic!("no frame with background {bg:06x} for p{session}");
+}
+
+#[test]
+fn a_theme_reaches_every_session_and_new_ones() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let a = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: a }).unwrap();
+    frame_with_bg(&c, &rx, a, 0x000000);
+
+    let light = proto::theme::Theme::kibann_light();
+    let r = c
+        .request(|req| ClientMsg::SetTheme {
+            req,
+            theme: light.clone(),
+        })
+        .unwrap();
+    assert!(matches!(r, Reply::Ok), "{r:?}");
+    frame_with_bg(&c, &rx, a, 0xffffff);
+
+    let b = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: b }).unwrap();
+    frame_with_bg(&c, &rx, b, 0xffffff);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

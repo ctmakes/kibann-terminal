@@ -11,6 +11,8 @@ import type { InputEvent } from "../proto";
 import { ReplayTransport } from "../transport/replay";
 import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
+import { KIBANN_DARK, type ThemeApi } from "../workspace/theme";
+import type { Theme } from "../proto";
 import { Screen } from "./screen";
 
 const params = Object.fromEntries(new URLSearchParams(location.search));
@@ -58,7 +60,40 @@ function transport(n: number): ReplayTransport {
   return t;
 }
 
+// A few themes, as the app would list them; `previews` records each step.
+const THEMES: Record<string, Theme> = {
+  "Kibann Dark": KIBANN_DARK,
+  "Kibann Light": {
+    ...KIBANN_DARK,
+    palette: [...KIBANN_DARK.palette.slice(0, 4), 0x0969da, ...KIBANN_DARK.palette.slice(5)],
+    background: 0xffffff,
+    foreground: 0x1f2328,
+  },
+  Dracula: { ...KIBANN_DARK, palette: [...KIBANN_DARK.palette.slice(0, 4), 0xbd93f9, ...KIBANN_DARK.palette.slice(5)], background: 0x282a36, foreground: 0xf8f8f2 },
+  Nord: { ...KIBANN_DARK, background: 0x2e3440, foreground: 0xd8dee9 },
+  "Solarized Light": { ...KIBANN_DARK, background: 0xfdf6e3, foreground: 0x657b83 },
+};
+let kept = "Kibann Dark";
+let showing = kept;
+const previews: Array<string | null> = [];
+const themes: ThemeApi = {
+  list: async () =>
+    Object.entries(THEMES).map(([name, t]) => ({ name, dark: name !== "Kibann Light" && name !== "Solarized Light" })),
+  preview: async (name) => {
+    previews.push(name);
+    showing = name ?? kept;
+    ws.setTheme(THEMES[showing]);
+  },
+  choose: async (name) => {
+    kept = showing = name;
+    ws.setTheme(THEMES[name]);
+  },
+  current: () => kept,
+};
+
 const ws = new Workspace(root, {
+  themes,
+  firstRunHint: params.hint === "1",
   backend,
   transport,
   platform: params.platform === "mac" || params.platform === "other" ? params.platform : undefined,
@@ -93,6 +128,14 @@ else void backend.act({ t: "new_tab", focus: true });
     return badge;
   },
   diffs,
+  previews,
+  /** The theme kept and the one showing. */
+  theme: () => ({ kept, showing }),
+  /** Show a theme as the app would after a config change. */
+  setTheme(name: string) {
+    kept = showing = name;
+    ws.setTheme(THEMES[name]);
+  },
   /** The shortcut sheet: shown or not, and each row as "label: keys". */
   shortcuts() {
     const el = document.querySelector<HTMLElement>(".shortcut-sheet")!;
@@ -107,7 +150,7 @@ else void backend.act({ t: "new_tab", focus: true });
   sidebar() {
     const els = [...ws.sidebar.el.querySelectorAll<HTMLElement>(".sidebar-group, .sidebar-card")];
     return {
-      visible: ws.sidebar.visible,
+      expanded: ws.sidebar.expanded,
       width: ws.sidebar.width,
       items: els.map((e) =>
         e.classList.contains("sidebar-group") ? `# ${e.textContent}` : Number(e.dataset.pane),

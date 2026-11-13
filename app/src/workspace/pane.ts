@@ -51,9 +51,9 @@ const COLORS: Record<PartKind, string> = {
   place: "inherit",
   worktree: "inherit",
   branch: "inherit",
-  op: "#f0883e",
-  conflicts: "#f85149",
-  changed: "#d29922",
+  op: "var(--k-op)",
+  conflicts: "var(--k-conflicts)",
+  changed: "var(--k-changed)",
   sync: "inherit",
 };
 
@@ -77,8 +77,8 @@ export class PaneHeader {
       gap: "8px",
       padding: "0 8px",
       boxSizing: "border-box",
-      background: "#141414",
-      color: "#7d7d7d",
+      background: "var(--k-header)",
+      color: "var(--k-muted)",
       font: "11px -apple-system, system-ui, sans-serif",
       whiteSpace: "nowrap",
       overflow: "hidden",
@@ -103,7 +103,7 @@ export class PaneHeader {
   }
 
   setActive(active: boolean): void {
-    this.el.style.color = active ? "#c8c8c8" : "#7d7d7d";
+    this.el.style.color = active ? "var(--k-strong)" : "var(--k-muted)";
   }
 
   show(place: PaneDir | undefined): void {

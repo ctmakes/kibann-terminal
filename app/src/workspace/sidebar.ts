@@ -2,13 +2,33 @@
 // branch, ●N), grouped by repository, the groups needing attention first.
 // Hovering a row shows a live preview of the pane beside the sidebar.
 // Clicking a row shows its pane; clicking ●N opens its diff.
+//
+// It's never hidden: collapsed, it's a narrow rail with one badge per pane
+// (agent dot and first letter), which still click and preview.
 
 import type { AgentState, PaneDir } from "../proto";
 import type { PaneId } from "./layout";
 import { headerParts, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
+import { tooltip } from "./tooltip";
 
 export const SIDEBAR = { min: 140, max: 480, default: 220 };
+/** The collapsed rail's width. */
+export const RAIL = 44;
+/** The bottom row's height. */
+const BAR_H = 30;
+/** The sidebar icon: a window with its left column marked. */
+const ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+<rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><line x1="5.5" y1="2.5" x2="5.5" y2="13.5"/></svg>`;
+/** Theme: a circle, half dark. */
+const THEME_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+<circle cx="8" cy="8" r="5.75"/><path d="M8 2.25a5.75 5.75 0 0 1 0 11.5z" fill="currentColor" stroke="none"/></svg>`;
+/** Shortcuts: a keyboard. */
+const KEYS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+<rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/>
+<path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6" stroke-linecap="round" stroke-width="1.4"/></svg>`;
+/** Dragging the edge narrower than this collapses it. */
+const COLLAPSE_AT = 90;
 /** The preview redraws at most this often. */
 const PREVIEW_MS = 250;
 /** The preview's scale: half size is small but still readable. */
@@ -69,6 +89,8 @@ interface Row {
   title: HTMLSpanElement;
   dot: HTMLSpanElement;
   line: HTMLSpanElement;
+  /** The first letter, shown on the rail. */
+  badge: HTMLSpanElement;
 }
 
 export interface SidebarOptions {
@@ -76,8 +98,15 @@ export interface SidebarOptions {
   onPick(pane: PaneId): void;
   /** ●N was clicked on this pane's row. */
   onDiff(pane: PaneId): void;
-  /** The sidebar opened, closed or changed width. */
+  /** The sidebar expanded, collapsed or changed width. */
   onResize(): void;
+  /** The bottom row's buttons. */
+  onShortcuts(): void;
+  onThemes?(): void;
+  /** The shortcut sheet's key, shown in its button's tooltip. */
+  shortcutKey: string;
+  /** The key that collapses and expands it, shown in its button's tooltip. */
+  sidebarKey: string;
 }
 
 export class Sidebar {
@@ -89,8 +118,13 @@ export class Sidebar {
   private readonly preview: HTMLCanvasElement;
   private previewing: PaneId | null = null;
   private previewTimer = 0;
-  visible = false;
+  /** Expanded to a list; otherwise the rail. */
+  expanded = false;
   width = SIDEBAR.default;
+  /** The bottom row's buttons besides collapse, hidden on the rail. */
+  private readonly extras: HTMLElement[] = [];
+  private readonly bar: HTMLDivElement;
+  private last: { git: GitMap; status: StatusMap } | null = null;
 
   constructor(private readonly opts: SidebarOptions) {
     this.el = document.createElement("div");
@@ -98,10 +132,10 @@ export class Sidebar {
     Object.assign(this.el.style, {
       position: "relative",
       flex: "0 0 auto",
-      display: "none",
-      background: "#101010",
+      display: "block",
+      background: "var(--k-sidebar)",
       boxSizing: "border-box",
-      color: "#9a9a9a",
+      color: "var(--k-text)",
       font: "12px -apple-system, system-ui, sans-serif",
       overflow: "hidden",
     });
@@ -109,7 +143,7 @@ export class Sidebar {
     this.list.className = "sidebar-list";
     Object.assign(this.list.style, {
       position: "absolute",
-      inset: "0",
+      inset: `0 0 ${BAR_H}px 0`,
       overflowY: "auto",
       padding: "6px 4px",
       boxSizing: "border-box",
@@ -126,7 +160,7 @@ export class Sidebar {
       cursor: "col-resize",
       zIndex: "2",
       // The sidebar's edge line, inside the grab area.
-      borderRight: "1px solid #2a2a2a",
+      borderRight: "1px solid var(--k-edge)",
       boxSizing: "border-box",
     });
     grip.addEventListener("pointerdown", (e) => {
@@ -134,7 +168,16 @@ export class Sidebar {
       this.hidePreview();
       grip.setPointerCapture(e.pointerId);
       const left = this.el.getBoundingClientRect().left;
-      const move = (ev: PointerEvent) => this.setWidth(ev.clientX - left);
+      const move = (ev: PointerEvent) => {
+        // Narrow enough, it folds to the rail; wider, it opens again.
+        const x = ev.clientX - left;
+        if (x < COLLAPSE_AT) this.setExpanded(false);
+        else {
+          this.width = Math.round(Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, x)));
+          if (this.expanded) this.apply();
+          else this.setExpanded(true);
+        }
+      };
       const up = () => {
         grip.removeEventListener("pointermove", move);
         grip.removeEventListener("pointerup", up);
@@ -153,10 +196,66 @@ export class Sidebar {
       zIndex: "20",
       pointerEvents: "none",
       borderRadius: "6px",
-      border: "1px solid #3a3a3a",
-      boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+      border: "1px solid var(--k-divider)",
+      boxShadow: "0 6px 24px var(--k-shadow)",
     });
-    this.el.append(this.list, grip, this.preview);
+    // Bottom: the theme picker and the shortcut sheet on the left, the
+    // button that collapses and expands it on the right.
+    this.bar = document.createElement("div");
+    this.bar.className = "sidebar-bar";
+    Object.assign(this.bar.style, {
+      position: "absolute",
+      bottom: "0",
+      left: "0",
+      right: "5px",
+      height: `${BAR_H}px`,
+      borderTop: "1px solid var(--k-edge)",
+      display: "flex",
+      alignItems: "center",
+      gap: "2px",
+      padding: "0 6px",
+      boxSizing: "border-box",
+    });
+    const icon = (cls: string, svg: string, run: () => void) => {
+      const b = document.createElement("div");
+      b.className = cls;
+      b.innerHTML = svg;
+      Object.assign(b.style, {
+        display: "flex",
+        flex: "0 0 auto",
+        padding: "3px 5px",
+        borderRadius: "5px",
+        color: "var(--k-muted)",
+        cursor: "default",
+      });
+      b.addEventListener("mouseenter", () => {
+        b.style.background = "var(--k-tab)";
+        b.style.color = "var(--k-strong)";
+      });
+      b.addEventListener("mouseleave", () => {
+        b.style.background = "";
+        b.style.color = "var(--k-muted)";
+      });
+      b.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep focus in the terminal
+        run();
+      });
+      return b;
+    };
+    if (opts.onThemes) {
+      const themes = icon("sidebar-themes", THEME_ICON, opts.onThemes);
+      tooltip(themes, "Theme…", "", true);
+      this.extras.push(themes);
+    }
+    const keys = icon("sidebar-shortcuts", KEYS_ICON, opts.onShortcuts);
+    tooltip(keys, "Keyboard shortcuts", opts.shortcutKey, true);
+    const spacer = document.createElement("div");
+    spacer.style.flex = "1";
+    this.extras.push(keys, spacer);
+    const fold = icon("sidebar-fold", ICON, () => this.toggle());
+    tooltip(fold, () => (this.expanded ? "Collapse sidebar" : "Expand sidebar"), opts.sidebarKey, true);
+    this.bar.append(...this.extras, fold);
+    this.el.append(this.bar, this.list, grip, this.preview);
     this.load();
     this.apply();
   }
@@ -164,10 +263,17 @@ export class Sidebar {
   // ---- open, close, width ----
 
   toggle(): void {
-    this.visible = !this.visible;
+    this.setExpanded(!this.expanded);
+    this.save();
+  }
+
+  private setExpanded(on: boolean): void {
+    if (on === this.expanded) return;
+    this.expanded = on;
     this.hidePreview();
     this.apply();
-    this.save();
+    // Rows look different on the rail; draw them again.
+    if (this.last) this.render(this.panes, this.last.git, this.last.status);
   }
 
   setWidth(w: number): void {
@@ -176,8 +282,13 @@ export class Sidebar {
   }
 
   private apply(): void {
-    this.el.style.display = this.visible ? "block" : "none";
-    this.el.style.width = `${this.width}px`;
+    this.el.style.width = `${this.expanded ? this.width : RAIL}px`;
+    this.el.dataset.expanded = String(this.expanded);
+    // The rail has room for one button.
+    for (const e of this.extras) e.style.display = this.expanded ? "flex" : "none";
+    this.bar.style.justifyContent = this.expanded ? "flex-end" : "center";
+    this.bar.style.padding = this.expanded ? "0 6px" : "0";
+    this.bar.style.right = this.expanded ? "5px" : "0";
     this.opts.onResize();
   }
 
@@ -185,7 +296,8 @@ export class Sidebar {
     try {
       const s = JSON.parse(localStorage.getItem(STORE) ?? "null");
       if (s && typeof s === "object") {
-        this.visible = s.visible === true;
+        // `visible` is the older name, from when it could be hidden.
+        this.expanded = (s.expanded ?? s.visible) === true;
         if (typeof s.width === "number") this.width = Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, s.width));
       }
     } catch {
@@ -195,7 +307,7 @@ export class Sidebar {
 
   private save(): void {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ visible: this.visible, width: this.width }));
+      localStorage.setItem(STORE, JSON.stringify({ expanded: this.expanded, width: this.width }));
     } catch {
       // Not remembered this time.
     }
@@ -206,6 +318,7 @@ export class Sidebar {
   /** Show these panes, grouped, with their places and states. */
   render(panes: CardPane[], git: GitMap, status: StatusMap): void {
     this.panes = panes;
+    this.last = { git, status };
     const groups = groupPanes(panes, git, status);
     const keep = new Set(panes.map((p) => p.id));
     for (const [id, r] of this.rows) {
@@ -219,15 +332,28 @@ export class Sidebar {
       const h = document.createElement("div");
       h.className = "sidebar-group";
       h.textContent = g.label;
-      Object.assign(h.style, {
-        margin: nodes.length ? "8px 6px 2px" : "0 6px 2px",
-        color: "#7d7d7d",
-        fontSize: "11px",
-        fontWeight: "600",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-      });
+      h.title = g.label;
+      Object.assign(
+        h.style,
+        this.expanded
+          ? {
+              margin: nodes.length ? "8px 6px 2px" : "0 6px 2px",
+              color: "var(--k-muted)",
+              fontSize: "11px",
+              fontWeight: "600",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }
+          : // On the rail a group is a short line between its badges.
+            {
+              margin: nodes.length ? "6px 8px" : "0",
+              height: nodes.length ? "1px" : "0",
+              background: "var(--k-divider)",
+              fontSize: "0",
+              overflow: "hidden",
+            },
+      );
       nodes.push(h);
       for (const p of g.panes) {
         const r = this.rows.get(p.id) ?? this.makeRow(p.id);
@@ -277,7 +403,15 @@ export class Sidebar {
       overflow: "hidden",
       fontSize: "11px",
     });
-    el.append(slot, title, line);
+    const badge = document.createElement("span");
+    badge.className = "sidebar-badge";
+    Object.assign(badge.style, {
+      flex: "0 0 16px",
+      textAlign: "center",
+      fontWeight: "600",
+      textTransform: "uppercase",
+    });
+    el.append(slot, badge, title, line);
     el.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       const t = e.target as HTMLElement;
@@ -285,17 +419,27 @@ export class Sidebar {
       else this.opts.onPick(id);
     });
     el.addEventListener("mouseenter", () => this.showPreview(id));
-    const r: Row = { el, title, dot, line };
+    const r: Row = { el, title, dot, line, badge };
     this.rows.set(id, r);
     return r;
   }
 
   private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap): void {
-    r.title.textContent = p.title || "shell";
-    r.el.title = place?.dir ?? "";
+    const name = p.title || "shell";
+    r.title.textContent = name;
+    r.badge.textContent = [...name.trim()][0] ?? "·";
+    const full = this.expanded;
+    r.el.title = full ? (place?.dir ?? "") : [name, place?.shown].filter(Boolean).join(" — ");
+    r.badge.style.display = full ? "none" : "";
+    r.title.style.display = full ? "" : "none";
+    r.line.style.display = full ? "flex" : "none";
+    r.el.style.padding = full ? "0 6px" : "0 4px";
+    r.el.style.gap = full ? "6px" : "3px";
     const current = p.focused && p.shown;
-    r.el.style.background = current ? "#24324f" : "";
-    r.title.style.color = current ? "#ffffff" : p.shown ? "#d8d8d8" : "#a8a8a8";
+    r.el.style.background = current ? "var(--k-current)" : "";
+    const color = current ? "var(--k-current-text)" : p.shown ? "var(--k-title)" : "var(--k-label)";
+    r.title.style.color = color;
+    r.badge.style.color = color;
     const s = status[String(p.id)];
     showDot(r.dot, s && s.state !== "idle" ? s.state : null, s?.agent);
     // The header's parts without the repo or directory (the group says it).
@@ -310,7 +454,7 @@ export class Sidebar {
           textOverflow: "ellipsis",
           flex: x.kind === "branch" ? "0 1 auto" : "0 0 auto",
           minWidth: x.kind === "branch" ? "0" : "",
-          color: x.kind === "changed" ? "#d29922" : x.kind === "conflicts" ? "#f85149" : "#7d7d7d",
+          color: x.kind === "changed" ? "var(--k-changed)" : x.kind === "conflicts" ? "var(--k-conflicts)" : "var(--k-muted)",
           cursor: x.kind === "changed" ? "pointer" : "",
         });
         return span;
@@ -353,7 +497,7 @@ export class Sidebar {
     const p = id === null ? undefined : this.pane(id);
     const row = id === null ? undefined : this.rows.get(id);
     const src = p?.canvas;
-    if (!this.visible || !p || !row || !src || src.width === 0 || src.height === 0) {
+    if (!p || !row || !src || src.width === 0 || src.height === 0) {
       this.preview.style.display = "none";
       return;
     }

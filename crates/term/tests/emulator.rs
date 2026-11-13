@@ -842,3 +842,64 @@ fn reading_a_mostly_empty_screen() {
     assert_eq!(read(&e, Visible, None), "$");
     assert_eq!(read(&e, Recent, None), "$");
 }
+
+#[test]
+fn a_theme_sets_the_colors_programs_and_frames_see() {
+    let mut e = emu();
+    let mut t = proto::theme::Theme::kibann_light();
+    t.palette[1] = 0x112233;
+    e.set_theme(&t).unwrap();
+    e.write(b"\x1b[31mr\x1b[0m");
+    let f = e.build_frame(true).unwrap().unwrap();
+    assert_eq!(f.default_bg, 0xffffff);
+    assert_eq!(f.default_fg, 0x1f2328);
+    assert_eq!(f.styles[f.rows[0].runs[0].s as usize].fg, 0x112233);
+    assert_eq!(f.cursor.color, Some(0x0969da));
+
+    // A program asking for the background (OSC 11) gets the theme's.
+    e.write(b"\x1b]11;?\x1b\\");
+    let reply = String::from_utf8(e.take_outbox()).unwrap();
+    assert!(reply.contains("rgb:ffff/ffff/ffff"), "{reply:?}");
+
+    // A color the program set itself survives a theme change.
+    e.write(b"\x1b]11;rgb:12/34/56\x1b\\");
+    e.set_theme(&proto::theme::Theme::kibann_dark()).unwrap();
+    let f = e.build_frame(true).unwrap().unwrap();
+    assert_eq!(f.default_bg, 0x123456);
+    assert_eq!(f.default_fg, 0xffffff);
+}
+
+#[test]
+fn a_theme_colors_the_selection() {
+    let mut e = emu();
+    let mut t = proto::theme::Theme::kibann_dark();
+    t.selection_bg = Some(0x334455);
+    t.selection_fg = None;
+    e.set_theme(&t).unwrap();
+    e.write(b"hello");
+    // Select "hel" by dragging.
+    let at = |x: f32| InputEvent::Mouse {
+        action: MouseAction::Press,
+        button: Some(1),
+        x,
+        y: 5.0,
+        mods: 0,
+    };
+    e.input(&at(1.0)).unwrap();
+    e.input(&InputEvent::Mouse {
+        action: MouseAction::Motion,
+        button: Some(1),
+        x: 29.0,
+        y: 5.0,
+        mods: 0,
+    })
+    .unwrap();
+    let f = e.build_frame(true).unwrap().unwrap();
+    let run = &f.rows[0].runs[0];
+    let s = f.styles[run.s as usize];
+    assert_eq!(s.bg, Some(0x334455));
+    assert_eq!(
+        s.fg, 0xffffff,
+        "the text keeps its color without selection-foreground"
+    );
+}

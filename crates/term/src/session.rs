@@ -79,6 +79,7 @@ enum Msg {
     Resize(Resize),
     Ack(u64),
     RequestFull,
+    Theme(proto::theme::Theme),
     Attach(Sink),
     Cwd(Sender<Option<PathBuf>>),
     Title(Sender<String>),
@@ -229,6 +230,11 @@ impl Session {
 
     pub fn request_full(&self) {
         self.send(Msg::RequestFull);
+    }
+
+    /// Use `theme`'s colors; the screen and scrollback redraw in them.
+    pub fn set_theme(&self, theme: proto::theme::Theme) {
+        self.send(Msg::Theme(theme));
     }
 
     /// The shell's working directory: what it last reported (OSC 7), else
@@ -600,6 +606,11 @@ fn run(
                 }
                 Msg::Ack(seq) => p.acked = p.acked.max(seq.min(p.sent)),
                 Msg::RequestFull => p.force_full = true,
+                Msg::Theme(t) => {
+                    let _ = emu.set_theme(&t);
+                    p.dirty = true;
+                    p.force_full = true;
+                }
                 Msg::Attach(sink) => {
                     p.sink = Some(sink);
                     // Frames sent to the old sink will never be acked.

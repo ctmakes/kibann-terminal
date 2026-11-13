@@ -84,6 +84,8 @@ pub struct FrameBuilder {
     row_cells: Vec<CellOut>,
     row_text: String,
     grapheme: String,
+    /// Selected text's colors (foreground, background); `None` inverts.
+    pub selection: Option<(Option<u32>, u32)>,
 }
 
 impl FrameBuilder {
@@ -97,6 +99,7 @@ impl FrameBuilder {
             row_cells: Vec::new(),
             row_text: String::new(),
             grapheme: String::new(),
+            selection: None,
         })
     }
 
@@ -132,6 +135,7 @@ impl FrameBuilder {
         let snap = self.state.update(term)?;
         let dirty = snap.dirty()?;
         let colors = snap.colors()?;
+        let selection = self.selection;
         let cols = snap.cols()?;
         let nrows = snap.rows()?;
         let default_fg = rgb(colors.foreground);
@@ -243,11 +247,20 @@ impl FrameBuilder {
                     };
                     let x = self.row_cells.len() as u16;
                     let style = match &selected {
-                        Some(r) if r.contains(&x) && wide != CellWide::SpacerTail => Style {
-                            fg: default_bg,
-                            bg: Some(default_fg),
-                            ..style
-                        },
+                        Some(r) if r.contains(&x) && wide != CellWide::SpacerTail => {
+                            match selection {
+                                Some((fg, bg)) => Style {
+                                    fg: fg.unwrap_or(style.fg),
+                                    bg: Some(bg),
+                                    ..style
+                                },
+                                None => Style {
+                                    fg: default_bg,
+                                    bg: Some(default_fg),
+                                    ..style
+                                },
+                            }
+                        }
                         _ => style,
                     };
                     prev = style;

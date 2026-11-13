@@ -12,6 +12,7 @@ use ts_rs::TS;
 pub mod git;
 pub mod layout;
 pub mod status;
+pub mod theme;
 pub mod wire;
 
 /// Bits of [`Style::flags`].

@@ -159,9 +159,9 @@ export class ShortcutSheet {
       display: "none",
       alignItems: "center",
       justifyContent: "center",
-      background: "rgba(0,0,0,0.55)",
+      background: "var(--k-scrim)",
       font: "12px -apple-system, system-ui, sans-serif",
-      color: "#c8c8c8",
+      color: "var(--k-strong)",
     });
     // Any click closes it, and keeps focus in the terminal.
     this.el.addEventListener("mousedown", (e) => {
@@ -170,10 +170,10 @@ export class ShortcutSheet {
     });
     const panel = document.createElement("div");
     Object.assign(panel.style, {
-      background: "#1a1a1a",
-      border: "1px solid #333",
+      background: "var(--k-panel)",
+      border: "1px solid var(--k-divider)",
       borderRadius: "10px",
-      boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
+      boxShadow: "0 12px 40px var(--k-shadow)",
       padding: "16px 20px 18px",
       width: "min(760px, calc(100% - 32px))",
       maxHeight: "calc(100% - 32px)",
@@ -184,10 +184,10 @@ export class ShortcutSheet {
     Object.assign(head.style, { display: "flex", alignItems: "baseline", marginBottom: "10px" });
     const title = document.createElement("div");
     title.textContent = "Keyboard Shortcuts";
-    Object.assign(title.style, { flex: "1", fontSize: "14px", fontWeight: "600", color: "#eee" });
+    Object.assign(title.style, { flex: "1", fontSize: "14px", fontWeight: "600", color: "var(--k-bright)" });
     const hint = document.createElement("div");
     hint.textContent = "Esc to close";
-    hint.style.color = "#777";
+    hint.style.color = "var(--k-muted)";
     head.append(title, hint);
     const cols = document.createElement("div");
     Object.assign(cols.style, {
@@ -201,7 +201,7 @@ export class ShortcutSheet {
       box.className = "shortcut-group";
       const h = document.createElement("div");
       h.textContent = g.title;
-      Object.assign(h.style, { color: "#7d7d7d", fontSize: "11px", fontWeight: "600", margin: "4px 0 4px" });
+      Object.assign(h.style, { color: "var(--k-muted)", fontSize: "11px", fontWeight: "600", margin: "4px 0 4px" });
       box.append(h);
       for (const r of g.rows) {
         const line = document.createElement("div");
@@ -217,9 +217,9 @@ export class ShortcutSheet {
           Object.assign(kbd.style, {
             font: "11px -apple-system, system-ui, sans-serif",
             letterSpacing: "0.5px",
-            color: "#e6e6e6",
-            background: "#2a2a2a",
-            border: "1px solid #3a3a3a",
+            color: "var(--k-bright)",
+            background: "var(--k-kbd)",
+            border: "1px solid var(--k-divider)",
             borderRadius: "4px",
             padding: "1px 6px",
             whiteSpace: "nowrap",

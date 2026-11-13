@@ -2,12 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Layout, LayoutAction } from "./proto";
+import type { Layout, LayoutAction, Theme } from "./proto";
 import { TauriTransport, inTauri } from "./transport/tauri";
 import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
 import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
+import type { ThemeApi, ThemeEntry } from "./workspace/theme";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -52,8 +53,20 @@ async function start(): Promise<void> {
     });
     if (made.pane !== null) diffs.set(pane.id, made.pane);
   };
+  // Themes: the app keeps the choice (config file, system appearance) and
+  // colors the terminals through the daemon; the window follows here.
+  const now = await invoke<{ name: string; theme: Theme }>("theme_current");
+  let themeName = now.name;
+  const themes: ThemeApi = {
+    list: () => invoke<ThemeEntry[]>("theme_list"),
+    preview: (name) => invoke("theme_preview", { name }),
+    choose: (name) => invoke("theme_choose", { name }),
+    current: () => themeName,
+  };
   const ws = new Workspace(el, {
     backend,
+    themes,
+    firstRunHint: true,
     transport: (pane) => new TauriTransport(pane),
     onTitle: (title) => void win.setTitle(title),
     onEmpty: () => void invoke("app_quit"),
@@ -63,6 +76,13 @@ async function start(): Promise<void> {
     onDiff: (pane) => void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
+
+  ws.setTheme(now.theme);
+  await listen<{ name: string; theme: Theme }>("theme", (e) => {
+    themeName = e.payload.name;
+    ws.setTheme(e.payload.theme);
+  });
+  await listen<string>("notice", (e) => ws.notice(e.payload));
 
   // Menu bar items (macOS) carry the action as JSON in their id.
   await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));

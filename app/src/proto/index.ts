@@ -24,6 +24,7 @@ export type { PaneStatus } from "./generated/PaneStatus";
 export type { GitInfo } from "./generated/GitInfo";
 export type { GitOp } from "./generated/GitOp";
 export type { PaneDir } from "./generated/PaneDir";
+export type { Theme } from "./generated/Theme";
 
 export const Flag = {
   BOLD: 1 << 0,

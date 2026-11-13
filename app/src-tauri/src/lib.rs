@@ -5,6 +5,7 @@
 //! channel messages and events.
 
 mod open;
+mod theme;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -325,6 +326,143 @@ fn set_badge(window: tauri::WebviewWindow, count: u32) {
     }
 }
 
+// ---- themes ----
+
+/// Which theme is in use, and why.
+struct Looks {
+    /// From the config file.
+    choice: proto::theme::ThemeChoice,
+    /// The system appearance.
+    dark: bool,
+    /// Shown by the picker, not kept yet.
+    preview: Option<String>,
+    /// In use now.
+    name: String,
+    theme: proto::theme::Theme,
+}
+
+#[derive(Clone, Serialize)]
+struct ThemeNow {
+    name: String,
+    theme: proto::theme::Theme,
+}
+
+/// Show the right theme (the preview, else the config's for the
+/// appearance): tell the daemon, which colors the terminals, and the
+/// frontend, which colors the window. A theme that can't be loaded falls
+/// back to the built-in one, with a notice.
+fn show_theme(app: &AppHandle) {
+    let looks = app.state::<Mutex<Looks>>();
+    let name = {
+        let l = looks.lock().unwrap();
+        l.preview
+            .clone()
+            .unwrap_or_else(|| l.choice.for_appearance(l.dark).to_owned())
+    };
+    let (name, theme) = match theme::load(&name) {
+        Ok((t, errors)) => {
+            for e in errors {
+                let _ = app.emit("notice", format!("Theme \"{name}\": {e}"));
+            }
+            (name, t)
+        }
+        Err(e) => {
+            let _ = app.emit("notice", format!("{e}; using the built-in theme"));
+            let dark = looks.lock().unwrap().dark;
+            let n = if dark {
+                proto::theme::DEFAULT_DARK
+            } else {
+                proto::theme::DEFAULT_LIGHT
+            };
+            (n.to_owned(), theme::load(n).expect("built in").0)
+        }
+    };
+    {
+        let mut l = looks.lock().unwrap();
+        if l.name == name && l.theme == theme {
+            return;
+        }
+        l.name.clone_from(&name);
+        l.theme = theme.clone();
+    }
+    if let Some(term) = app.try_state::<Term>() {
+        let _ = term.client.request(|req| ClientMsg::SetTheme {
+            req,
+            theme: theme.clone(),
+        });
+    }
+    let _ = app.emit("theme", ThemeNow { name, theme });
+}
+
+/// Read the config file again (it changed, or at start).
+fn reload_choice(app: &AppHandle) {
+    let (choice, errors) = theme::read_choice();
+    for e in errors {
+        let _ = app.emit("notice", format!("Config: {e}"));
+    }
+    app.state::<Mutex<Looks>>().lock().unwrap().choice = choice;
+    show_theme(app);
+}
+
+/// Poll the config file and the user's themes: editors save in ways
+/// (rename over) that file watchers report unreliably, and once a second
+/// costs nothing.
+fn watch_config(app: AppHandle) {
+    let _ = std::thread::Builder::new()
+        .name("config-watch".into())
+        .spawn(move || {
+            let mut last = theme::stamp();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let now = theme::stamp();
+                if now != last {
+                    last = now;
+                    reload_choice(&app);
+                }
+            }
+        });
+}
+
+#[tauri::command]
+fn theme_current(looks: State<'_, Mutex<Looks>>) -> ThemeNow {
+    let l = looks.lock().unwrap();
+    ThemeNow {
+        name: l.name.clone(),
+        theme: l.theme.clone(),
+    }
+}
+
+#[tauri::command]
+async fn theme_list() -> Vec<theme::Entry> {
+    theme::list()
+}
+
+/// Show `name` for now; `None` goes back to the kept theme.
+#[tauri::command]
+async fn theme_preview(app: AppHandle, name: Option<String>) {
+    app.state::<Mutex<Looks>>().lock().unwrap().preview = name;
+    show_theme(&app);
+}
+
+/// Keep `name` for the current appearance, in the config file.
+#[tauri::command]
+async fn theme_choose(app: AppHandle, name: String) -> Result<(), String> {
+    let choice = {
+        let looks = app.state::<Mutex<Looks>>();
+        let mut l = looks.lock().unwrap();
+        l.preview = None;
+        if l.dark {
+            l.choice.dark.clone_from(&name);
+        } else {
+            l.choice.light.clone_from(&name);
+        }
+        l.choice.clone()
+    };
+    let saved = theme::save_choice(&choice);
+    show_theme(&app);
+    saved
+}
+
 /// This executable, which also runs `kibann` commands (the diff viewer).
 #[tauri::command]
 fn app_exe() -> Option<String> {
@@ -391,6 +529,7 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             "Toggle Sidebar",
             "Shift+Cmd+B",
         )?)
+        .item(&MenuItemBuilder::with_id(r#"{"kind":"themes"}"#, "Theme…").build(app)?)
         .separator()
         .item(&item(
             r#"{"kind":"zoom"}"#,
@@ -478,11 +617,36 @@ pub fn run() {
             #[cfg(not(unix))]
             let client = local()?;
             app.manage(Term { client, channels });
+
+            let dark = app
+                .get_webview_window("main")
+                .and_then(|w| w.theme().ok())
+                .is_none_or(|t| t != tauri::Theme::Light);
+            app.manage(Mutex::new(Looks {
+                choice: Default::default(),
+                dark,
+                preview: None,
+                name: String::new(),
+                theme: proto::theme::Theme::kibann_dark(),
+            }));
+            reload_choice(handle);
+            watch_config(handle.clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::ThemeChanged(t) = event {
+                let app = window.app_handle();
+                app.state::<Mutex<Looks>>().lock().unwrap().dark = *t != tauri::Theme::Light;
+                show_theme(app);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             app_exe,
             set_badge,
+            theme_current,
+            theme_list,
+            theme_preview,
+            theme_choose,
             term_attach,
             term_release,
             term_input,

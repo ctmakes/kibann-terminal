@@ -8,9 +8,9 @@ import type { PaneId } from "./layout";
 export type StatusMap = Record<string, PaneStatus>;
 
 export const DOT_COLORS: Partial<Record<AgentState, string>> = {
-  working: "#3fb950",
-  blocked: "#e3a008",
-  done: "#58a6ff",
+  working: "var(--k-working, #3fb950)",
+  blocked: "var(--k-blocked, #e3a008)",
+  done: "var(--k-done, #58a6ff)",
 };
 
 /** Most urgent first; idle shows nothing. */

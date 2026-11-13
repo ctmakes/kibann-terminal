@@ -12,6 +12,7 @@ use proto::{Frame, InputEvent, KeyAction, MouseAction, Resize, ScrollBy};
 use crate::frame::{Extra, FrameBuilder};
 use crate::keymap::{key_from_code, unshifted_codepoint};
 use crate::selection::Selector;
+use crate::vt::color::{Palette, Rgb};
 use crate::vt::error::{Error, Result};
 use crate::vt::key::{self, Mods};
 use crate::vt::mode::Mode;
@@ -159,6 +160,29 @@ impl Emulator {
             cwd: None,
             sent_link: None,
         })
+    }
+
+    /// Use `theme`'s colors as the defaults. Colors a program set itself
+    /// (OSC 4, 10, 11, 12) still win. The next frame should be full.
+    pub fn set_theme(&mut self, theme: &proto::theme::Theme) -> Result<()> {
+        let rgb = |c: u32| Rgb {
+            r: (c >> 16) as u8,
+            g: (c >> 8) as u8,
+            b: c as u8,
+        };
+        // Entries past 15 (the color cube and greys) stay standard.
+        let mut palette: Palette = Palette(self.term.default_color_palette()?.0);
+        for (i, c) in theme.palette.iter().take(16).enumerate() {
+            palette.0[i] = rgb(*c);
+        }
+        self.term
+            .set_default_color_palette(Some(palette))?
+            .set_default_fg_color(Some(rgb(theme.foreground)))?
+            .set_default_bg_color(Some(rgb(theme.background)))?
+            .set_default_cursor_color(theme.cursor.map(rgb))?;
+        self.shared.builder.borrow_mut().selection =
+            theme.selection_bg.map(|bg| (theme.selection_fg, bg));
+        Ok(())
     }
 
     pub fn terminal(&self) -> &Terminal<'static, 'static> {

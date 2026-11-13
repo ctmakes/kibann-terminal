@@ -15,7 +15,11 @@ import type { Layout, LayoutAction } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
-import { ShortcutSheet } from "./shortcuts";
+import { ThemePicker } from "./picker";
+import { ShortcutSheet, keyText } from "./shortcuts";
+import { tooltip } from "./tooltip";
+import { applyChrome, KIBANN_DARK, type ThemeApi } from "./theme";
+import type { Theme } from "../proto";
 import { Sidebar } from "./sidebar";
 import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
 import {
@@ -38,12 +42,12 @@ const RESIZE_STEP = 10;
 const MENU_ECHO_MS = 300;
 
 const COLORS = {
-  bar: "#111111",
-  tab: "#1d1d1d",
-  activeTab: "#2a2a2a",
-  text: "#9a9a9a",
-  activeText: "#e6e6e6",
-  divider: "#3a3a3a",
+  bar: "var(--k-bar)",
+  tab: "var(--k-tab)",
+  activeTab: "var(--k-tabActive)",
+  text: "var(--k-text)",
+  activeText: "var(--k-bright)",
+  divider: "var(--k-divider)",
 };
 
 export interface Pane {
@@ -88,12 +92,22 @@ export interface WorkspaceOptions {
   onBlocked?(count: number): void;
   /** Open the uncommitted changes of `pane`'s checkout (●N was clicked). */
   onDiff?(pane: Pane): void;
+  /** Themes to pick from (View → Theme…); without it there's no picker. */
+  themes?: ThemeApi;
+  /** Say once, on the first launch, where the shortcuts are. */
+  firstRunHint?: boolean;
 }
+
+const HINT_KEY = "kibann.hint.shortcuts";
 
 export class Workspace {
   readonly root: HTMLDivElement;
   readonly sidebar: Sidebar;
   private readonly shortcuts: ShortcutSheet;
+  private readonly picker: ThemePicker | null;
+  /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
+  private readonly help: HTMLDivElement;
+  private readonly notices: HTMLDivElement;
   readonly bar: HTMLDivElement;
   readonly stage: HTMLDivElement;
   readonly tabs: Tab[] = [];
@@ -113,6 +127,8 @@ export class Workspace {
     private readonly opts: WorkspaceOptions,
   ) {
     this.platform = opts.platform ?? detectPlatform();
+    applyChrome(KIBANN_DARK);
+    const sheetKey = this.platform === "mac" ? keyText("m", "/", "mac") : keyText("cs", "/", "other");
     this.root = document.createElement("div");
     this.root.className = "workspace";
     Object.assign(this.root.style, {
@@ -134,6 +150,10 @@ export class Workspace {
         if (p) this.opts.onDiff?.(p);
       },
       onResize: () => {},
+      onShortcuts: () => this.shortcuts.toggle(),
+      onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
+      shortcutKey: sheetKey,
+      sidebarKey: this.platform === "mac" ? keyText("ms", "B", "mac") : keyText("cs", "B", "other"),
     });
     this.bar = document.createElement("div");
     this.bar.className = "tab-bar";
@@ -147,9 +167,49 @@ export class Workspace {
     this.stage = document.createElement("div");
     this.stage.className = "stage";
     Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden" });
+    this.help = document.createElement("div");
+    this.help.className = "tab-help";
+    this.help.textContent = "?";
+    tooltip(this.help, "Keyboard shortcuts", sheetKey);
+    Object.assign(this.help.style, {
+      flex: "0 0 30px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "var(--k-muted)",
+      background: "var(--k-tab)",
+      cursor: "default",
+      fontWeight: "600",
+    });
+    this.help.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // keep focus in the terminal
+      this.shortcuts.toggle();
+    });
+    this.bar.append(this.help);
+    // Notices: the first-run hint, a theme that can't be read.
+    this.notices = document.createElement("div");
+    this.notices.className = "notices";
+    Object.assign(this.notices.style, {
+      position: "absolute",
+      right: "12px",
+      bottom: "12px",
+      zIndex: "25",
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+      alignItems: "flex-end",
+      pointerEvents: "none",
+      font: "12px -apple-system, system-ui, sans-serif",
+    });
+    this.stage.append(this.notices);
     main.append(this.bar, this.stage);
     this.shortcuts = new ShortcutSheet(this.platform);
+    this.picker = opts.themes
+      ? new ThemePicker(opts.themes, () => this.focusedPane?.view?.focus())
+      : null;
     this.root.append(this.sidebar.el, main, this.shortcuts.el);
+    if (this.picker) this.root.append(this.picker.el);
+    if (opts.firstRunHint) this.firstRunHint(sheetKey);
     container.append(this.root);
 
     installStyle();
@@ -195,6 +255,11 @@ export class Workspace {
     }
     if (action.kind === "shortcuts") {
       this.shortcuts.toggle();
+      return;
+    }
+    if (action.kind === "themes") {
+      this.shortcuts.hide();
+      void this.picker?.open();
       return;
     }
     if (action.kind === "sidebar") {
@@ -254,7 +319,7 @@ export class Workspace {
         panes(t.tree).flatMap((id) => {
           const p = this.panes.get(id);
           if (!p) return [];
-          const bg = p.view ? `#${p.view.grid.defaultBg.toString(16).padStart(6, "0")}` : "#181818";
+          const bg = p.view ? `#${p.view.grid.defaultBg.toString(16).padStart(6, "0")}` : "var(--k-bg)";
           return [
             {
               id,
@@ -286,6 +351,8 @@ export class Workspace {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    // The theme picker's search field takes the keys while it's open.
+    if (this.picker?.visible) return;
     const action = actionFor(e, this.platform);
     // While the shortcut sheet is open, a key closes it and goes nowhere
     // else (modifiers alone don't, so a shortcut can be pressed to try it).
@@ -459,6 +526,7 @@ export class Workspace {
   private updateBar(): void {
     this.renderSidebar();
     this.bar.style.display = this.tabs.length > 1 ? "flex" : "none";
+    this.bar.append(this.help); // after the tabs, wherever they moved
     for (const t of this.tabs) {
       const on = t === this.active;
       t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
@@ -469,6 +537,39 @@ export class Workspace {
       t.button.title = title;
       showDot(t.dot, rollUp(this.status, panes(t.tree)));
     }
+  }
+
+  /** Color the window around the terminals for `theme`. */
+  setTheme(theme: Theme): void {
+    applyChrome(theme);
+  }
+
+  /** Show `text` in the corner for a while. */
+  notice(text: string, ms = 8000): void {
+    const n = document.createElement("div");
+    n.className = "notice";
+    n.textContent = text;
+    Object.assign(n.style, {
+      maxWidth: "420px",
+      padding: "7px 10px",
+      borderRadius: "6px",
+      background: "var(--k-panel)",
+      border: "1px solid var(--k-divider)",
+      color: "var(--k-strong)",
+      boxShadow: "0 4px 16px var(--k-shadow)",
+    });
+    this.notices.append(n);
+    window.setTimeout(() => n.remove(), ms);
+  }
+
+  private firstRunHint(key: string): void {
+    try {
+      if (localStorage.getItem(HINT_KEY)) return;
+      localStorage.setItem(HINT_KEY, "1");
+    } catch {
+      return; // can't remember it was shown: don't show it every time
+    }
+    this.notice(`Press ${key} to see every keyboard shortcut.`, 10000);
   }
 
   private emitTitle(): void {

@@ -17,8 +17,14 @@ interface State {
   panes: PaneBox[];
 }
 
+/** The collapsed sidebar's width (it's never hidden). */
+const RAIL = 44;
+
+/** Open the harness; `w` is the width beside the sidebar's rail, so pane
+ * sizes read the same as without it. */
 async function open(page: Page, extra: Record<string, string> = {}): Promise<void> {
-  const q = new URLSearchParams({ w: "800", h: "500", platform: "mac", ...extra });
+  const o = { w: "800", h: "500", platform: "mac", ...extra };
+  const q = new URLSearchParams({ ...o, w: String(Number(o.w) + RAIL) });
   await page.goto(`/src/dev/workspace.html?${q}`);
   await settle(page);
 }
@@ -132,7 +138,7 @@ test.describe("splits", () => {
     const div = (await page.locator(".tab-stage:not([style*='none']) .divider").boundingBox())!;
     await page.mouse.move(div.x + div.width / 2, 250);
     await page.mouse.down();
-    await page.mouse.move(200, 250, { steps: 4 });
+    await page.mouse.move(RAIL + 200, 250, { steps: 4 });
     await page.mouse.up();
     await settle(page);
     let s = await state(page);
@@ -602,17 +608,70 @@ test.describe("sidebar", () => {
     await place(page, 4, repo("alpha", { worktree: "alpha-wt", branch: "fix" }));
   }
 
-  test("toggles with Cmd+Shift+B and takes room from the panes", async ({ page }) => {
+  test("Cmd+Shift+B and its button expand and collapse it; it's never gone", async ({ page }) => {
     await three(page);
-    expect((await sidebar(page)).visible).toBe(false);
+    const side = page.locator(".sidebar");
+    // Collapsed: a rail, one badge per pane of the tab's ones too.
+    expect((await sidebar(page)).expanded).toBe(false);
+    expect((await side.boundingBox())!.width).toBeLessThan(50);
+    expect(await page.locator(".sidebar-badge:visible").allTextContents()).toHaveLength(4);
     const before = (await state(page)).panes[0].w;
     await press(page, "Meta+Shift+b");
-    const s = await sidebar(page);
-    expect(s.visible).toBe(true);
+    expect((await sidebar(page)).expanded).toBe(true);
     const after = (await state(page)).panes[0].w;
-    expect(before - after).toBeGreaterThan(200);
+    expect(before - after).toBeGreaterThan(150);
+    await expect(page.locator(".sidebar-badge:visible")).toHaveCount(0);
     await press(page, "Meta+Shift+b");
-    expect((await sidebar(page)).visible).toBe(false);
+    expect((await sidebar(page)).expanded).toBe(false);
+    await expect(side).toBeVisible();
+
+    // The button at its bottom does the same, and says so with its key.
+    const fold = page.locator(".sidebar-fold");
+    expect((await fold.boundingBox())!.y).toBeGreaterThan(500);
+    await fold.hover();
+    await expect(page.locator(".tooltip")).toHaveText("Expand sidebar⇧⌘B");
+    await fold.click();
+    expect((await sidebar(page)).expanded).toBe(true);
+    await page.mouse.move(400, 300);
+    await fold.hover();
+    await expect(page.locator(".tooltip")).toHaveText("Collapse sidebar⇧⌘B");
+    // Above the button, since the bar is at the bottom.
+    expect((await page.locator(".tooltip").boundingBox())!.y).toBeLessThan((await fold.boundingBox())!.y);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-sidebar-button.png");
+    // Focus stays in the pane.
+    await page.locator(".sidebar-fold").click();
+    expect((await sidebar(page)).expanded).toBe(false);
+    await page.keyboard.type("x");
+    expect((await typed(page))[4]).toBe("x");
+  });
+
+  test("the rail: a badge shows its pane and previews it", async ({ page }) => {
+    await three(page);
+    await page.locator('.sidebar-card[data-pane="2"]').click();
+    await settle(page);
+    expect((await state(page)).focused).toBe(2);
+    await page.locator('.sidebar-card[data-pane="3"]').hover();
+    await expect(page.locator(".sidebar-preview")).toBeVisible();
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-sidebar-rail.png");
+  });
+
+  test("dragging the edge in folds it to the rail, and out opens it", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    const drag = async (to: number) => {
+      const box = (await page.locator(".sidebar").boundingBox())!;
+      await page.mouse.move(box.x + box.width - 1, box.y + 100);
+      await page.mouse.down();
+      await page.mouse.move(box.x + to, box.y + 100, { steps: 4 });
+      await page.mouse.up();
+      await settle(page);
+    };
+    await drag(40);
+    expect((await sidebar(page)).expanded).toBe(false);
+    await drag(250);
+    const s = await sidebar(page);
+    expect(s.expanded).toBe(true);
+    expect(s.width).toBeGreaterThan(200);
   });
 
   test("every pane in every tab, grouped by repository", async ({ page }) => {
@@ -658,7 +717,7 @@ test.describe("sidebar", () => {
     await page.reload();
     await settle(page);
     const s = await sidebar(page);
-    expect(s.visible).toBe(true);
+    expect(s.expanded).toBe(true);
     expect(s.width).toBeGreaterThan(300);
   });
 
@@ -727,6 +786,84 @@ test.describe("shortcut sheet", () => {
     await press(page, "Meta+/");
     await press(page, "Meta+Shift+b");
     expect((await sheet(page)).visible).toBe(false);
-    expect((await page.evaluate(() => (window as any).__ws.sidebar())).visible).toBe(true);
+    expect((await page.evaluate(() => (window as any).__ws.sidebar())).expanded).toBe(true);
+  });
+});
+
+test.describe("themes", () => {
+  const theme = (page: Page) => page.evaluate(() => (window as any).__ws.theme());
+  const bg = (page: Page, sel: string) =>
+    page.evaluate((s) => getComputedStyle(document.querySelector(s)!).backgroundColor, sel);
+
+  test("the window follows the theme", async ({ page }) => {
+    await open(page, { w: "900", h: "560" });
+    await press(page, "Meta+t");
+    await press(page, "Meta+Shift+b");
+    expect(await bg(page, ".sidebar")).toBe("rgb(16, 16, 16)");
+    await page.evaluate(() => (window as any).__ws.setPlace(2, {
+      dir: "/r/app", shown: "~/app",
+      git: { root: "/r/app", repo: "app", worktree: null, branch: "main", detached: null, upstream: null,
+             ahead: 0, behind: 0, changed: 4, conflicts: 0, operation: null },
+    }));
+    await page.evaluate(() => (window as any).__ws.setAgent(2, "blocked"));
+    await page.evaluate(() => (window as any).__ws.setTheme("Kibann Light"));
+    await settle(page);
+    // Light surfaces, dark text, and the status colors' light set.
+    const [r] = (await bg(page, ".sidebar")).match(/\d+/g)!.map(Number);
+    expect(r).toBeGreaterThan(230);
+    expect(await bg(page, ".tab-bar")).not.toBe("rgb(17, 17, 17)");
+    const changed = await page.evaluate(
+      () => getComputedStyle(document.querySelector(".pane-header .pane-changed")!).color,
+    );
+    expect(changed).toBe("rgb(154, 103, 0)");
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-theme-light.png");
+  });
+
+  test("the picker previews as you move, Enter keeps, Esc goes back", async ({ page }) => {
+    await open(page, { w: "900", h: "560" });
+    await press(page, "Meta+Shift+b");
+    await page.locator(".sidebar-themes").click();
+    const input = page.locator(".theme-picker-input");
+    await expect(input).toBeFocused();
+    const rows = () => page.locator(".theme-picker-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.name));
+    expect((await rows())[0]).toBe("Kibann Dark");
+
+    // Searching, then moving: each row is shown on the real window.
+    await page.keyboard.type("light");
+    expect(await rows()).toEqual(["Kibann Light", "Solarized Light"]);
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(async () => (await theme(page)).showing).toBe("Solarized Light");
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-theme-picker.png");
+    // Esc goes back to the theme from before; nothing was kept.
+    await page.keyboard.press("Escape");
+    await expect.poll(() => theme(page)).toEqual({ kept: "Kibann Dark", showing: "Kibann Dark" });
+    expect((await page.evaluate(() => (window as any).__ws.previews)).at(-1)).toBe(null);
+    await expect(page.locator(".theme-picker")).toBeHidden();
+
+    // Enter keeps it; the keys typed in the picker never reached a pane.
+    await page.locator(".sidebar-themes").click();
+    await page.keyboard.type("drac");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => theme(page)).toEqual({ kept: "Dracula", showing: "Dracula" });
+    expect((await typed(page))[1] ?? "").toBe("");
+    // And focus is back in the terminal.
+    await page.keyboard.type("x");
+    expect((await typed(page))[1]).toBe("x");
+  });
+
+  test("the shortcut sheet is a click away; the first launch says so", async ({ page }) => {
+    await open(page, { w: "900", h: "560", hint: "1" });
+    await expect(page.locator(".notice")).toContainText("⌘/");
+    await page.reload();
+    await settle(page);
+    await expect(page.locator(".notice")).toHaveCount(0);
+
+    await press(page, "Meta+t");
+    await page.locator(".tab-help").click();
+    expect((await page.evaluate(() => (window as any).__ws.shortcuts())).visible).toBe(true);
+    await press(page, "Escape");
+    await press(page, "Meta+Shift+b");
+    await page.locator(".sidebar-shortcuts").click();
+    expect((await page.evaluate(() => (window as any).__ws.shortcuts())).visible).toBe(true);
   });
 });

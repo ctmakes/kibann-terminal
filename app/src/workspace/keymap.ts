@@ -17,7 +17,9 @@ export type Action =
   /** 0-based; -1 is the last tab. */
   | { kind: "goToTab"; index: number }
   | { kind: "sidebar" }
-  | { kind: "shortcuts" };
+  | { kind: "shortcuts" }
+  /** The theme picker (no key; View → Theme…). */
+  | { kind: "themes" };
 
 /** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
 type Mods = string;
