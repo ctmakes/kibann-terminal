@@ -15,7 +15,8 @@ export type Action =
   | { kind: "zoom" }
   | { kind: "tabCycle"; step: 1 | -1 }
   /** 0-based; -1 is the last tab. */
-  | { kind: "goToTab"; index: number };
+  | { kind: "goToTab"; index: number }
+  | { kind: "sidebar" };
 
 /** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
 type Mods = string;
@@ -54,6 +55,7 @@ function table(p: Platform): Binding[] {
     add("ms", "BracketLeft", { kind: "tabCycle", step: -1 });
     add("ms", "BracketRight", { kind: "tabCycle", step: 1 });
     DIGITS.forEach((code, i) => add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
+    add("ms", "KeyB", { kind: "sidebar" });
   } else {
     add("cs", "KeyT", { kind: "newTab" });
     add("cs", "KeyW", { kind: "close" });
@@ -70,6 +72,7 @@ function table(p: Platform): Binding[] {
     add("c", "PageUp", { kind: "tabCycle", step: -1 });
     add("c", "PageDown", { kind: "tabCycle", step: 1 });
     DIGITS.forEach((code, i) => add("a", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
+    add("cs", "KeyB", { kind: "sidebar" });
   }
   add("c", "Tab", { kind: "tabCycle", step: 1 });
   add("cs", "Tab", { kind: "tabCycle", step: -1 });

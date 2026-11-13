@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 
 use std::collections::BTreeMap;
 
-use crate::git::{GitInfo, PaneDir};
+use crate::git::{Diff, GitInfo, PaneDir};
 use crate::layout::{Action, Layout, PaneId, TabId};
 use crate::status::{AgentState, PaneStatus};
 use crate::{Frame, InputEvent, Resize};
@@ -19,7 +19,7 @@ use crate::{Frame, InputEvent, Resize};
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -83,6 +83,12 @@ pub enum ClientMsg {
         agent: String,
         state: AgentState,
         seq: Option<u64>,
+    },
+    /// Everything uncommitted in `pane`'s checkout. Replied with
+    /// [`Reply::Diff`].
+    Diff {
+        req: ReqId,
+        pane: PaneId,
     },
     /// Drop `pane`'s report. Replied with [`Reply::Ok`].
     Release {
@@ -175,6 +181,9 @@ pub enum Reply {
         agent: Option<PaneStatus>,
     },
     Ok,
+    Diff {
+        diff: Diff,
+    },
     Error {
         message: String,
     },

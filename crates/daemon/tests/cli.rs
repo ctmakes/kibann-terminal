@@ -307,6 +307,17 @@ fn pane_list_shows_the_checkout() {
     assert_eq!(pane["git"]["branch"], "trunk");
     assert_eq!(pane["git"]["repo"], "proj");
     assert_eq!(pane["git"]["changed"], 1);
+
+    // Its diff, as a patch and as files.
+    let id = pane["id"].as_str().unwrap().to_owned();
+    let out = kibann(&socket, None, &["pane", "diff", &id]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("+++ b/x"));
+    let stat = ok(kibann(&socket, None, &["pane", "diff", &id, "--stat"]));
+    assert_eq!(stat["files"][0]["path"], "x");
+    assert_eq!(stat["files"][0]["status"], "?");
+    let out = kibann(&socket, None, &["pane", "diff", "p999"]);
+    assert_eq!(fails(&out, 1)["error"]["code"], "not_found");
     d.shutdown();
     h.join().unwrap().unwrap();
 }

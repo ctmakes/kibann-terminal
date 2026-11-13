@@ -461,6 +461,37 @@ impl Daemon {
                 drop(st);
                 Self::reply(out, req, reply);
             }
+            ClientMsg::Diff { req, pane } => {
+                let root = {
+                    let st = self.lock();
+                    if st.sessions.contains_key(&pane) {
+                        Ok(st.places.get(&pane).and_then(|p| p.root.clone()))
+                    } else {
+                        Err(err(format!("no pane p{pane}")))
+                    }
+                };
+                // Git can take a while; this thread also carries the
+                // connection's keystrokes.
+                let out = out.clone();
+                let _ = thread::Builder::new()
+                    .name("daemon-diff".into())
+                    .spawn(move || {
+                        let reply = match root {
+                            Err(e) => e,
+                            Ok(None) => err("not in a git checkout"),
+                            Ok(Some(root)) => match git::Checkout::discover(&root)
+                                .ok_or_else(|| err("not in a git checkout"))
+                                .and_then(|c| {
+                                    c.diff(git::Limits::default())
+                                        .map_err(|e| err(format!("git diff: {e}")))
+                                }) {
+                                Ok(diff) => Reply::Diff { diff },
+                                Err(e) => e,
+                            },
+                        };
+                        Self::reply(&out, req, reply);
+                    });
+            }
             ClientMsg::Release { req, pane } => {
                 let mut st = self.lock();
                 let reply = if st.sessions.contains_key(&pane) {

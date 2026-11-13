@@ -53,3 +53,32 @@ pub struct PaneDir {
     pub shown: String,
     pub git: Option<GitInfo>,
 }
+
+/// One file's uncommitted change, against HEAD.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FileDiff {
+    pub path: String,
+    /// The path before a rename or copy.
+    pub old_path: Option<String>,
+    /// `M` modified, `A` added, `D` deleted, `R` renamed, `C` copied,
+    /// `T` type changed, `?` untracked.
+    pub status: String,
+    /// Lines added and removed; `None` for binary files.
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
+    pub binary: bool,
+    /// The unified diff, without color; `None` for binary or skipped files.
+    pub patch: Option<String>,
+    /// The patch was cut at the size limit.
+    pub truncated: bool,
+}
+
+/// Everything uncommitted in a checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Diff {
+    pub files: Vec<FileDiff>,
+    /// Some files' patches were left out to stay under the total limit.
+    pub truncated: bool,
+}

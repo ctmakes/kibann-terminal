@@ -325,6 +325,14 @@ fn set_badge(window: tauri::WebviewWindow, count: u32) {
     }
 }
 
+/// This executable, which also runs `kibann` commands (the diff viewer).
+#[tauri::command]
+fn app_exe() -> Option<String> {
+    std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 /// End every shell and the daemon, then quit.
 #[cfg(target_os = "macos")]
 fn quit_ending_sessions(app: &AppHandle) {
@@ -378,6 +386,12 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .build()?;
     let edit = SubmenuBuilder::new(app, "Edit").copy().paste().build()?;
     let view = SubmenuBuilder::new(app, "View")
+        .item(&item(
+            r#"{"kind":"sidebar"}"#,
+            "Toggle Sidebar",
+            "Shift+Cmd+B",
+        )?)
+        .separator()
         .item(&item(
             r#"{"kind":"zoom"}"#,
             "Zoom Split",
@@ -460,6 +474,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_exe,
             set_badge,
             term_attach,
             term_release,

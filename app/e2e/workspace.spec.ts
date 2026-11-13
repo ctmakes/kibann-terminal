@@ -549,7 +549,8 @@ test.describe("pane header", () => {
       git: git({ branch: "feature/a-very-long-branch-name-indeed", changed: 12, ahead: 3 }),
     });
     const w = await page.evaluate(() => {
-      const r = (s: string) => document.querySelector(s)!.getBoundingClientRect().width;
+      const r = (s: string) =>
+        document.querySelector(`.pane-header ${s}`)!.getBoundingClientRect().width;
       return { changed: r(".pane-changed"), sync: r(".pane-sync"), branch: r(".pane-branch") };
     });
     expect(w.changed).toBeGreaterThan(10);
@@ -562,4 +563,121 @@ test.describe("pane header", () => {
     await page.evaluate((p) => (window as any).__ws.setAgent(p, "working"), pane);
     await settle(page);
   }
+});
+
+test.describe("sidebar", () => {
+  const repo = (name: string, g: Record<string, unknown> = {}) => ({
+    dir: `/r/${name}`,
+    shown: `~/${name}`,
+    git: {
+      root: `/r/${name}`,
+      repo: name,
+      worktree: null,
+      branch: "main",
+      detached: null,
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      changed: 0,
+      conflicts: 0,
+      operation: null,
+      ...g,
+    },
+  });
+  async function place(page: Page, pane: number, p: unknown): Promise<void> {
+    await page.evaluate(([id, pl]) => (window as any).__ws.setPlace(id, pl), [pane, p] as const);
+    await settle(page);
+  }
+  const sidebar = (page: Page) => page.evaluate(() => (window as any).__ws.sidebar());
+
+  /** Three tabs: 1|2, 3, 4. */
+  async function three(page: Page): Promise<void> {
+    await open(page, { w: "900", h: "560" });
+    await press(page, "Meta+d");
+    await press(page, "Meta+t");
+    await press(page, "Meta+t");
+    await place(page, 1, repo("alpha", { changed: 3 }));
+    await place(page, 2, { dir: "/Users/x", shown: "~", git: null });
+    await place(page, 3, repo("beta", { branch: "feature/x", ahead: 1 }));
+    await place(page, 4, repo("alpha", { worktree: "alpha-wt", branch: "fix" }));
+  }
+
+  test("toggles with Cmd+Shift+B and takes room from the panes", async ({ page }) => {
+    await three(page);
+    expect((await sidebar(page)).visible).toBe(false);
+    const before = (await state(page)).panes[0].w;
+    await press(page, "Meta+Shift+b");
+    const s = await sidebar(page);
+    expect(s.visible).toBe(true);
+    const after = (await state(page)).panes[0].w;
+    expect(before - after).toBeGreaterThan(200);
+    await press(page, "Meta+Shift+b");
+    expect((await sidebar(page)).visible).toBe(false);
+  });
+
+  test("every pane in every tab, grouped by repository", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    expect((await sidebar(page)).items).toEqual(["# alpha", 1, 4, "# ~", 2, "# beta", 3]);
+    // An agent waiting for you brings its group to the top.
+    await page.evaluate(() => (window as any).__ws.setAgent(3, "blocked"));
+    await settle(page);
+    expect((await sidebar(page)).items).toEqual(["# beta", 3, "# alpha", 1, 4, "# ~", 2]);
+  });
+
+  test("clicking a card shows its pane; ●N asks for the diff", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    await page.locator('.sidebar-card[data-pane="2"] .sidebar-title').click();
+    await settle(page);
+    let s = await state(page);
+    expect(s.active).toBe(0);
+    expect(s.focused).toBe(2);
+    await page.keyboard.type("x");
+    expect((await typed(page))[2]).toBe("x");
+
+    await page.locator('.sidebar-card[data-pane="1"] .pane-changed').click();
+    // And from the pane's own header.
+    await page.locator('.pane[data-pane="2"]').waitFor();
+    await page.locator('.pane[data-pane="1"] .pane-header .pane-changed').click();
+    expect(await page.evaluate(() => (window as any).__ws.diffs)).toEqual([1, 1]);
+    s = await state(page);
+    expect(s.focused).toBe(2); // ●N doesn't move focus
+  });
+
+  test("dragging the edge resizes it, and it's remembered", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    const box = (await page.locator(".sidebar").boundingBox())!;
+    await page.mouse.move(box.x + box.width - 1, box.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 320, box.y + 100, { steps: 4 });
+    await page.mouse.up();
+    await settle(page);
+    expect((await sidebar(page)).width).toBeGreaterThan(300);
+    await page.reload();
+    await settle(page);
+    const s = await sidebar(page);
+    expect(s.visible).toBe(true);
+    expect(s.width).toBeGreaterThan(300);
+  });
+
+  test("thumbnails show the panes", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    await page.waitForTimeout(700);
+    // Every thumbnail has something drawn (the pane's text).
+    const drawn = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLCanvasElement>(".sidebar-thumb")].map((c) => {
+        const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+        let lit = 0;
+        // Pixels clearly off the background (#181818): text, shrunk.
+        for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] + d[i + 1] + d[i + 2] > 140) lit++;
+        return lit;
+      }),
+    );
+    expect(drawn.length).toBe(4);
+    for (const n of drawn) expect(n).toBeGreaterThan(20);
+    await expect(page.locator("#ws")).toHaveScreenshot("workspace-sidebar.png");
+  });
 });

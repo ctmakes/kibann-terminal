@@ -39,6 +39,7 @@ Tabs and splits use Ghostty's default shortcuts:
 | Zoom pane | Cmd+Shift+Enter | Ctrl+Shift+Enter |
 | Previous / next tab | Cmd+Shift+[ / ] | Ctrl+PageUp / PageDown |
 | Tab 1–8, last tab | Cmd+1–8, Cmd+9 | Alt+1–8, Alt+9 |
+| Sidebar | Cmd+Shift+B | Ctrl+Shift+B |
 
 Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
 
@@ -75,6 +76,12 @@ It updates from filesystem events, not polling, so an idle workspace costs nothi
 - **Git is run with `--no-optional-locks`**, so it never takes the index lock an agent's `git commit` needs.
 
 Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane list` includes the same information as `git`.
+
+**Click `●5`** to see the changes: a viewer opens in a split beside the pane, with the changed files on top (untracked ones too) and the selected file's diff below. Up/down or j/k pick a file, space and b page, q closes it. It follows changes while open; clicking `●5` again focuses it. Very large diffs are cut, with a note. From a shell, `kibann pane diff P` prints the same patch (`--stat` lists the files as JSON).
+
+### The sidebar
+
+**Cmd+Shift+B** (Ctrl+Shift+B elsewhere, or View → Toggle Sidebar) shows every pane of every tab on the left, grouped by repository (panes outside one by directory). Each card has a live thumbnail of the pane's screen, its title, agent dot and branch line. Groups with an agent waiting for you come first, then finished, then working. Click a card to go to its pane; click its `●5` for the diff. Drag the sidebar's edge to resize it; whether it's shown and its width are remembered.
 
 ### Agent status at a glance
 

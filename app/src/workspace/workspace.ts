@@ -15,6 +15,7 @@ import type { Layout, LayoutAction } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
+import { Sidebar } from "./sidebar";
 import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
 import {
   cycle,
@@ -84,10 +85,13 @@ export interface WorkspaceOptions {
   onContextMenu?(pane: Pane, e: MouseEvent): void;
   /** How many panes' agents wait for the user changed (the Dock badge). */
   onBlocked?(count: number): void;
+  /** Open the uncommitted changes of `pane`'s checkout (●N was clicked). */
+  onDiff?(pane: Pane): void;
 }
 
 export class Workspace {
   readonly root: HTMLDivElement;
+  readonly sidebar: Sidebar;
   readonly bar: HTMLDivElement;
   readonly stage: HTMLDivElement;
   readonly tabs: Tab[] = [];
@@ -113,10 +117,21 @@ export class Workspace {
       position: "absolute",
       inset: "0",
       display: "flex",
-      flexDirection: "column",
       background: COLORS.divider,
       userSelect: "none",
       webkitUserSelect: "none",
+    });
+    // The sidebar on the left; the tab bar and the panes to its right.
+    const main = document.createElement("div");
+    main.className = "workspace-main";
+    Object.assign(main.style, { flex: "1 1 auto", minWidth: "0", display: "flex", flexDirection: "column" });
+    this.sidebar = new Sidebar({
+      onPick: (id) => this.show(id),
+      onDiff: (id) => {
+        const p = this.panes.get(id);
+        if (p) this.opts.onDiff?.(p);
+      },
+      onResize: () => {},
     });
     this.bar = document.createElement("div");
     this.bar.className = "tab-bar";
@@ -130,7 +145,8 @@ export class Workspace {
     this.stage = document.createElement("div");
     this.stage.className = "stage";
     Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden" });
-    this.root.append(this.bar, this.stage);
+    main.append(this.bar, this.stage);
+    this.root.append(this.sidebar.el, main);
     container.append(this.root);
 
     installStyle();
@@ -174,6 +190,11 @@ export class Workspace {
         }
         return;
     }
+    if (action.kind === "sidebar") {
+      this.sidebar.toggle();
+      this.renderSidebar();
+      return;
+    }
     if (!on || !tab) return;
     switch (action.kind) {
       case "close":
@@ -204,6 +225,48 @@ export class Workspace {
         return;
       }
     }
+  }
+
+  /** Show `id`: its tab, focused. */
+  show(id: PaneId): void {
+    const p = this.panes.get(id);
+    if (!p) return;
+    if (this.active !== p.tab) this.activate(p.tab);
+    this.focusPane(id);
+  }
+
+  private sidebarQueued = false;
+
+  /** Redraw the sidebar's cards after the current change settles. */
+  private renderSidebar(): void {
+    if (this.sidebarQueued) return;
+    this.sidebarQueued = true;
+    queueMicrotask(() => {
+      this.sidebarQueued = false;
+      const cards = this.tabs.flatMap((t, i) =>
+        panes(t.tree).flatMap((id) => {
+          const p = this.panes.get(id);
+          if (!p) return [];
+          const bg = p.view ? `#${p.view.grid.defaultBg.toString(16).padStart(6, "0")}` : "#181818";
+          return [
+            {
+              id,
+              title: p.title,
+              tab: i,
+              shown: t === this.active,
+              focused: t.focused === id,
+              canvas: p.view?.gridCanvas ?? null,
+              bg,
+              cursor: () => {
+                const g = p.view?.grid;
+                return g && g.rows > 0 ? (g.cursor.y + 1) / g.rows : 1;
+              },
+            },
+          ];
+        }),
+      );
+      this.sidebar.render(cards, this.git, this.status);
+    });
   }
 
   private send(a: LayoutAction): void {
@@ -376,6 +439,7 @@ export class Workspace {
   }
 
   private updateBar(): void {
+    this.renderSidebar();
     this.bar.style.display = this.tabs.length > 1 ? "flex" : "none";
     for (const t of this.tabs) {
       const on = t === this.active;
@@ -402,7 +466,10 @@ export class Workspace {
     el.dataset.pane = String(id);
     Object.assign(el.style, { position: "absolute", overflow: "hidden" });
     const dot = makeDot();
-    const header = new PaneHeader(dot);
+    const header = new PaneHeader(dot, () => {
+      const p = this.panes.get(id);
+      if (p) this.opts.onDiff?.(p);
+    });
     header.show(this.git[String(id)]);
     header.setActive(tab.focused === id);
     // The terminal fills what the header leaves.
@@ -419,6 +486,10 @@ export class Workspace {
       platform: this.platform,
       autofocus: false,
       onFocusChange: (focused) => focused && this.onPaneFocused(pane),
+      onPaint: (info) => {
+        this.opts.view?.onPaint?.(info);
+        this.sidebar.painted(id);
+      },
       onTitle: (title) => {
         pane.title = title;
         this.updateBar();
@@ -431,6 +502,7 @@ export class Workspace {
         return;
       }
       pane.view = view;
+      this.renderSidebar();
       view.setActive(pane.tab.focused === pane.id);
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
     });
@@ -569,6 +641,7 @@ export class Workspace {
       p.transport.close?.();
     }
     for (const c of this.cleanups) c();
+    this.sidebar.dispose();
     this.root.remove();
   }
 }

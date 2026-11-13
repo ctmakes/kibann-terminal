@@ -66,11 +66,14 @@ const ws = new Workspace(root, {
   onTitle: (t) => titles.push(t),
   onEmpty: () => (quit = true),
   onBlocked: (n) => (badge = n),
+  onDiff: (p) => diffs.push(p.id),
 });
 backend.onLayout = (l) => ws.apply(l);
 backend.onStatus = (m) => ws.setStatus(m);
 backend.onGit = (m) => ws.setGit(m);
 let badge = 0;
+/** Panes whose diff was asked for. */
+const diffs: number[] = [];
 // `saved`: a layout from `__ws.snapshot()`, as if the daemon kept it.
 if (params.saved) ws.apply(backend.layout);
 else void backend.act({ t: "new_tab", focus: true });
@@ -88,6 +91,18 @@ else void backend.act({ t: "new_tab", focus: true });
   },
   get badge() {
     return badge;
+  },
+  diffs,
+  /** The sidebar's groups and cards, in order. */
+  sidebar() {
+    const els = [...ws.sidebar.el.querySelectorAll<HTMLElement>(".sidebar-group, .sidebar-card")];
+    return {
+      visible: ws.sidebar.visible,
+      width: ws.sidebar.width,
+      items: els.map((e) =>
+        e.classList.contains("sidebar-group") ? `# ${e.textContent}` : Number(e.dataset.pane),
+      ),
+    };
   },
   /** A pane's agent changes state (as the daemon would detect it). */
   setAgent(pane: number, state: string | null) {

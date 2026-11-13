@@ -46,6 +46,9 @@ usage: kibann <command>
                                     say what the agent in P is doing (beats
                                     what its screen shows)
   pane release P                    forget P's report
+  pane diff P [--stat|--view]       P's uncommitted changes as a patch; with
+                                    --stat the files as JSON; with --view a
+                                    full-screen viewer that follows changes
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
   skill show | skill install        the guide for agents (to ~/.claude/skills/kibann)
@@ -406,6 +409,36 @@ fn dispatch(args: &[String]) -> Out {
                 other => Err(unexpected(other).into()),
             }
         }
+        (Some("pane"), Some("diff")) => {
+            a.only(&["--stat", "--view"])?;
+            let pane = take_pane(&mut a, true)?;
+            if a.has("--view") {
+                return view(pane);
+            }
+            let diff = diff(&connect()?, pane)?;
+            if a.has("--stat") {
+                let files: Vec<Value> = diff
+                    .files
+                    .iter()
+                    .map(|f| {
+                        json!({"path": f.path, "old_path": f.old_path, "status": f.status,
+                               "added": f.added, "removed": f.removed, "binary": f.binary})
+                    })
+                    .collect();
+                return Ok(Some(json!({"files": files, "truncated": diff.truncated})));
+            }
+            for f in &diff.files {
+                match &f.patch {
+                    Some(p) => print!("{p}"),
+                    None if f.binary => println!("Binary file {} ({})", f.path, f.status),
+                    None => println!("{} ({}): too large to show", f.path, f.status),
+                }
+                if f.truncated {
+                    println!("[{}: cut at the size limit]", f.path);
+                }
+            }
+            Ok(None)
+        }
         (Some("pane"), Some("focus")) => {
             let pane = take_pane(&mut a, false)?;
             let (p, t) = connect()?.act(Action::Focus { pane })?;
@@ -499,6 +532,32 @@ fn pane_list(c: &Client, only: Option<PaneId>) -> Out {
             json!({"panes": panes.iter().map(entry).collect::<Vec<_>>()}),
         )),
     }
+}
+
+fn diff(c: &Client, pane: PaneId) -> Result<proto::git::Diff, Fail> {
+    match c.request(|req| ClientMsg::Diff { req, pane })? {
+        Reply::Diff { diff } => Ok(diff),
+        Reply::Error { message } if message.starts_with("no pane") => {
+            Err(error("not_found", message))
+        }
+        Reply::Error { message } => Err(error("no_repo", message)),
+        other => Err(unexpected(other).into()),
+    }
+}
+
+#[cfg(unix)]
+fn view(pane: PaneId) -> Out {
+    // Check the pane first, so a bad id fails before the screen changes.
+    check_pane(&connect()?, pane)?;
+    let socket = crate::paths::socket_path(cfg!(debug_assertions));
+    crate::view::run(pane, |on_event| Client::connect(&socket, on_event))?;
+    Ok(None)
+}
+
+#[cfg(not(unix))]
+fn view(_pane: PaneId) -> Out {
+    connect()?;
+    Ok(None)
 }
 
 fn read(c: &Client, pane: PaneId, source: ReadSource, lines: Option<u32>) -> Result<String, Fail> {

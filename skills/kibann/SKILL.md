@@ -50,6 +50,9 @@ kibann pane wait P --until done,blocked --timeout 900000
 kibann pane list                  # every pane: id, tab, title, cwd, focused,
                                   # agent ("claude" or null), state, and git:
                                   # {repo, worktree, branch, changed, ahead, ...}
+kibann pane diff P                # P's uncommitted changes (vs HEAD, untracked
+                                  # files included) as a patch
+kibann pane diff P --stat         # {"files":[{"path","status","added","removed",...}]}
 kibann pane current               # your own pane
 kibann pane focus P
 kibann pane close P
@@ -100,9 +103,10 @@ Code's screen and title. Wait for `working` first: right after `run`, the
 agent hasn't started yet and the pane has no agent. If `blocked` comes back,
 read the pane and tell the user what it asks; don't answer it.
 
-To see what another pane's agent changed, compare `.git.branch` and
-`.git.changed` from `kibann pane list` before and after, rather than typing
-`git status` into its pane. The counts follow file changes within about a
+To see what another pane's agent changed, use `kibann pane diff P` (or
+`--stat`), and compare `.git.branch` and `.git.changed` from `kibann pane
+list` before and after, rather than typing `git status` or `git diff` into
+its pane. The counts follow file changes within about a
 second; `ahead`/`behind` are as of the last fetch (Kibann never fetches).
 
 A script or other agent can say what it is doing itself, which beats what

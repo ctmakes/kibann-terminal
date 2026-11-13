@@ -35,6 +35,23 @@ async function start(): Promise<void> {
   const backend: LayoutBackend = {
     act: (action: LayoutAction) => invoke<Acted>("layout_act", { action }),
   };
+  // ●N opens the diff viewer (`kibann pane diff P --view`, run by this
+  // executable) in a split beside the pane; again, it focuses that split.
+  const diffs = new Map<number, number>();
+  const openDiff = async (pane: Pane) => {
+    const open = diffs.get(pane.id);
+    if (open !== undefined && ws.panes.has(open)) return ws.show(open);
+    const exe = await invoke<string | null>("app_exe");
+    if (!exe) return;
+    const made = await backend.act({
+      t: "split",
+      pane: pane.id,
+      dir: "row",
+      argv: [exe, "pane", "diff", `p${pane.id}`, "--view"],
+      focus: true,
+    });
+    if (made.pane !== null) diffs.set(pane.id, made.pane);
+  };
   const ws = new Workspace(el, {
     backend,
     transport: (pane) => new TauriTransport(pane),
@@ -43,6 +60,7 @@ async function start(): Promise<void> {
     onContextMenu: (pane) => void showContextMenu(ws, pane),
     // The Dock icon shows how many agents wait for the user (macOS).
     onBlocked: (count) => void invoke("set_badge", { count }),
+    onDiff: (pane) => void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 

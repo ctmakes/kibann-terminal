@@ -62,7 +62,8 @@ export class PaneHeader {
   private readonly text: HTMLDivElement;
   private last = "";
 
-  constructor(dot: HTMLElement) {
+  /** `onDiff`: the changed count (●N) was clicked. */
+  constructor(dot: HTMLElement, onDiff?: () => void) {
     this.el = document.createElement("div");
     this.el.className = "pane-header";
     Object.assign(this.el.style, {
@@ -92,6 +93,13 @@ export class PaneHeader {
       overflow: "hidden",
     });
     this.el.append(this.text, dot);
+    this.el.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement).classList.contains("pane-changed") && onDiff) {
+        e.preventDefault();
+        e.stopPropagation();
+        onDiff();
+      }
+    });
   }
 
   setActive(active: boolean): void {
@@ -116,6 +124,7 @@ export class PaneHeader {
           overflow: "hidden",
           textOverflow: "ellipsis",
           color: COLORS[p.kind],
+          cursor: p.kind === "changed" ? "pointer" : "",
         });
         return s;
       }),

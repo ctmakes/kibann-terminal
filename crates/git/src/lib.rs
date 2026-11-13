@@ -9,6 +9,7 @@
 //! commits fail on `index.lock`. It also never writes, so our own runs
 //! don't show up as changes.
 
+mod diff;
 mod filter;
 mod status;
 mod watch;
@@ -19,6 +20,7 @@ use std::process::{Command, Stdio};
 
 use proto::git::{GitInfo, GitOp};
 
+pub use diff::Limits;
 pub use filter::{Filter, global_excludes};
 pub use status::{Status, parse_status};
 pub use watch::Watcher;
