@@ -42,6 +42,7 @@ Tabs and splits use Ghostty's default shortcuts:
 - Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app, and any key closes it. You can change any shortcut in the config file (see [Keyboard shortcuts](#keyboard-shortcuts)).
 - Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS, the actions are also in the menu bar.
 - You can drag the dividers. The right-click menu has Split Right, Split Down and Close.
+- With more than one tab, each tab shows its number, the one Cmd+1–8 goes to; the sidebar shows it on each pane's row.
 - New panes and tabs start in the focused pane's directory. A pane closes when its shell exits.
 
 ### Shells outlive the app
@@ -57,7 +58,7 @@ The layout is kept in `~/Library/Application Support/kibann/layout.json` (`$XDG_
 
 **The menu-bar icon (macOS).**
 - **Closing the window, or its last pane,** only hides the window. The app keeps running, so agents can still notify you, and the icon shows a dot while one waits.
-- **The icon's menu** shows the version. From it you can bring the window back (the Dock icon does that too), open a tab, go to a waiting agent, or install a downloaded update.
+- **The icon's menu** shows the version. From it you can bring the window back (the Dock icon does that too), open a tab, go to a waiting agent, install a downloaded update, or read What's New.
 - **Quit Kibann Terminal** in that menu asks first, then ends the shells, the daemon and the app.
 
 `menu-bar-icon = false` in the config removes the icon. Closing the window then quits the app, as does closing the last pane on other platforms.
@@ -139,7 +140,7 @@ The sidebar never hides completely.
 - **A badge** is the pane's agent dot and a letter: the program's (`V` for vim), or, for a shell, the directory's (`K` for `~/src/kibann`). When two neighbours would look alike, they get two letters.
 - **Drag its edge** to resize it. Dragging it nearly shut folds it, and its state and width are remembered.
 
-The bottom row also has buttons for the theme picker and the shortcut sheet; hover one for its name and key. The `?` at the end of the tab bar also opens the shortcut sheet.
+The bottom row also has buttons for the theme picker, the shortcut sheet and What's New; hover one for its name and key. The `?` at the end of the tab bar also opens the shortcut sheet.
 
 ### Find
 
@@ -179,7 +180,7 @@ Links (Cmd on macOS, Ctrl elsewhere):
 
 ### Updates
 
-The app checks for a new version a few seconds after it starts and then every hour. You can also check now with Kibann Terminal → Check for Updates…. It downloads the update in the background and says when it's ready, with **Restart to update**; the shells keep running through the restart. Help → What's New shows the release notes, and the first start of a new version offers them.
+The app checks for a new version a few seconds after it starts and then every hour. You can also check now with Kibann Terminal → Check for Updates…. It downloads the update in the background and says when it's ready, with **Restart to update**; the shells keep running through the restart. Help → What's New (also the sparkle at the bottom of the sidebar, and the menu-bar icon's menu) shows the release notes, and the first start of a new version offers them.
 
 ## Configuration
 

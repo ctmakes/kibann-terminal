@@ -13,7 +13,8 @@ The first public build, for Macs with Apple silicon.
   box drawing drawn as lines, selection, scrollback, links you can
   Cmd+click, and find in scrollback (Cmd+F).
 - Tabs and splits with Ghostty's shortcuts, all listed with Cmd+/ and all
-  changeable in the config file (`keybind = ...`, Ghostty's syntax).
+  changeable in the config file (`keybind = ...`, Ghostty's syntax). Tabs
+  show their number (Cmd+1–8), in the tab bar and the sidebar.
 - Shells outlive the window: a background process keeps them running, and
   the app picks them up again when it opens. After a restart the tabs and
   splits come back with fresh shells in the same directories.

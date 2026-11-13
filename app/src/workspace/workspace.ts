@@ -91,6 +91,8 @@ export interface Tab {
 }
 
 export interface WorkspaceOptions {
+  /** What's New was asked for (the sidebar's button). */
+  onWhatsNew?(): void;
   /** Where layout actions go. */
   backend: LayoutBackend;
   /** A transport for the pane (session) `pane`. */
@@ -189,6 +191,7 @@ export class Workspace {
       onResize: () => {},
       onShortcuts: () => this.shortcuts.toggle(),
       onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
+      onWhatsNew: opts.onWhatsNew,
       shortcutKey: sheetKey,
       sidebarKey: () => keyFor({ kind: "sidebar" }, this.platform),
     });
@@ -636,7 +639,11 @@ export class Workspace {
     x.className = "tab-close";
     x.textContent = "×";
     Object.assign(x.style, { position: "absolute", left: "8px", fontSize: "14px", opacity: "0.6" });
-    b.append(x, tab.dot, label);
+    // Its number: Cmd+1–8 goes to it (Ctrl elsewhere).
+    const n = document.createElement("span");
+    n.className = "tab-number";
+    Object.assign(n.style, { position: "absolute", right: "10px", fontSize: "11px", opacity: "0.55", fontVariantNumeric: "tabular-nums" });
+    b.append(x, tab.dot, label, n);
     b.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       if (e.button === 1 || e.target === x) {
@@ -650,7 +657,7 @@ export class Workspace {
     this.renderSidebar();
     this.bar.style.display = this.tabs.length > 1 ? "flex" : "none";
     this.bar.append(this.help); // after the tabs, wherever they moved
-    for (const t of this.tabs) {
+    this.tabs.forEach((t, i) => {
       const on = t === this.active;
       t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
       t.button.style.color = on ? COLORS.activeText : COLORS.text;
@@ -658,8 +665,9 @@ export class Workspace {
       const title = (this.panes.get(t.focused)?.title || "shell") + (branch ? ` · ${branch}` : "");
       t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
       t.button.title = title;
+      t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent = String(i + 1);
       showDot(t.dot, rollUp(this.status, panes(t.tree)));
-    }
+    });
   }
 
   /** Color the window around the terminals for `theme`. */

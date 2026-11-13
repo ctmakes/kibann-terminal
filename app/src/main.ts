@@ -64,6 +64,7 @@ async function start(): Promise<void> {
     current: () => themeName,
   };
   const ws = new Workspace(el, {
+    onWhatsNew: () => void whatsNew(),
     backend,
     themes,
     firstRunHint: true,
@@ -99,7 +100,7 @@ async function start(): Promise<void> {
   );
   // A notification was clicked: show the pane it's about.
   await listen<number>("focus-pane", (e) => ws.show(e.payload));
-  // What's New (Help menu, or the notice after an update).
+  // What's New (Help menu, the sidebar, the menu-bar icon, or the notice after an update).
   const whatsNew = async () => {
     const [text, version] = await invoke<[string, string]>("changelog");
     ws.showChanges(text, version);

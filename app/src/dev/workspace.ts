@@ -103,6 +103,7 @@ const ws = new Workspace(root, {
   onBlocked: (n) => (badge = n),
   onDiff: (p) => diffs.push(p.id),
   onNotify: (n) => notes.push(n),
+  onWhatsNew: () => (api.whatsNew += 1),
   windowFocused: () => windowFocused,
 });
 /** System notifications asked for, and whether the window "has focus". */
@@ -142,6 +143,8 @@ const api = {
   noticeWithButton(text: string, label: string) {
     ws.notice(text, 0, { label, run: () => (api.clicked += 1) });
   },
+  /** Times the sidebar's What's New button was used. */
+  whatsNew: 0,
   /** Help → What's New, with this changelog text. */
   showChanges: (text: string, version: string) => ws.showChanges(text, version),
   /** The menu-bar icon's "N agents are waiting". */

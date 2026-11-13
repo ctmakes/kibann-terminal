@@ -27,6 +27,9 @@ const THEME_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" 
 const KEYS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
 <rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/>
 <path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6" stroke-linecap="round" stroke-width="1.4"/></svg>`;
+/** What's New: a sparkle. */
+const NEWS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
+<path d="M8 2 9.3 6.7 14 8 9.3 9.3 8 14 6.7 9.3 2 8 6.7 6.7z"/></svg>`;
 /** Dragging the edge narrower than this collapses it. */
 const COLLAPSE_AT = 90;
 /** The preview redraws at most this often. */
@@ -115,6 +118,8 @@ interface Row {
   el: HTMLDivElement;
   title: HTMLSpanElement;
   dot: HTMLSpanElement;
+  /** Its tab's number, when there's more than one tab. */
+  num: HTMLSpanElement;
   line: HTMLSpanElement;
   /** The first letter, shown on the rail. */
   badge: HTMLSpanElement;
@@ -130,6 +135,7 @@ export interface SidebarOptions {
   /** The bottom row's buttons. */
   onShortcuts(): void;
   onThemes?(): void;
+  onWhatsNew?(): void;
   /** The shortcut sheet's key, shown in its button's tooltip. */
   shortcutKey: () => string;
   /** The key that collapses and expands it, shown in its button's tooltip. */
@@ -226,7 +232,7 @@ export class Sidebar {
       border: "1px solid var(--k-divider)",
       boxShadow: "0 6px 24px var(--k-shadow)",
     });
-    // Bottom: the theme picker and the shortcut sheet on the left, the
+    // Bottom: the theme picker, the shortcut sheet and What's New on the left, the
     // button that collapses and expands it on the right.
     this.bar = document.createElement("div");
     this.bar.className = "sidebar-bar";
@@ -276,9 +282,15 @@ export class Sidebar {
     }
     const keys = icon("sidebar-shortcuts", KEYS_ICON, opts.onShortcuts);
     tooltip(keys, "Keyboard shortcuts", opts.shortcutKey, true);
+    this.extras.push(keys);
+    if (opts.onWhatsNew) {
+      const news = icon("sidebar-whats-new", NEWS_ICON, opts.onWhatsNew);
+      tooltip(news, "What's New", "", true);
+      this.extras.push(news);
+    }
     const spacer = document.createElement("div");
     spacer.style.flex = "1";
-    this.extras.push(keys, spacer);
+    this.extras.push(spacer);
     const fold = icon("sidebar-fold", ICON, () => this.toggle());
     tooltip(fold, () => (this.expanded ? "Collapse sidebar" : "Expand sidebar"), opts.sidebarKey, true);
     this.bar.append(...this.extras, fold);
@@ -347,6 +359,8 @@ export class Sidebar {
     this.panes = panes;
     this.last = { git, status };
     const groups = groupPanes(panes, git, status);
+    // Tab numbers only mean something with more than one tab.
+    const tabbed = panes.some((p) => p.tab > 0);
     const keep = new Set(panes.map((p) => p.id));
     for (const [id, r] of this.rows) {
       if (keep.has(id)) continue;
@@ -385,7 +399,7 @@ export class Sidebar {
       const badges = badgeTexts(g.panes.map((p) => badgeSource(p.title, git[String(p.id)])));
       g.panes.forEach((p, i) => {
         const r = this.rows.get(p.id) ?? this.makeRow(p.id);
-        this.fillRow(r, p, git[String(p.id)], status, badges[i]);
+        this.fillRow(r, p, git[String(p.id)], status, badges[i], tabbed);
         nodes.push(r.el);
       });
     }
@@ -440,7 +454,17 @@ export class Sidebar {
       fontWeight: "600",
       overflow: "hidden",
     });
-    el.append(slot, badge, title, line);
+    const num = document.createElement("span");
+    num.className = "sidebar-tab";
+    Object.assign(num.style, {
+      flex: "0 0 auto",
+      minWidth: "9px",
+      fontSize: "10px",
+      textAlign: "center",
+      color: "var(--k-muted)",
+      fontVariantNumeric: "tabular-nums",
+    });
+    el.append(slot, badge, num, title, line);
     el.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       const t = e.target as HTMLElement;
@@ -448,17 +472,23 @@ export class Sidebar {
       else this.opts.onPick(id);
     });
     el.addEventListener("mouseenter", () => this.showPreview(id));
-    const r: Row = { el, title, dot, line, badge };
+    const r: Row = { el, title, dot, num, line, badge };
     this.rows.set(id, r);
     return r;
   }
 
-  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap, badge: string): void {
+  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap, badge: string, tabbed: boolean): void {
     const name = p.title || "shell";
     r.title.textContent = name;
     r.badge.textContent = badge;
+    const tab = `Tab ${p.tab + 1}`;
+    r.num.textContent = String(p.tab + 1);
+    r.num.title = tab;
     const full = this.expanded;
-    r.el.title = full ? (place?.dir ?? "") : [name, place?.shown].filter(Boolean).join(" — ");
+    r.num.style.display = full && tabbed ? "" : "none";
+    r.el.title = full
+      ? (place?.dir ?? "")
+      : [name, place?.shown, tabbed ? tab : ""].filter(Boolean).join(" — ");
     r.badge.style.display = full ? "none" : "";
     r.title.style.display = full ? "" : "none";
     r.line.style.display = full ? "flex" : "none";

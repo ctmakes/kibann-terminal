@@ -242,6 +242,8 @@ test.describe("tabs", () => {
     });
     await settle(page);
     await expect(page.locator(".tab-title")).toHaveText(["vim", "zsh"]);
+    // Each tab shows its number, the one Cmd+N goes to.
+    await expect(page.locator(".tab-number")).toHaveText(["1", "2"]);
     const titles = await page.evaluate(() => (window as any).__ws.titles);
     expect(titles[titles.length - 1]).toBe("zsh");
     await press(page, "Meta+1");
@@ -656,6 +658,43 @@ test.describe("sidebar", () => {
     expect((await sidebar(page)).expanded).toBe(false);
     await page.keyboard.type("x");
     expect((await typed(page))[4]).toBe("x");
+  });
+
+  test("each row shows its tab's number, with more than one tab", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    const nums = () =>
+      page.locator(".sidebar-card").evaluateAll((els) =>
+        els.map((e) => {
+          const n = e.querySelector<HTMLElement>(".sidebar-tab")!;
+          return `${(e as HTMLElement).dataset.pane}:${n.style.display === "none" ? "-" : n.textContent}`;
+        }),
+      );
+    // Grouped by repo (alpha: 1 and 4, then ~, then beta), each with its tab.
+    expect(await nums()).toEqual(["1:1", "4:3", "2:1", "3:2"]);
+    // On the rail, the badge's tooltip names the tab.
+    await press(page, "Meta+Shift+b");
+    expect(await page.locator('.sidebar-card[data-pane="3"]').getAttribute("title")).toContain("Tab 2");
+    // Down to one tab: no numbers.
+    await press(page, "Meta+Shift+b");
+    await press(page, "Meta+w");
+    await press(page, "Meta+w");
+    await settle(page);
+    expect((await nums()).every((n) => n.endsWith(":-"))).toBe(true);
+    await expect(page.locator(".tab-bar")).toBeHidden();
+  });
+
+  test("its What's New button asks for the changelog", async ({ page }) => {
+    await three(page);
+    await press(page, "Meta+Shift+b");
+    const news = page.locator(".sidebar-whats-new");
+    await news.hover();
+    await expect(page.locator(".tooltip")).toHaveText("What's New");
+    await news.click();
+    expect(await page.evaluate(() => (window as any).__ws.whatsNew)).toBe(1);
+    // Like the other extras, it isn't on the rail.
+    await press(page, "Meta+Shift+b");
+    await expect(news).toBeHidden();
   });
 
   test("the rail: a badge shows its pane and previews it", async ({ page }) => {

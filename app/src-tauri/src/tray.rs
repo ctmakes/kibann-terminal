@@ -25,6 +25,7 @@ const NEW_TAB: &str = "tray-new-tab";
 const WAITING: &str = "tray-waiting";
 const UPDATE: &str = "tray-update";
 const CHECK: &str = "tray-check";
+const WHATS_NEW: &str = "tray-whats-new";
 const QUIT: &str = "tray-quit";
 
 /// What the icon and its menu show.
@@ -84,6 +85,7 @@ fn entries(version: &str, waiting: u32, update: Option<&str>) -> Vec<Entry> {
         Some(v) => item(UPDATE, format!("Restart to Update to {v}")),
         None => item(CHECK, "Check for Updates…"),
     });
+    e.push(item(WHATS_NEW, "What's New"));
     e.push(Entry::Separator);
     e.push(item(QUIT, "Quit Kibann Terminal"));
     e
@@ -242,6 +244,10 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { crate::update::check(&app, true).await });
         }
+        WHATS_NEW => {
+            show_window(app);
+            let _ = app.emit("whats-new", ());
+        }
         QUIT => quit(app),
         _ => {}
     }
@@ -306,7 +312,9 @@ mod tests {
         let quiet = entries("0.1.0", 0, None);
         assert_eq!(
             ids(&quiet),
-            [VERSION, "-", SHOW, NEW_TAB, "-", CHECK, "-", QUIT]
+            [
+                VERSION, "-", SHOW, NEW_TAB, "-", CHECK, WHATS_NEW, "-", QUIT
+            ]
         );
         assert_eq!(
             quiet[0],
@@ -320,7 +328,7 @@ mod tests {
         assert_eq!(
             ids(&busy),
             [
-                VERSION, "-", SHOW, NEW_TAB, "-", WAITING, "-", UPDATE, "-", QUIT
+                VERSION, "-", SHOW, NEW_TAB, "-", WAITING, "-", UPDATE, WHATS_NEW, "-", QUIT
             ]
         );
         assert!(busy.contains(&item(WAITING, "2 agents are waiting")));
