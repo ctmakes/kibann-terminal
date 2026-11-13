@@ -6,6 +6,8 @@
 
 mod open;
 mod theme;
+#[cfg(target_os = "macos")]
+mod tray;
 mod update;
 
 use std::collections::HashMap;
@@ -323,15 +325,32 @@ fn open_link(app: AppHandle, target: String) -> Result<(), String> {
     r.map_err(|e| e.to_string())
 }
 
-/// The last pane closed.
+/// The last pane closed: with the menu-bar icon, close the window and
+/// keep running (showing it again opens a shell); without, quit.
 #[tauri::command]
 fn app_quit(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    if tray::enabled(&app) {
+        tray::hide_window(&app);
+        return;
+    }
     app.exit(0);
+}
+
+/// What's New: the changelog this build was made with, and its version.
+#[tauri::command]
+fn changelog(app: AppHandle) -> (String, String) {
+    (
+        include_str!("../../../CHANGELOG.md").to_owned(),
+        app.package_info().version.to_string(),
+    )
 }
 
 /// The Dock badge: how many agents wait for the user (none: no badge).
 #[tauri::command]
 fn set_badge(window: tauri::WebviewWindow, count: u32) {
+    #[cfg(target_os = "macos")]
+    tray::set_waiting(window.app_handle(), count);
     let r = window.set_badge_count((count > 0).then_some(i64::from(count)));
     if cfg!(debug_assertions) {
         eprintln!("kibann: badge {count}: {r:?}");
@@ -471,6 +490,8 @@ fn reload_choice(app: &AppHandle) {
         changed
     };
     if changed {
+        #[cfg(target_os = "macos")]
+        tray::set_visible(app, settings.menu_bar_icon);
         let _ = app.emit("settings", settings);
     }
 }
@@ -541,6 +562,9 @@ fn on_notification_click(app: &AppHandle) {
         let Some(pane) = done.notification().map(|n| n.id()) else {
             return;
         };
+        #[cfg(target_os = "macos")]
+        tray::show_window(&handle);
+        #[cfg(not(target_os = "macos"))]
         if let Some(w) = handle.get_webview_window("main") {
             let _ = w.unminimize();
             let _ = w.show();
@@ -632,6 +656,9 @@ const QUIT_END_SESSIONS: &str = "quit-end-sessions";
 /// Menu item id for Check for Updates….
 #[cfg(target_os = "macos")]
 const CHECK_UPDATES: &str = "check-updates";
+/// Menu item id for Help → What's New.
+#[cfg(target_os = "macos")]
+const WHATS_NEW: &str = "whats-new";
 
 /// The macOS menu bar: the standard menus plus the workspace actions with
 /// their shortcuts. An item's id is the frontend action as JSON.
@@ -758,6 +785,7 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             "Keyboard Shortcuts",
             "Cmd+/",
         )?)
+        .item(&MenuItemBuilder::with_id(WHATS_NEW, "What's New").build(app)?)
         .build()?;
     MenuBuilder::new(app)
         .items(&[&app_menu, &shell, &edit, &view, &window, &help])
@@ -773,6 +801,10 @@ pub fn run() {
             let _ = app.emit("menu-action", id);
         } else if id == QUIT_END_SESSIONS {
             quit_ending_sessions(app);
+        } else if id.starts_with(tray::PREFIX) {
+            tray::on_menu(app, id);
+        } else if id == WHATS_NEW {
+            let _ = app.emit("whats-new", ());
         } else if id == CHECK_UPDATES {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { update::check(&app, true).await });
@@ -822,9 +854,30 @@ pub fn run() {
             watch_config(handle.clone());
             on_notification_click(handle);
             update::start(handle);
+            #[cfg(target_os = "macos")]
+            {
+                let on = app
+                    .state::<Mutex<proto::config::Settings>>()
+                    .lock()
+                    .unwrap()
+                    .menu_bar_icon;
+                if let Err(e) = tray::create(handle, on) {
+                    eprintln!("kibann: menu-bar icon: {e}");
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
+            // With the menu-bar icon, closing the window hides it: the app
+            // keeps running (see tray.rs).
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::enabled(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                return;
+            }
             if let tauri::WindowEvent::ThemeChanged(t) = event {
                 let app = window.app_handle();
                 {
@@ -842,6 +895,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_exe,
+            changelog,
             set_badge,
             notify,
             menu_keys,
@@ -865,6 +919,17 @@ pub fn run() {
             open_link,
             dev_layout
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run the app");
+        .build(tauri::generate_context!())
+        .expect("failed to start the app")
+        .run(|_app, _event| {
+            // A click on the Dock icon with the window closed brings it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = _event
+            {
+                tray::show_window(_app);
+            }
+        });
 }

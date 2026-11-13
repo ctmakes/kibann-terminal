@@ -17,6 +17,7 @@ import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
+import { ChangesSheet } from "./changes";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
 import { FindBar } from "./find";
@@ -127,6 +128,7 @@ export class Workspace {
   readonly root: HTMLDivElement;
   readonly sidebar: Sidebar;
   private readonly shortcuts: ShortcutSheet;
+  private readonly changes = new ChangesSheet();
   private readonly picker: ThemePicker | null;
   /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
   private readonly help: HTMLDivElement;
@@ -242,7 +244,7 @@ export class Workspace {
     this.picker = opts.themes
       ? new ThemePicker(opts.themes, () => this.focusedPane?.view?.focus())
       : null;
-    this.root.append(this.sidebar.el, main, this.shortcuts.el);
+    this.root.append(this.sidebar.el, main, this.shortcuts.el, this.changes.el);
     if (this.picker) this.root.append(this.picker.el);
     if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
@@ -349,6 +351,24 @@ export class Workspace {
     }
   }
 
+  /** What's New: the changelog, with the running version marked. */
+  showChanges(changelog: string, version: string): void {
+    this.shortcuts.hide();
+    this.changes.show(changelog, version);
+  }
+
+  /** Show a pane whose agent waits for the user (the menu-bar icon's
+   * "N agents are waiting"); false if none does. */
+  showWaiting(): boolean {
+    for (const [id, s] of Object.entries(this.status)) {
+      if (s.state === "blocked" && this.panes.has(Number(id))) {
+        this.show(Number(id));
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Show `id`: its tab, focused. */
   show(id: PaneId): void {
     const p = this.panes.get(id);
@@ -404,6 +424,14 @@ export class Workspace {
     // The theme picker's search field takes the keys while it's open.
     if (this.picker?.visible) return;
     const action = actionFor(e, this.platform);
+    // What's New: a key closes it (scroll it with the mouse).
+    if (this.changes.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.changes.hide();
+      this.focusedPane?.view?.focus();
+      return;
+    }
     // While the shortcut sheet is open, a key closes it and goes nowhere
     // else (modifiers alone don't, so a shortcut can be pressed to try it).
     if (this.shortcuts.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {

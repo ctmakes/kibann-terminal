@@ -1,4 +1,4 @@
-//! Updates from GitHub releases: checked at start and every few hours,
+//! Updates from GitHub releases: checked at start and every hour,
 //! downloaded in the background, installed when the user says (a notice
 //! with a Restart button, or Kibann Terminal → Check for Updates…).
 //!
@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// How often to look for a new version while the app runs.
-const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+const EVERY: Duration = Duration::from_secs(60 * 60);
 /// The first look, once the window is up and shells have started.
 const FIRST: Duration = Duration::from_secs(20);
 
@@ -84,6 +84,8 @@ pub async fn check(app: &AppHandle, asked: bool) {
     match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
             ready(app, &update);
+            #[cfg(target_os = "macos")]
+            crate::tray::set_update(app, update.version.clone());
             *app.state::<Ready>().0.lock().unwrap() = Some((update, bytes));
         }
         Err(e) => {

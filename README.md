@@ -48,6 +48,8 @@ Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app; any key 
 
 Shells outlive the app. Closing the window or quitting (Cmd+Q) leaves them running in a background process, the daemon, which also owns the tabs and splits; opening the app again brings them back, with each pane showing what its shell printed meanwhile. Closing a pane still ends its shell, and the daemon exits 10 s after the last shell and window are gone. **Quit and End Sessions** in the app menu ends every shell and the daemon. A reboot or log out ends the shells. After that, the app opens with the same tabs and splits, at the same sizes and with the same pane focused, each a fresh shell in the directory it was in (scrollback and running programs don't come back). The daemon keeps the layout in `~/Library/Application Support/kibann/layout.json` (`$XDG_STATE_HOME/kibann/` on Linux), written a few seconds after each change; `restore-layout = false` in the config turns it off. Closing the last pane on purpose starts fresh next time.
 
+On macOS the app also keeps an icon in the menu bar. Closing the window (or its last pane) only hides it: the app keeps running, so agents can still notify you, and the icon shows a dot while one waits. Its menu shows the version, brings the window back (so does the Dock icon), opens a tab, shows a waiting agent, and offers a downloaded update; **Quit Kibann Terminal** there ends the shells, the daemon and the app, after asking. Cmd+Q quits the app only, as above. `menu-bar-icon = false` in the config removes the icon, and closing the window quits the app again.
+
 The daemon is the app's own executable run with `--daemon`, listening on a socket only your user can open (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux; its log is beside it). Dev builds use `daemon-dev.sock` and replace a daemon from an earlier build, which ends dev sessions after a Rust rebuild. On Windows (not yet supported by the daemon) sessions run inside the app and end with it.
 
 New panes and tabs start in the focused pane's directory. A pane closes when its shell exits, and the app quits when the last pane closes. The shell doesn't inherit variables describing the terminal the app was started from (`TERM_PROGRAM`, `TMUX`, `GHOSTTY_*` and the like); it gets `TERM_PROGRAM=kibann`.
@@ -117,6 +119,10 @@ Fonts named here are tried first, then the bundled JetBrains Mono, then the syst
 ### Notifications
 
 When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so ("Claude Code is waiting for you", with the repo, branch and pane title). A pane counts as looked at when it's the focused pane and the window is in front; with the window behind, every pane counts. Clicking one brings the window forward and shows that pane. Turn them off with `agent-notifications = false`.
+
+### Updates
+
+The app checks for a new version a few seconds after it starts and then hourly (or now: Kibann Terminal → Check for Updates…), downloads it in the background, and says when it's ready, with **Restart to update**; the shells keep running through the restart. Help → What's New shows the release notes, and the first start of a new version offers them.
 
 ### Find
 

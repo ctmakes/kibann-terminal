@@ -430,6 +430,19 @@ test.describe("agent status", () => {
   }
   const badge = (page: Page): Promise<number> => page.evaluate(() => (window as any).__ws.badge);
 
+  test("the menu bar's waiting item shows the waiting agent's pane", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+d"); // panes 1 and 2
+    await press(page, "Meta+t"); // tab 2: pane 3, shown
+    expect(await page.evaluate(() => (window as any).__ws.showWaiting())).toBe(false);
+    await agent(page, 2, "blocked");
+    expect(await page.evaluate(() => (window as any).__ws.showWaiting())).toBe(true);
+    await settle(page);
+    const s = await state(page);
+    expect(s.panes.map((p: { id: number }) => p.id)).toEqual([1, 2]);
+    expect(s.focused).toBe(2);
+  });
+
   test("dots on panes, the tab roll-up, done clearing on focus, the badge", async ({ page }) => {
     await open(page);
     await press(page, "Meta+d"); // pane 2 beside 1, focused
@@ -914,6 +927,24 @@ test.describe("settings", () => {
       }),
     );
     await expect.poll(async () => (await font(page)).cells[0]![0]).not.toBe(mono);
+  });
+});
+
+test.describe("what's new", () => {
+  test("shows the changelog's sections, marks this version, and a key closes it", async ({ page }) => {
+    await open(page);
+    const text = "# Changelog\n\nIntro.\n\n## [0.2.0] - 2026-12-01\n\n- New **thing** with `code`\n\n## [0.1.0] - 2026-11-14\n\nFirst.\n";
+    await page.evaluate(([t]) => (window as any).__ws.showChanges(t, "0.2.0"), [text] as const);
+    const sheet = page.locator(".changes-sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".changes-release")).toHaveCount(2);
+    await expect(sheet.locator(".changes-release").first()).toContainText("0.2.0");
+    await expect(sheet.locator(".changes-release").first()).toContainText("this version");
+    await expect(sheet.locator("strong")).toHaveText("thing");
+    await expect(sheet.locator("code")).toHaveText("code");
+    await expect(sheet).not.toContainText("Intro.");
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
   });
 });
 

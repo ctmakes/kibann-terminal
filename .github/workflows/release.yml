@@ -1,9 +1,11 @@
 name: Release
 run-name: Release ${{ github.ref_name }}
 
-# A version tag (scripts/bump-version.sh pushes one) builds, signs and
-# notarizes the macOS app and attaches it, with the updater's latest.json,
-# to a draft GitHub release. Publishing the draft is by hand (RELEASE.md).
+# A version tag (scripts/bump-version.sh pushes one, after the release
+# commit reaches main) builds, signs and notarizes the macOS app and
+# attaches it, with the updater's latest.json, to a draft GitHub release.
+# Publishing the draft is by hand (RELEASE.md). A tag on a commit that
+# isn't on main builds nothing.
 
 on:
   push:
@@ -24,6 +26,37 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag is on main
+        shell: bash
+        run: |
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME isn't on main: releases are made with scripts/bump-version.sh, which pushes main first"
+            exit 1
+          fi
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$GITHUB_REF_NAME isn't a version tag (vX.Y.Z)"
+            exit 1
+          fi
+      - name: Every secret is set
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "::error::the secret $name is empty or missing (RELEASE.md)"; missing=1; fi
+          done
+          exit $missing
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -58,15 +91,14 @@ jobs:
           cargo test --workspace
           cd app && npm run typecheck && npm test
 
-      # This version's CHANGELOG.md section (a release candidate takes the
-      # version it leads to), then sections marked "Included in <version>".
+      # This version's CHANGELOG.md section, then sections marked
+      # "Included in <version>".
       - name: Release notes
         id: notes
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          base="${version%%-*}"
-          notes=$(awk -v v="$base" '
+          notes=$(awk -v v="$version" '
             /^## / {
               included = "Included in " v
               take = index($0, "## [" v "]") == 1
@@ -79,15 +111,14 @@ jobs:
             take { print }
           ' CHANGELOG.md)
           if [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
-            echo "::warning::CHANGELOG.md has no section for $base"
-            notes="See the assets to download and install this version."
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
           fi
           {
             echo "body<<NOTES_EOF"
             echo "$notes"
             echo "NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
-          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Import the signing certificate
         env:
@@ -122,7 +153,6 @@ jobs:
           releaseName: Kibann Terminal ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          prerelease: ${{ steps.notes.outputs.prerelease }}
           uploadUpdaterJson: true
           args: --target aarch64-apple-darwin --config src-tauri/tauri.release.conf.json
 

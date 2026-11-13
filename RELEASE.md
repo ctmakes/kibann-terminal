@@ -42,7 +42,8 @@ installed copies update to.
 2. **CHANGELOG.md:** a section `## [0.2.0] - Unreleased`, in plain words.
    It becomes the release notes. Say so when an update ends sessions (the
    protocol changed: `PROTOCOL_VERSION` in `crates/proto/src/wire.rs`).
-3. **Bump and tag** on `main`, clean:
+3. **Bump and tag**, with a clean tree, on `main` or a branch that
+   `main` can fast-forward to:
 
    ```sh
    scripts/bump-version.sh 0.2.0
@@ -50,19 +51,20 @@ installed copies update to.
 
    It sets the version in `app/package.json`, `app/src-tauri/Cargo.toml`
    and `app/src-tauri/tauri.conf.json` (and the lock files), dates the
-   changelog section, commits "Release 0.2.0", tags `v0.2.0` and pushes.
-   `--local` changes the files only.
+   changelog section, commits "Release 0.2.0", pushes it to `main` (and
+   your branch), then tags `v0.2.0` and pushes the tag. `--local` changes
+   the files only.
 4. **Watch** the Release workflow (`gh run watch`). It checks the tag
    matches the version, runs the Rust and unit tests, builds, signs,
    notarizes (several minutes), uploads, and checks the signature.
 5. **Check the draft by hand** (below), then **Publish** it on GitHub.
 
-A release candidate (`scripts/bump-version.sh 0.2.0-rc.1`, from any
-branch) makes a draft marked pre-release, with the 0.2.0 notes. Delete the
-draft and the tag afterwards (`gh release delete v0.2.0-rc.1
---cleanup-tag`). The updater ignores drafts and pre-releases.
+Only a tag on a commit that is on `main` builds: the workflow checks
+that first, then that every secret is set.
 
-A failed run: fix, delete the draft, `scripts/retrigger-release.sh 0.2.0`.
+A failed run: fix and commit, delete the draft (`gh release delete
+v0.2.0`), then `scripts/retrigger-release.sh 0.2.0` (it pushes the fix
+to `main` and moves the tag).
 
 ## By-hand check before publishing
 
@@ -74,14 +76,19 @@ CI can't see these. Use the `.dmg` from the draft.
 | b | Splits, tabs, vim, htop, Claude Code | Look and behave right |
 | c | Quit, reopen | The shells are still running |
 | d | An agent waits in a background tab | The notification says Kibann, with its icon; clicking it shows the pane |
+| d2 | Close the window; an agent waits | The menu-bar icon gets a dot and "1 agent is waiting"; that item, the icon's Show and the Dock icon bring the window back |
+| d3 | Close the last pane, then the icon's Show | The window comes back with a fresh shell |
+| d4 | The icon's Quit with shells open | It asks; Quit ends the shells, and the next start reopens the tabs with fresh shells |
+| d5 | The icon in a light and a dark menu bar; Help → What's New | The K is clear in both; the notes are this version's |
 | e | With the previous release installed, wait for (or Check for Updates…) the notice, Restart to update | The new version opens; shells kept, or the protocol prompt if the notes say so |
 
 ## How updates reach users
 
-The app checks 20 s after starting and every 6 hours (and on Kibann
-Terminal → Check for Updates…), downloads a newer version in the
-background, and shows "Kibann Terminal 0.2.0 is ready" with **Restart to
-update**. Restarting replaces the app; the daemon keeps the shells and the
+The app checks 20 s after starting and every hour (and on Kibann
+Terminal → Check for Updates…, or the menu-bar icon's), downloads a newer
+version in the background, and shows "Kibann Terminal 0.2.0 is ready" with
+**Restart to update** (also in the menu-bar icon's menu). The first start
+of the new version offers its notes (Help → What's New). Restarting replaces the app; the daemon keeps the shells and the
 new app picks them up, unless the protocol changed, in which case it asks
 before ending them (the layout comes back with fresh shells).
 

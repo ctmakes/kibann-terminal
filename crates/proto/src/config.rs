@@ -34,6 +34,10 @@ pub struct Settings {
     /// Reopen the tabs and splits (with fresh shells) after the sessions
     /// ended, as after a restart.
     pub restore_layout: bool,
+    /// Keep running with the window closed, behind an icon in the menu
+    /// bar, so agents can still notify. Off: closing the window quits the
+    /// app (the shells keep running in the daemon either way).
+    pub menu_bar_icon: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +48,7 @@ impl Default for Settings {
             agent_notifications: true,
             keybind: Vec::new(),
             restore_layout: true,
+            menu_bar_icon: true,
         }
     }
 }
@@ -95,6 +100,11 @@ impl Settings {
                     "false" => s.restore_layout = false,
                     _ => errors.push(bad("restore-layout (true or false)")),
                 },
+                "menu-bar-icon" => match v {
+                    "true" => s.menu_bar_icon = true,
+                    "false" => s.menu_bar_icon = false,
+                    _ => errors.push(bad("menu-bar-icon (true or false)")),
+                },
                 _ => {}
             }
         }
@@ -109,7 +119,7 @@ mod tests {
     #[test]
     fn parses_fonts_and_switches() {
         let (s, e) = Settings::parse(
-            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\nkeybind = clear\nkeybind = super+d=new_split:down # mine\nrestore-layout = false\n",
+            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\nkeybind = clear\nkeybind = super+d=new_split:down # mine\nrestore-layout = false\nmenu-bar-icon = false\n",
         );
         assert!(e.is_empty(), "{e:?}");
         assert_eq!(s.font_family, ["Berkeley Mono", "Symbols Nerd Font"]);
@@ -117,6 +127,7 @@ mod tests {
         assert!(!s.agent_notifications);
         assert_eq!(s.keybind, ["clear", "super+d=new_split:down"]);
         assert!(!s.restore_layout);
+        assert!(!s.menu_bar_icon);
     }
 
     #[test]

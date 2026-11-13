@@ -30,3 +30,9 @@ The first public build, for Macs with Apple silicon.
   Font family and size in the config, and Cmd+= / Cmd+- to zoom.
 - A `kibann` command in every pane, so agents can open panes, run
   commands, read output and wait on each other.
+- An icon in the menu bar: closing the window keeps the app running there,
+  so agents can still notify you, with a dot when one waits. Its menu
+  shows the version and brings the window back; its Quit ends everything.
+- Updates itself: it checks hourly, downloads in the background and offers
+  to restart (the shells keep running). Help → What's New shows these
+  notes.

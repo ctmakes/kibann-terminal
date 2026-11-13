@@ -142,13 +142,17 @@ const api = {
   noticeWithButton(text: string, label: string) {
     ws.notice(text, 0, { label, run: () => (api.clicked += 1) });
   },
+  /** Help → What's New, with this changelog text. */
+  showChanges: (text: string, version: string) => ws.showChanges(text, version),
+  /** The menu-bar icon's "N agents are waiting". */
+  showWaiting: () => ws.showWaiting(),
   /** The window gains or loses focus (as far as notifications care). */
   setWindowFocused(on: boolean) {
     windowFocused = on;
   },
   /** The config file's settings changed. */
   setSettings(s: Partial<Settings>) {
-    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, keybind: [], restore_layout: true, ...s });
+    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, keybind: [], restore_layout: true, menu_bar_icon: true, ...s });
   },
   /** The font size in use, and each pane's cell size (device px). */
   font() {

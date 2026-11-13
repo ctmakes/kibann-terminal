@@ -24,4 +24,10 @@ keybind: Array<string>,
  * Reopen the tabs and splits (with fresh shells) after the sessions
  * ended, as after a restart.
  */
-restore_layout: boolean, };
+restore_layout: boolean, 
+/**
+ * Keep running with the window closed, behind an icon in the menu
+ * bar, so agents can still notify. Off: closing the window quits the
+ * app (the shells keep running in the daemon either way).
+ */
+menu_bar_icon: boolean, };

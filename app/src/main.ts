@@ -99,6 +99,32 @@ async function start(): Promise<void> {
   );
   // A notification was clicked: show the pane it's about.
   await listen<number>("focus-pane", (e) => ws.show(e.payload));
+  // What's New (Help menu, or the notice after an update).
+  const whatsNew = async () => {
+    const [text, version] = await invoke<[string, string]>("changelog");
+    ws.showChanges(text, version);
+  };
+  await listen("whats-new", () => void whatsNew());
+  // The first start of a new version (an update): say so, once.
+  const [, version] = await invoke<[string, string]>("changelog");
+  const SEEN = "kibann.version.seen";
+  let seen: string | null = null;
+  try {
+    seen = localStorage.getItem(SEEN);
+    localStorage.setItem(SEEN, version);
+  } catch {
+    // Storage unavailable: no notice.
+  }
+  if (seen && seen !== version) {
+    ws.notice(`Updated to Kibann Terminal ${version}.`, 15000, { label: "What's New", run: () => void whatsNew() });
+  }
+  // The menu-bar icon: "N agents are waiting" shows one.
+  await listen("show-waiting", () => ws.showWaiting());
+  // The window came back (menu-bar icon, Dock) after its last pane closed:
+  // start a shell, as at launch.
+  await listen("window-shown", () => {
+    if (ws.panes.size === 0) void backend.act({ t: "new_tab", focus: true });
+  });
 
   // Menu bar items (macOS) carry the action as JSON in their id.
   await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));
