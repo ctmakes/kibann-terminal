@@ -143,22 +143,24 @@ fn frames_are_throttled() {
     let f = h.next();
     h.session.ack(f.seq);
     let start = std::time::Instant::now();
-    let mut seqs = Vec::new();
     for i in 0..10 {
         h.pty.send(format!("{i}").into_bytes()).unwrap();
         std::thread::sleep(Duration::from_millis(2));
     }
-    // Ack as frames arrive and collect what came in ~60 ms.
-    while start.elapsed() < Duration::from_millis(60) {
-        if let Ok(f) = h.frames.recv_timeout(Duration::from_millis(5)) {
-            seqs.push(f.seq);
-            h.session.ack(f.seq);
-        }
+    // Ack as frames arrive, until the output has been quiet a while. The
+    // limit follows the time the writes really took (a busy CI machine
+    // can stretch 20 ms of sleeps a lot), at one frame per interval.
+    let mut seqs = vec![h.next().seq];
+    h.session.ack(seqs[0]);
+    while let Ok(f) = h.frames.recv_timeout(Duration::from_millis(60)) {
+        seqs.push(f.seq);
+        h.session.ack(f.seq);
     }
-    assert!(!seqs.is_empty());
+    let took = start.elapsed().saturating_sub(Duration::from_millis(60));
+    let most = (took.as_millis() / term::session::FRAME_INTERVAL.as_millis()) as usize + 2;
     assert!(
-        seqs.len() <= 5,
-        "ten writes in 20 ms should not make {} frames",
+        seqs.len() <= most,
+        "ten writes in {took:?} should make at most {most} frames, not {}",
         seqs.len()
     );
 }
