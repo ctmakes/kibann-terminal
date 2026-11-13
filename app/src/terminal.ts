@@ -86,7 +86,7 @@ export class TerminalView {
   private raf = 0;
   private sentSize = "";
   private focused = false;
-  private readonly fontSize: number;
+  private fontSize: number;
   private readonly cleanups: Array<() => void> = [];
 
   static async create(container: HTMLElement, transport: Transport, opts: TerminalOptions = {}): Promise<TerminalView> {
@@ -261,6 +261,16 @@ export class TerminalView {
   /** Whether this is the pane the user is working in; others are dimmed. */
   setActive(active: boolean): void {
     this.dimEl.style.display = active ? "none" : "block";
+  }
+
+  /** Use `size` (CSS px) and the current font families: re-measure and
+   * repaint; the grid gets as many cells as now fit. */
+  async setFont(size: number): Promise<void> {
+    this.fontSize = size;
+    await loadFonts(size);
+    this.remeasure();
+    this.painter.paintAll(this.grid);
+    this.cursor.update(this.grid, true);
   }
 
   /** Re-measure after a DPR change; counts as a resize. */

@@ -102,10 +102,17 @@ const ws = new Workspace(root, {
   onEmpty: () => (quit = true),
   onBlocked: (n) => (badge = n),
   onDiff: (p) => diffs.push(p.id),
+  onNotify: (n) => notes.push(n),
+  windowFocused: () => windowFocused,
 });
+/** System notifications asked for, and whether the window "has focus". */
+const notes: Array<{ pane: number; title: string; body: string }> = [];
+let windowFocused = true;
 backend.onLayout = (l) => ws.apply(l);
 backend.onStatus = (m) => ws.setStatus(m);
 backend.onGit = (m) => ws.setGit(m);
+// The daemon sends its status map right after the first layout.
+ws.setStatus({});
 let badge = 0;
 /** Panes whose diff was asked for. */
 const diffs: number[] = [];
@@ -129,6 +136,22 @@ else void backend.act({ t: "new_tab", focus: true });
   },
   diffs,
   previews,
+  notes,
+  /** The window gains or loses focus (as far as notifications care). */
+  setWindowFocused(on: boolean) {
+    windowFocused = on;
+  },
+  /** The config file's settings changed. */
+  setSettings(s: { font_family?: string[]; font_size?: number | null; agent_notifications?: boolean }) {
+    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, ...s });
+  },
+  /** The font size in use, and each pane's cell size (device px). */
+  font() {
+    return {
+      size: ws.fontSize,
+      cells: [...ws.panes.values()].map((p) => (p.view ? [p.view.m.cellW, p.view.m.cellH] : null)),
+    };
+  },
   /** The theme kept and the one showing. */
   theme: () => ({ kept, showing }),
   /** Show a theme as the app would after a config change. */

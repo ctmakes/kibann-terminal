@@ -33,6 +33,7 @@ const KEY_NAMES: Record<string, string> = {
   BracketLeft: "[",
   BracketRight: "]",
   Equal: "=",
+  Minus: "−",
   Slash: "/",
   ArrowLeft: "←",
   ArrowRight: "→",
@@ -120,7 +121,12 @@ export function sheetFor(platform: Platform): SheetGroup[] {
     },
     {
       title: "Window",
-      rows: [row("Sidebar", { kind: "sidebar" }), row("Keyboard shortcuts", { kind: "shortcuts" })],
+      rows: [
+        row("Sidebar", { kind: "sidebar" }),
+        row("Keyboard shortcuts", { kind: "shortcuts" }),
+        row("Bigger / smaller text", { kind: "fontSize", step: 1 }, { kind: "fontSize", step: -1 }),
+        row("Default text size", { kind: "fontSize", step: 0 }),
+      ],
     },
     {
       title: "Terminal",

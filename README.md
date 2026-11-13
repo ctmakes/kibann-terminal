@@ -41,6 +41,7 @@ Tabs and splits use Ghostty's default shortcuts:
 | Tab 1–8, last tab | Cmd+1–8, Cmd+9 | Alt+1–8, Alt+9 |
 | Sidebar | Cmd+Shift+B | Ctrl+Shift+B |
 | All shortcuts | Cmd+/ | Ctrl+Shift+/ |
+| Bigger / smaller text, default size | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 
 Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app; any key closes it. Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS the actions are in the menu bar too. Dividers can be dragged, and the right-click menu has Split Right, Split Down and Close.
 
@@ -99,6 +100,22 @@ theme = light:Kibann Light,dark:Kibann Dark
 ```
 
 The picker sets the theme for the appearance in use. Your own themes go in `~/.config/kibann/themes/`, one file per theme in Ghostty's format, named as the theme; they win over a bundled one of the same name. A bad name or line shows a notice and the default is used. The defaults are Kibann Dark and Kibann Light.
+
+### Fonts
+
+The same config file sets the font, and applies when saved:
+
+```
+font-family = Berkeley Mono
+font-family = Symbols Nerd Font   # repeat for fallbacks, in order
+font-size = 13
+```
+
+Fonts named here are tried first, then the bundled JetBrains Mono, then the system's fallbacks for CJK and emoji. Cmd+= and Cmd+- (Ctrl elsewhere, or View → Bigger / Smaller) change the size in every pane, and Cmd+0 goes back to the config's.
+
+### Notifications
+
+When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so ("Claude Code is waiting for you", with the repo, branch and pane title). A pane counts as looked at when it's the focused pane and the window is in front; with the window behind, every pane counts. Turn them off with `agent-notifications = false`.
 
 ### Agent status at a glance
 

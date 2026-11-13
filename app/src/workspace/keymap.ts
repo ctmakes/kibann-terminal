@@ -18,6 +18,8 @@ export type Action =
   | { kind: "goToTab"; index: number }
   | { kind: "sidebar" }
   | { kind: "shortcuts" }
+  /** Bigger (1), smaller (-1), or back to the config's size (0). */
+  | { kind: "fontSize"; step: 1 | -1 | 0 }
   /** The theme picker (no key; View → Theme…). */
   | { kind: "themes" };
 
@@ -60,6 +62,10 @@ function table(p: Platform): Binding[] {
     DIGITS.forEach((code, i) => add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
     add("ms", "KeyB", { kind: "sidebar" });
     add("m", "Slash", { kind: "shortcuts" });
+    add("m", "Equal", { kind: "fontSize", step: 1 });
+    add("ms", "Equal", { kind: "fontSize", step: 1 }); // Cmd+Plus
+    add("m", "Minus", { kind: "fontSize", step: -1 });
+    add("m", "Digit0", { kind: "fontSize", step: 0 });
   } else {
     add("cs", "KeyT", { kind: "newTab" });
     add("cs", "KeyW", { kind: "close" });
@@ -79,6 +85,11 @@ function table(p: Platform): Binding[] {
     add("cs", "KeyB", { kind: "sidebar" });
     // Not Ctrl+/: shells and editors take it (undo).
     add("cs", "Slash", { kind: "shortcuts" });
+    // Ghostty's: Ctrl+= (and Ctrl+Plus), Ctrl+-, Ctrl+0.
+    add("c", "Equal", { kind: "fontSize", step: 1 });
+    add("cs", "Equal", { kind: "fontSize", step: 1 });
+    add("c", "Minus", { kind: "fontSize", step: -1 });
+    add("c", "Digit0", { kind: "fontSize", step: 0 });
   }
   add("c", "Tab", { kind: "tabCycle", step: 1 });
   add("cs", "Tab", { kind: "tabCycle", step: -1 });

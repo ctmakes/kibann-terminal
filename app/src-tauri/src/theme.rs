@@ -151,6 +151,15 @@ pub fn read_choice() -> (ThemeChoice, Vec<String>) {
     (choice.unwrap_or_default(), errors)
 }
 
+/// The config file's other settings (fonts, notifications), and their
+/// problems.
+pub fn read_settings() -> (proto::config::Settings, Vec<String>) {
+    let text = config_file()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .unwrap_or_default();
+    proto::config::Settings::parse(&text)
+}
+
 /// Save `choice` to the config file, keeping its other lines.
 pub fn save_choice(choice: &ThemeChoice) -> Result<(), String> {
     let file = config_file().ok_or("no home directory")?;

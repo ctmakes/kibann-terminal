@@ -397,11 +397,40 @@ fn show_theme(app: &AppHandle) {
 /// Read the config file again (it changed, or at start).
 fn reload_choice(app: &AppHandle) {
     let (choice, errors) = theme::read_choice();
-    for e in errors {
+    let (settings, more) = theme::read_settings();
+    for e in errors.into_iter().chain(more) {
         let _ = app.emit("notice", format!("Config: {e}"));
     }
     app.state::<Mutex<Looks>>().lock().unwrap().choice = choice;
     show_theme(app);
+    let changed = {
+        let state = app.state::<Mutex<proto::config::Settings>>();
+        let mut now = state.lock().unwrap();
+        let changed = *now != settings;
+        *now = settings.clone();
+        changed
+    };
+    if changed {
+        let _ = app.emit("settings", settings);
+    }
+}
+
+#[tauri::command]
+fn settings_current(
+    settings: State<'_, Mutex<proto::config::Settings>>,
+) -> proto::config::Settings {
+    settings.lock().unwrap().clone()
+}
+
+/// A system notification (an agent waits or finished, in a pane the user
+/// isn't looking at).
+#[tauri::command]
+fn notify(app: AppHandle, title: String, body: String) {
+    use tauri_plugin_notification::NotificationExt;
+    let r = app.notification().builder().title(title).body(body).show();
+    if let Err(e) = r {
+        eprintln!("kibann: notification: {e}");
+    }
 }
 
 /// Poll the config file and the user's themes: editors save in ways
@@ -532,6 +561,22 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .item(&MenuItemBuilder::with_id(r#"{"kind":"themes"}"#, "Theme…").build(app)?)
         .separator()
         .item(&item(
+            r#"{"kind":"fontSize","step":1}"#,
+            "Bigger",
+            "Cmd+Equal",
+        )?)
+        .item(&item(
+            r#"{"kind":"fontSize","step":-1}"#,
+            "Smaller",
+            "Cmd+Minus",
+        )?)
+        .item(&item(
+            r#"{"kind":"fontSize","step":0}"#,
+            "Actual Size",
+            "Cmd+Digit0",
+        )?)
+        .separator()
+        .item(&item(
             r#"{"kind":"zoom"}"#,
             "Zoom Split",
             "Shift+Cmd+Enter",
@@ -596,6 +641,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let channels = Channels::default();
             let handle = app.handle();
@@ -629,6 +675,7 @@ pub fn run() {
                 name: String::new(),
                 theme: proto::theme::Theme::kibann_dark(),
             }));
+            app.manage(Mutex::new(proto::config::Settings::default()));
             reload_choice(handle);
             watch_config(handle.clone());
             Ok(())
@@ -643,6 +690,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_exe,
             set_badge,
+            notify,
+            settings_current,
             theme_current,
             theme_list,
             theme_preview,

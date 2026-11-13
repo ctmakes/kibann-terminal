@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Layout, LayoutAction, Theme } from "./proto";
+import type { Layout, LayoutAction, Settings, Theme } from "./proto";
 import { TauriTransport, inTauri } from "./transport/tauri";
 import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
@@ -74,10 +74,15 @@ async function start(): Promise<void> {
     // The Dock icon shows how many agents wait for the user (macOS).
     onBlocked: (count) => void invoke("set_badge", { count }),
     onDiff: (pane) => void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
+    onNotify: ({ title, body }) => void invoke("notify", { title, body }),
+    windowFocused: () => document.hasFocus(),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
   });
 
   ws.setTheme(now.theme);
+  // Fonts and notifications, from the same config file; edits apply live.
+  ws.setSettings(await invoke<Settings>("settings_current"));
+  await listen<Settings>("settings", (e) => ws.setSettings(e.payload));
   await listen<{ name: string; theme: Theme }>("theme", (e) => {
     themeName = e.payload.name;
     ws.setTheme(e.payload.theme);

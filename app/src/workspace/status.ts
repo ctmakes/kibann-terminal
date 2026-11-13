@@ -33,6 +33,36 @@ export function blockedCount(map: StatusMap): number {
   return Object.values(map).filter((s) => s.state === "blocked").length;
 }
 
+/** An agent that started waiting or finished. */
+export interface Arrival {
+  pane: PaneId;
+  state: "blocked" | "done";
+  agent: string;
+}
+
+/** The panes whose agent has just started waiting for the user or just
+ * finished (from `prev` to `next`), except `looking`, the pane the user is
+ * looking at, if any. Finishing is `done`, or working to idle: the daemon
+ * says idle for the focused pane even when the window is in the
+ * background, which is when a notification matters most. */
+export function arrivals(prev: StatusMap, next: StatusMap, looking: PaneId | null): Arrival[] {
+  const out: Arrival[] = [];
+  for (const [id, s] of Object.entries(next)) {
+    const was = prev[id]?.state;
+    if (Number(id) === looking || was === s.state) continue;
+    if (s.state === "blocked") out.push({ pane: Number(id), state: "blocked", agent: s.agent });
+    else if (s.state === "done" || (s.state === "idle" && was === "working"))
+      out.push({ pane: Number(id), state: "done", agent: s.agent });
+  }
+  return out;
+}
+
+/** How a notification names an agent: `claude` is Claude Code. */
+export function agentName(agent: string): string {
+  if (agent === "claude") return "Claude Code";
+  return agent ? agent[0].toUpperCase() + agent.slice(1) : "An agent";
+}
+
 const STYLE_ID = "kibann-status-style";
 
 /** The pulse for working dots, once per document. */

@@ -867,3 +867,86 @@ test.describe("themes", () => {
     expect((await page.evaluate(() => (window as any).__ws.shortcuts())).visible).toBe(true);
   });
 });
+
+test.describe("settings", () => {
+  const font = (page: Page) => page.evaluate(() => (window as any).__ws.font());
+
+  test("Cmd+= and Cmd+- zoom every pane; Cmd+0 goes back to the config's size", async ({ page }) => {
+    await open(page, { w: "800", h: "500" });
+    await press(page, "Meta+d");
+    const before = await font(page);
+    expect(before.size).toBe(14);
+    const cols = (await state(page)).panes[0].w;
+    await press(page, "Meta+Equal");
+    await press(page, "Meta+Equal");
+    await expect.poll(async () => (await font(page)).cells[0]![0]).toBeGreaterThan(before.cells[0]![0]);
+    const big = await font(page);
+    expect(big.size).toBe(16);
+    expect(big.cells[0]).toEqual(big.cells[1]); // every pane
+    expect((await state(page)).panes[0].w).toBe(cols); // the layout stays
+    // A new pane starts at the zoomed size.
+    await press(page, "Meta+t");
+    await expect.poll(async () => (await font(page)).cells[2]?.[0]).toBe(big.cells[0]![0]);
+    await press(page, "Meta+Minus");
+    expect((await font(page)).size).toBe(15);
+    await press(page, "Meta+0");
+    expect((await font(page)).size).toBe(14);
+    // Typing never reached a terminal.
+    expect(await typed(page)).toEqual({});
+  });
+
+  test("the config's font size and family apply live", async ({ page }) => {
+    await open(page);
+    const before = await font(page);
+    await page.evaluate(() => (window as any).__ws.setSettings({ font_size: 18 }));
+    await expect.poll(async () => (await font(page)).cells[0]![1]).toBeGreaterThan(before.cells[0]![1]);
+    // Zoom is from the config's size; Cmd+0 comes back to it.
+    await press(page, "Meta+Equal");
+    await press(page, "Meta+0");
+    expect((await font(page)).size).toBe(18);
+    // A family the system has (a wide one, so the cells change).
+    const mono = (await font(page)).cells[0]![0];
+    await page.evaluate(() => (window as any).__ws.setSettings({ font_size: 18, font_family: ["Verdana"] }));
+    await expect.poll(async () => (await font(page)).cells[0]![0]).not.toBe(mono);
+  });
+});
+
+test.describe("notifications", () => {
+  const notes = (page: Page) => page.evaluate(() => (window as any).__ws.notes);
+  const agent = (page: Page, pane: number, s: string) =>
+    page.evaluate(([p, st]) => (window as any).__ws.setAgent(p, st), [pane, s] as const);
+
+  test("an agent elsewhere that waits or finishes says so; the pane in view doesn't", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+t"); // pane 2, focused; pane 1 is in the hidden tab
+    await page.evaluate(() => (window as any).__ws.setPlace(1, {
+      dir: "/r/app", shown: "~/app",
+      git: { root: "/r/app", repo: "app", worktree: null, branch: "main", detached: null, upstream: null,
+             ahead: 0, behind: 0, changed: 0, conflicts: 0, operation: null },
+    }));
+    await agent(page, 1, "working");
+    await agent(page, 2, "working");
+    await settle(page);
+    expect(await notes(page)).toEqual([]);
+
+    await agent(page, 1, "blocked");
+    await agent(page, 2, "blocked"); // the pane being looked at
+    await settle(page);
+    expect(await notes(page)).toEqual([{ pane: 1, title: "Claude Code is waiting for you", body: "app · main" }]);
+
+    // With the window in the background, every pane counts.
+    await page.evaluate(() => (window as any).__ws.setWindowFocused(false));
+    await agent(page, 2, "working");
+    await agent(page, 2, "idle"); // finished, unseen: done
+    await settle(page);
+    expect((await notes(page)).at(-1)).toMatchObject({ pane: 2, title: "Claude Code finished" });
+
+    // Turned off in the config.
+    const n = (await notes(page)).length;
+    await page.evaluate(() => (window as any).__ws.setSettings({ agent_notifications: false }));
+    await agent(page, 1, "working");
+    await agent(page, 1, "blocked");
+    await settle(page);
+    expect(await notes(page)).toHaveLength(n);
+  });
+});

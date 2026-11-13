@@ -9,9 +9,10 @@
 // hidden, so their terminals keep their state and frames.
 
 import { detectPlatform, type Platform } from "../input/keyboard";
+import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, setFontFamilies } from "../metrics";
 import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
-import type { Layout, LayoutAction } from "../proto";
+import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
@@ -21,7 +22,18 @@ import { tooltip } from "./tooltip";
 import { applyChrome, KIBANN_DARK, type ThemeApi } from "./theme";
 import type { Theme } from "../proto";
 import { Sidebar } from "./sidebar";
-import { blockedCount, dotFor, installStyle, makeDot, rollUp, showDot, type StatusMap } from "./status";
+import {
+  agentName,
+  arrivals,
+  blockedCount,
+  dotFor,
+  installStyle,
+  makeDot,
+  rollUp,
+  showDot,
+  type Arrival,
+  type StatusMap,
+} from "./status";
 import {
   cycle,
   dividers,
@@ -96,6 +108,11 @@ export interface WorkspaceOptions {
   themes?: ThemeApi;
   /** Say once, on the first launch, where the shortcuts are. */
   firstRunHint?: boolean;
+  /** An agent in a pane the user isn't looking at started waiting for them
+   * or finished: tell them (a system notification). */
+  onNotify?(n: { pane: PaneId; title: string; body: string }): void;
+  /** Whether the user is looking at the window (it has focus). */
+  windowFocused?(): boolean;
 }
 
 const HINT_KEY = "kibann.hint.shortcuts";
@@ -121,12 +138,22 @@ export class Workspace {
   /** Each pane's directory and checkout, from the daemon. */
   git: GitMap = {};
   private blocked = 0;
+  /** No notifications for the first status map: those agents were already
+   * waiting or done before the window opened. */
+  private statusSeen = false;
+  private notifyOn = true;
+  /** The config's font size, and the size in use (zoomed from it). */
+  private baseFont: number;
+  fontSize: number;
+  /** Bumped when the font changes, so views made meanwhile catch up. */
+  private fontGen = 0;
 
   constructor(
     container: HTMLElement,
     private readonly opts: WorkspaceOptions,
   ) {
     this.platform = opts.platform ?? detectPlatform();
+    this.baseFont = this.fontSize = opts.view?.fontSize ?? DEFAULT_FONT_SIZE;
     applyChrome(KIBANN_DARK);
     const sheetKey = this.platform === "mac" ? keyText("m", "/", "mac") : keyText("cs", "/", "other");
     this.root = document.createElement("div");
@@ -260,6 +287,11 @@ export class Workspace {
     if (action.kind === "themes") {
       this.shortcuts.hide();
       void this.picker?.open();
+      return;
+    }
+    if (action.kind === "fontSize") {
+      const next = action.step === 0 ? this.baseFont : this.fontSize + action.step;
+      this.useFont(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, next)), false);
       return;
     }
     if (action.kind === "sidebar") {
@@ -445,7 +477,14 @@ export class Workspace {
 
   /** Show the daemon's agent status: pane dots, tab dots, the badge. */
   setStatus(map: StatusMap): void {
+    const prev = this.status;
     this.status = map;
+    if (this.statusSeen && this.notifyOn && this.opts.onNotify) {
+      const focused = this.opts.windowFocused?.() ?? document.hasFocus();
+      const looking = focused ? (this.focusedPane?.id ?? null) : null;
+      for (const a of arrivals(prev, map, looking)) this.notify(a);
+    }
+    this.statusSeen = true;
     for (const p of this.panes.values()) this.showPaneDot(p);
     this.updateBar();
     const blocked = blockedCount(map);
@@ -453,6 +492,37 @@ export class Workspace {
       this.blocked = blocked;
       this.opts.onBlocked?.(blocked);
     }
+  }
+
+  private notify(a: Arrival): void {
+    const p = this.panes.get(a.pane);
+    if (!p) return;
+    const who = agentName(a.agent);
+    const title = a.state === "blocked" ? `${who} is waiting for you` : `${who} finished`;
+    const place = this.git[String(a.pane)];
+    const where = place?.git ? [place.git.repo, place.git.branch].filter(Boolean).join(" · ") : place?.shown;
+    const body = [where, p.title].filter(Boolean).join(" — ");
+    this.opts.onNotify?.({ pane: a.pane, title, body });
+  }
+
+  /** The config file's settings: fonts and notifications. */
+  setSettings(s: Settings): void {
+    this.notifyOn = s.agent_notifications;
+    const families = setFontFamilies(s.font_family);
+    const base = s.font_size ?? this.opts.view?.fontSize ?? DEFAULT_FONT_SIZE;
+    // A new size in the file replaces any zoom.
+    const size = base !== this.baseFont ? base : this.fontSize;
+    this.baseFont = base;
+    this.useFont(size, families);
+  }
+
+  /** Use `size` in every pane (and new ones); `force` after the families
+   * changed, when the size may not have. */
+  private useFont(size: number, force: boolean): void {
+    if (size === this.fontSize && !force) return;
+    this.fontSize = size;
+    this.fontGen++;
+    for (const p of this.panes.values()) void p.view?.setFont(size);
   }
 
   /** Show the daemon's map of directories and checkouts. */
@@ -600,8 +670,10 @@ export class Workspace {
     const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false };
     this.panes.set(id, pane);
     this.showPaneDot(pane);
+    const gen = this.fontGen;
     void TerminalView.create(body, transport, {
       ...this.opts.view,
+      fontSize: this.fontSize,
       platform: this.platform,
       autofocus: false,
       onFocusChange: (focused) => focused && this.onPaneFocused(pane),
@@ -621,6 +693,7 @@ export class Workspace {
         return;
       }
       pane.view = view;
+      if (gen !== this.fontGen) void view.setFont(this.fontSize);
       this.renderSidebar();
       view.setActive(pane.tab.focused === pane.id);
       if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
