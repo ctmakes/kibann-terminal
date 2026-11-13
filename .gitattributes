@@ -1,0 +1,6 @@
+# Recorded terminal output and the frames made from it are compared byte for
+# byte: keep their line endings as they are on every platform (Windows
+# checkouts would turn LF into CRLF).
+crates/term/recordings/** -text
+crates/term/tests/fixtures/** -text
+app/src/dev/recordings/** -text

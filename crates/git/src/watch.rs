@@ -244,6 +244,12 @@ impl Watcher {
 }
 
 fn on_event(shared: &Shared, event: &notify::Event) {
+    // Reads (inotify reports opens and closes): git status itself opens
+    // HEAD, the index and the files it hashes, so counting them would run
+    // it again and again. A write also comes as a modify, create or remove.
+    if event.kind.is_access() {
+        return;
+    }
     let now = Instant::now();
     let mut st = shared.lock();
     let mut any = false;
