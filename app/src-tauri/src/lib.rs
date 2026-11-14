@@ -100,6 +100,15 @@ fn decide(dev: bool, same_protocol: bool, same_build: bool, restarted: bool) -> 
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_quits_say_what_they_do() {
+        assert_eq!(quit_labels(true)[0], (QUIT_KEY, "Close to Menu Bar"));
+        assert_eq!(quit_labels(true)[1].1, "Quit Kibann Terminal…");
+        assert_eq!(quit_labels(false)[0].1, "Quit Kibann Terminal");
+        assert_eq!(quit_labels(false)[1].1, "Quit and End Sessions…");
+    }
+
     #[test]
     fn which_daemons_are_kept() {
         // Release: an upgrade keeps the sessions unless the protocol changed.
@@ -497,7 +506,10 @@ fn reload_choice(app: &AppHandle) {
     };
     if changed {
         #[cfg(target_os = "macos")]
-        tray::set_visible(app, settings.menu_bar_icon);
+        {
+            tray::set_visible(app, settings.menu_bar_icon);
+            set_quit_labels(app, settings.menu_bar_icon);
+        }
         let _ = app.emit("settings", settings);
     }
 }
@@ -744,6 +756,47 @@ fn quit_ending_sessions(app: &AppHandle) {
 /// Menu item id for [`quit_ending_sessions`].
 #[cfg(target_os = "macos")]
 const QUIT_END_SESSIONS: &str = "quit-end-sessions";
+/// Menu item id for Cmd+Q: with the menu-bar icon it only closes the window
+/// (the app keeps watching agents), without it it quits the app.
+#[cfg(target_os = "macos")]
+const QUIT_KEY: &str = "quit-key";
+
+/// The app menu's two quits say what they do, which depends on whether the
+/// app keeps running in the menu bar.
+#[cfg(target_os = "macos")]
+fn quit_labels(menu_bar_icon: bool) -> [(&'static str, &'static str); 2] {
+    if menu_bar_icon {
+        [
+            (QUIT_KEY, "Close to Menu Bar"),
+            (QUIT_END_SESSIONS, "Quit Kibann Terminal…"),
+        ]
+    } else {
+        [
+            (QUIT_KEY, "Quit Kibann Terminal"),
+            (QUIT_END_SESSIONS, "Quit and End Sessions…"),
+        ]
+    }
+}
+
+/// Retitle the app menu's quits for the setting.
+#[cfg(target_os = "macos")]
+fn set_quit_labels(app: &AppHandle, menu_bar_icon: bool) {
+    use tauri::menu::MenuItemKind;
+    let Some(menu) = app.menu() else { return };
+    for (id, text) in quit_labels(menu_bar_icon) {
+        let found = menu
+            .items()
+            .unwrap_or_default()
+            .into_iter()
+            .find_map(|m| match m {
+                MenuItemKind::Submenu(sub) => sub.get(id),
+                _ => None,
+            });
+        if let Some(MenuItemKind::MenuItem(i)) = found {
+            let _ = i.set_text(text);
+        }
+    }
+}
 /// Menu item id for Check for Updates….
 #[cfg(target_os = "macos")]
 const CHECK_UPDATES: &str = "check-updates";
@@ -774,8 +827,10 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .separator()
         .item(&MenuItemBuilder::with_id(CHECK_UPDATES, "Check for Updates…").build(app)?)
         .separator()
-        .item(&MenuItemBuilder::with_id(QUIT_END_SESSIONS, "Quit and End Sessions").build(app)?)
-        .quit()
+        // The settings aren't read yet: these say what they do with the
+        // default (the menu-bar icon on) until they are.
+        .item(&MenuItemBuilder::with_id(QUIT_END_SESSIONS, quit_labels(true)[1].1).build(app)?)
+        .item(&item(QUIT_KEY, quit_labels(true)[0].1, "Cmd+Q")?)
         .build()?;
     let shell = SubmenuBuilder::new(app, "Shell")
         .item(&item(r#"{"kind":"newTab"}"#, "New Tab", "Cmd+T")?)
@@ -893,7 +948,14 @@ pub fn run() {
         if id.starts_with('{') {
             let _ = app.emit("menu-action", id);
         } else if id == QUIT_END_SESSIONS {
-            quit_ending_sessions(app);
+            // Asks first when shells are open.
+            tray::quit(app);
+        } else if id == QUIT_KEY {
+            if tray::enabled(app) {
+                tray::hide_window(app);
+            } else {
+                app.exit(0);
+            }
         } else if id.starts_with(tray::PREFIX) {
             tray::on_menu(app, id);
         } else if id == WHATS_NEW {

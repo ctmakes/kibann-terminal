@@ -79,6 +79,7 @@ CI can't see these. Use the `.dmg` from the draft.
 | d2 | Close the window; an agent waits | The menu-bar icon gets a dot and "1 agent is waiting"; that item, the icon's Show and the Dock icon bring the window back |
 | d3 | Close the last pane, then the icon's Show | The window comes back with a fresh shell |
 | d4 | The icon's Quit with shells open | It asks; Quit ends the shells, and the next start reopens the tabs with fresh shells |
+| d4b | Cmd+Q, then the icon's Show | The window hid and the icon stayed; Show brings it back with the same shells |
 | d5 | The icon in a light and a dark menu bar; Help → What's New | The K is clear in both; Settings opens on Updates, with this version marked |
 | d6 | Cmd+, → General: turn a switch off, then Open in Editor | The config file opens in the text editor with the line in it |
 | d7 | Settings → Appearance: pick a font from the list, then − / + | The panes change font and size within a second |

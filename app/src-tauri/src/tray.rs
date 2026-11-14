@@ -259,8 +259,9 @@ pub fn on_menu(app: &AppHandle, id: &str) {
     }
 }
 
-/// Ask first when shells would end, then end everything.
-fn quit(app: &AppHandle) {
+/// Ask first when shells would end, then end everything (this menu's Quit,
+/// and the app menu's).
+pub fn quit(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let open = app
         .try_state::<crate::Term>()

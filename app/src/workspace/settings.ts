@@ -533,7 +533,7 @@ export class SettingsModal {
         rows.push(
           this.row(
             "Keep running in the menu bar",
-            "Closing the window hides it, so agents can still notify you. Quit from the menu-bar icon ends everything.",
+            "Closing the window or Cmd+Q hides it, so agents can still notify you. Quit Kibann Terminal… ends everything.",
             this.switch("menu-bar-icon", s.menu_bar_icon, (x, on) => (x.menu_bar_icon = on)),
           ),
         );

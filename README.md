@@ -50,19 +50,19 @@ Tabs and splits use Ghostty's default shortcuts:
 
 The shells run in a background process, the daemon, which also owns the tabs and splits. That changes what closing and quitting do:
 
-- **Closing the window or quitting (Cmd+Q)** leaves the shells running. Open the app again and they're back, and each pane shows what its shell printed in the meantime.
+- **Closing the window or quitting the app** leaves the shells running. Open the app again and they're back, and each pane shows what its shell printed in the meantime.
 - **Closing a pane** ends its shell.
-- **Quit and End Sessions** in the app menu ends every shell and the daemon. The daemon also exits on its own 10 s after the last shell and window are gone.
+- **Quit Kibann Terminal…** in the app menu (Quit and End Sessions… without the menu-bar icon) asks first, then ends every shell and the daemon. The daemon also exits on its own 10 s after the last shell and window are gone.
 - **After a reboot or log out**, the app opens with the same tabs and splits, at the same sizes and with the same pane focused. Each pane is a fresh shell in the directory it was in, but scrollback and running programs don't come back. Closing the last pane on purpose starts fresh next time instead.
 
 The layout is kept in `~/Library/Application Support/kibann/layout.json` (`$XDG_STATE_HOME/kibann/` on Linux) and written a few seconds after each change. `restore-layout = false` in the config turns this off.
 
 **The menu-bar icon (macOS).**
-- **Closing the window, or its last pane,** only hides the window. The app keeps running, so agents can still notify you, and the icon shows a dot while one waits.
+- **Closing the window, its last pane, or Cmd+Q** (Close to Menu Bar) only hides the window. The app keeps running, so agents can still notify you, and the icon shows a dot while one waits.
 - **The icon's menu** shows the version. From it you can bring the window back (the Dock icon does that too), open a tab, go to a waiting agent, install a downloaded update, read What's New, or open Settings.
 - **Quit Kibann Terminal** in that menu asks first, then ends the shells, the daemon and the app.
 
-`menu-bar-icon = false` in the config removes the icon. Closing the window then quits the app, as does closing the last pane on other platforms.
+`menu-bar-icon = false` in the config removes the icon. Closing the window or Cmd+Q then quits the app (the shells keep running), as closing the last pane does on other platforms.
 
 Each shell gets `TERM_PROGRAM=kibann`. Variables describing the terminal the app was started from (`TERM_PROGRAM`, `TMUX`, `GHOSTTY_*` and the like) are not passed on.
 
