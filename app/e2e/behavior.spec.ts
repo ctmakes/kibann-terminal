@@ -169,6 +169,39 @@ test.describe("frames", () => {
     expect(log.at(-1).full).toBe(true);
   });
 
+  test("a canvas that lost its pixels is painted again from the grid", async ({ page }) => {
+    // Browsers may clear a canvas (memory pressure, a graphics reset, a
+    // window hidden a long time); a pane left alone went blank until
+    // something scrolled. Clearing it as they do (resetting its size also
+    // resets its state), then each signal, must bring every pixel back.
+    await openFixture(page, "tui");
+    const snapshot = () =>
+      page.evaluate(() => {
+        const c = (window as any).__harness.view.gridCanvas as HTMLCanvasElement;
+        const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+        let h = 0;
+        for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0;
+        return h;
+      });
+    const wipe = () =>
+      page.evaluate(() => {
+        const c = (window as any).__harness.view.gridCanvas as HTMLCanvasElement;
+        c.width = c.width;
+      });
+    const painted = await snapshot();
+    const signals: Array<[string, () => void]> = [
+      ["contextrestored", () => (window as any).__harness.view.gridCanvas.dispatchEvent(new Event("contextrestored"))],
+      ["visibilitychange", () => document.dispatchEvent(new Event("visibilitychange"))],
+      ["focus", () => window.dispatchEvent(new Event("focus"))],
+    ];
+    for (const [name, fire] of signals) {
+      await wipe();
+      expect(await snapshot(), `wiped before ${name}`).not.toBe(painted);
+      await page.evaluate(fire);
+      expect(await snapshot(), `after ${name}`).toBe(painted);
+    }
+  });
+
   test("partial frames repaint only the rows that changed", async ({ page }) => {
     await openFixture(page, "partial", { still: "0" });
     await expect.poll(() => page.evaluate(() => (window as any).__harness.paints)).toBeGreaterThan(4);

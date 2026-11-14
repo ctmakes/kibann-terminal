@@ -238,6 +238,45 @@ export class TerminalView {
       this.textarea.removeEventListener("blur", onBlur);
       this.root.removeEventListener("mousedown", onRootDown);
     });
+    this.cleanups.push(this.watchLostPixels());
+  }
+
+  /**
+   * Browsers may throw a canvas's pixels away (memory pressure, a graphics
+   * reset, a window hidden a long time), and nothing else repaints until
+   * the screen changes: a pane left alone went blank until scrolled. The
+   * grid mirror still has everything, so paint it again when the canvas
+   * comes back, and whenever the page is shown or the window focused, for
+   * engines that clear it without saying so.
+   */
+  private watchLostPixels(): () => void {
+    const onLost = () => console.warn("kibann: canvas lost its contents");
+    const onRestored = () => this.repaint();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") this.repaint();
+    };
+    const onFocus = () => this.repaint();
+    for (const c of [this.gridCanvas, this.overlay]) {
+      c.addEventListener("contextlost", onLost);
+      c.addEventListener("contextrestored", onRestored);
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      for (const c of [this.gridCanvas, this.overlay]) {
+        c.removeEventListener("contextlost", onLost);
+        c.removeEventListener("contextrestored", onRestored);
+      }
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }
+
+  /** Paint everything again from the grid mirror (nothing changed in it). */
+  repaint(): void {
+    if (this.painter.cols <= 0) return; // not laid out yet
+    this.painter.paintAll(this.grid);
+    this.cursor.update(this.grid, false);
   }
 
   private readonly mouse: MouseInput;
