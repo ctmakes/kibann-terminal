@@ -2,6 +2,7 @@
 //! running in a pane, account details removed. Each file is `title: ...` and
 //! then the screen.
 //! - `fixtures/claude/`: Claude Code 2.1.323.
+//! - `fixtures/codex/`: Codex CLI 0.169.0 on a local model, 80x24.
 //! - `fixtures/opencode/`: OpenCode 2.2.7, 80x24.
 
 use term::agent::{Agent, State, detect};
@@ -55,6 +56,31 @@ fn claude_code_screens() {
             // A menu with "Esc to cancel" that asks nothing.
             ("model-menu", State::Idle),
             ("idle-after-menu", State::Idle),
+        ],
+    );
+}
+
+#[test]
+fn codex_screens() {
+    check(
+        Agent::Codex,
+        &[
+            // "Trust this folder?" on the first start in a directory.
+            ("blocked-trust", State::Blocked),
+            ("idle-start", State::Idle),
+            ("working", State::Working),
+            ("working-again", State::Working),
+            ("working-status", State::Working),
+            ("blocked-command", State::Blocked),
+            ("idle-after-cancel", State::Idle),
+            ("idle-after-turn", State::Idle),
+            ("idle-after-interrupt", State::Idle),
+            // The model asks in its reply: that's text, not a dialog.
+            ("idle-model-asks", State::Idle),
+            // A picker with numbered choices that asks nothing.
+            ("model-menu", State::Idle),
+            // The user typed the dialog's words into the prompt.
+            ("typed-question", State::Idle),
         ],
     );
 }

@@ -51,8 +51,11 @@ usage: kibann <command>
                                     full-screen viewer that follows changes
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
-  skill show | skill install        the guide for agents (to ~/.claude/skills/kibann,
-                                    read by Claude Code and OpenCode)
+  skill show                        the guide for agents
+  skill install [--claude|--codex|--opencode]
+                                    install it: ~/.claude/skills/kibann (Claude
+                                    Code, OpenCode), and ~/.agents/skills/kibann
+                                    when Codex is installed (Codex)
 
 P is a pane id like p3, or --current (this pane, from $KIBANN_PANE).
 Without P where one is optional, the calling pane is used.";
@@ -290,7 +293,10 @@ fn dispatch(args: &[String]) -> Out {
             print!("{SKILL}");
             Ok(None)
         }
-        (Some("skill"), Some("install")) => skill_install(),
+        (Some("skill"), Some("install")) => {
+            a.only(&["--claude", "--codex", "--opencode"])?;
+            skill_install(&a)
+        }
         (Some("tab"), Some("new")) => tab_new(&a),
         (Some("pane"), Some("list")) => pane_list(&connect()?, None),
         (Some("pane"), Some("current")) => {
@@ -853,21 +859,82 @@ fn press_release(code: String, key: String, text: Option<String>, m: u16) -> Vec
     vec![ev(KeyAction::Press, text), ev(KeyAction::Release, None)]
 }
 
-fn skill_install() -> Out {
+/// Where each agent reads skills, under `$HOME`, and who reads it.
+/// OpenCode reads Claude Code's folder; Codex reads `~/.agents/skills`.
+const SKILL_DIRS: &[(&str, &str, &[&str])] = &[
+    (
+        "claude",
+        ".claude/skills/kibann",
+        &["Claude Code", "OpenCode"],
+    ),
+    ("codex", ".agents/skills/kibann", &["Codex"]),
+];
+
+/// The skill folders to write: the agents named with `--claude`, `--codex`
+/// or `--opencode`, else Claude Code's folder (read by OpenCode too) and
+/// Codex's when Codex is installed.
+fn skill_targets(a: &Args, has_codex: bool) -> Vec<&'static str> {
+    let named: Vec<&str> = [
+        ("--claude", "claude"),
+        ("--opencode", "claude"),
+        ("--codex", "codex"),
+    ]
+    .iter()
+    .filter(|(flag, _)| a.has(flag))
+    .map(|&(_, dir)| dir)
+    .collect();
+    let mut want = if named.is_empty() {
+        let mut all = vec!["claude"];
+        if has_codex {
+            all.push("codex");
+        }
+        all
+    } else {
+        named
+    };
+    want.dedup();
+    want
+}
+
+/// Is `program` on `$PATH`?
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+}
+
+fn skill_install(a: &Args) -> Out {
     let home = std::env::var_os("HOME").ok_or_else(|| error("no_home", "$HOME is not set"))?;
-    let dir = PathBuf::from(home).join(".claude/skills/kibann");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("SKILL.md");
-    std::fs::write(&path, SKILL)?;
-    // OpenCode reads Claude Code's skills folder too.
-    Ok(Some(
-        json!({"installed": path, "read_by": ["Claude Code", "OpenCode"]}),
-    ))
+    let home = PathBuf::from(home);
+    let has_codex = on_path("codex") || home.join(".codex").is_dir();
+    let mut installed = Vec::new();
+    for key in skill_targets(a, has_codex) {
+        let (_, rel, readers) = SKILL_DIRS.iter().find(|(k, ..)| *k == key).unwrap();
+        let dir = home.join(rel);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("SKILL.md");
+        std::fs::write(&path, SKILL)?;
+        installed.push(json!({"path": path, "read_by": readers}));
+    }
+    Ok(Some(json!({"installed": installed})))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_folders() {
+        let parse =
+            |v: &[&str]| Args::parse(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        assert_eq!(skill_targets(&parse(&[]), false), ["claude"]);
+        assert_eq!(skill_targets(&parse(&[]), true), ["claude", "codex"]);
+        assert_eq!(skill_targets(&parse(&["--codex"]), false), ["codex"]);
+        assert_eq!(skill_targets(&parse(&["--opencode"]), true), ["claude"]);
+        assert_eq!(
+            skill_targets(&parse(&["--claude", "--opencode"]), true),
+            ["claude"]
+        );
+    }
 
     #[test]
     fn keys() {

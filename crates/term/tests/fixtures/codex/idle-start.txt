@@ -1,0 +1,25 @@
+title: cxwork
+
+  >_ OpenAI Codex (v0.169.0)
+     /private/tmp/kbz/cxwork
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  gemma4:e4b-mlx default · /private/tmp/kbz/cxwork
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

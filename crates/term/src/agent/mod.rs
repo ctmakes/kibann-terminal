@@ -15,11 +15,13 @@
 use std::path::Path;
 
 mod claude;
+mod codex;
 mod opencode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
     Claude,
+    Codex,
     OpenCode,
 }
 
@@ -27,6 +29,7 @@ impl Agent {
     pub fn name(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
+            Agent::Codex => "codex",
             Agent::OpenCode => "opencode",
         }
     }
@@ -51,12 +54,17 @@ fn base(s: &str) -> &str {
 ///
 /// - Claude Code's native binary is named after its version (`2.1.323`), so
 ///   `argv[0]` decides; the npm package runs as `node .../claude-code/cli.js`.
+/// - Codex is its native `codex` binary (the npm package's launcher starts
+///   one from `@openai/codex-darwin-arm64/vendor/…`), or that launcher
+///   (`node .../@openai/codex/bin/codex.js`).
 /// - OpenCode is the `opencode` binary, or its npm launcher
-///   (`node .../opencode-ai/bin/opencode`). Its subcommands that aren't the
-///   interactive screen (`opencode serve`, `opencode run`, …) don't count.
+///   (`node .../opencode-ai/bin/opencode`).
+/// - For both, subcommands other than the interactive screen don't count
+///   (`codex exec`, `opencode serve`, …).
 pub fn identify(name: &str, argv: &[String]) -> Option<Agent> {
     let named = |s: &str| match base(s) {
         "claude" => Some(Agent::Claude),
+        "codex" => Some(Agent::Codex),
         "opencode" => Some(Agent::OpenCode),
         _ => None,
     };
@@ -70,6 +78,8 @@ pub fn identify(name: &str, argv: &[String]) -> Option<Agent> {
         let agent = named(script).or_else(|| {
             if script.contains("claude-code") {
                 Some(Agent::Claude)
+            } else if script.contains("/@openai/codex/") {
+                Some(Agent::Codex)
             } else if script.contains("/opencode-ai/") {
                 Some(Agent::OpenCode)
             } else {
@@ -80,10 +90,12 @@ pub fn identify(name: &str, argv: &[String]) -> Option<Agent> {
     } else {
         return None;
     };
-    if agent == Agent::OpenCode && !opencode::interactive(rest) {
-        return None;
-    }
-    Some(agent)
+    let interactive = match agent {
+        Agent::Claude => true,
+        Agent::Codex => codex::interactive(rest),
+        Agent::OpenCode => opencode::interactive(rest),
+    };
+    interactive.then_some(agent)
 }
 
 /// The state of `agent`, given its title and the screen's lines (the active
@@ -91,6 +103,7 @@ pub fn identify(name: &str, argv: &[String]) -> Option<Agent> {
 pub fn detect(agent: Agent, title: &str, screen: &[&str]) -> State {
     match agent {
         Agent::Claude => claude::detect(title, screen),
+        Agent::Codex => codex::detect(title, screen),
         Agent::OpenCode => opencode::detect(title, screen),
     }
 }
@@ -128,6 +141,33 @@ mod tests {
         assert_eq!(identify("zsh", &args(&["-zsh"])), None);
         assert_eq!(identify("node", &args(&["node", "server.js"])), None);
         assert_eq!(identify("vim", &args(&["vim", "claude.md"])), None);
+    }
+
+    #[test]
+    fn identifying_codex() {
+        // As seen in a pane: 0.169.0 from npm, its native binary in front.
+        let native = "/x/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex";
+        assert_eq!(
+            identify("codex", &args(&[native, "--oss", "-m", "gemma4"])),
+            Some(Agent::Codex)
+        );
+        assert_eq!(identify("codex", &args(&["codex"])), Some(Agent::Codex));
+        assert_eq!(
+            identify("codex", &args(&["codex", "resume", "--last"])),
+            Some(Agent::Codex)
+        );
+        assert_eq!(
+            identify(
+                "node",
+                &args(&["node", "/x/lib/node_modules/@openai/codex/bin/codex.js"])
+            ),
+            Some(Agent::Codex)
+        );
+        for sub in ["exec", "login", "mcp", "app-server", "review"] {
+            assert_eq!(identify("codex", &args(&["codex", sub])), None, "{sub}");
+        }
+        assert_eq!(identify("vim", &args(&["vim", "codex.md"])), None);
+        assert_eq!(identify("node", &args(&["node", "codex-proxy.js"])), None);
     }
 
     #[test]
