@@ -7,14 +7,14 @@ its notes then go out with that version.
 
 ## [0.2.0] - Unreleased
 
+The first public build, for Macs with Apple silicon and for Linux.
+
 - Linux: an AppImage and a `.deb`, for x86_64 and arm64, that update
   themselves. A tray icon keeps it running when the window closes (where
   the desktop shows tray icons), Settings lists the installed monospaced
   fonts, and opening it again shows the running window.
 
-## [0.1.0] - 2026-11-14
-
-The first public build, for Macs with Apple silicon.
+## [0.1.0] - Included in 0.2.0
 
 - A terminal built on libghostty: true color, wide characters and emoji,
   box drawing drawn as lines, scrollback, links you can Cmd+click, and
