@@ -1,6 +1,5 @@
 import { Flag } from "../proto";
 import { fontString, type Metrics } from "../metrics";
-import { boxOps, drawBoxOps, isBoxChar } from "./boxdraw";
 
 /**
  * Wraps a 2D context: font selection without redundant changes, cached
@@ -39,7 +38,11 @@ export class TextContext {
   }
 
   useFont(flags: number): void {
-    const i = (flags & Flag.BOLD ? 1 : 0) | (flags & Flag.ITALIC ? 2 : 0);
+    this.useFontIndex((flags & Flag.BOLD ? 1 : 0) | (flags & Flag.ITALIC ? 2 : 0));
+  }
+
+  /** 0 regular, 1 bold, 2 italic, 3 bold italic (see `fontIndex`). */
+  useFontIndex(i: number): void {
     const f = this.fonts[i];
     if (f !== this.font) {
       this.ctx.font = f;
@@ -60,37 +63,27 @@ export class TextContext {
   }
 
   /**
-   * Draw one cell's grapheme at column `col` of the row whose top is `top`,
-   * in color `fg`. The font must already be selected with useFont. `bg` is
-   * used for the gaps in double box-drawing lines.
+   * Draw a grapheme in `cells` cells whose left edge is `x` and top is
+   * `top`, with the current font and fill. Wider than its cells: clipped,
+   * not scaled. Narrower than two cells: centered.
    */
-  drawGlyph(text: string, col: number, top: number, cells: number, fg: string, bg: string): void {
-    const { cellW, cellH, baseline, lineW } = this.m;
+  drawText(text: string, x: number, top: number, cells: number): void {
+    const { cellW, cellH, baseline } = this.m;
     const ctx = this.ctx;
-    const x = col * cellW;
-    const cp = text.codePointAt(0)!;
-    if (text.length === 1 && isBoxChar(cp)) {
-      const ops = boxOps(cp, cellW, cellH, lineW);
-      if (ops) {
-        drawBoxOps(ctx, ops, x, top, cellW, cellH, fg, bg);
-        return;
-      }
-    }
-    ctx.fillStyle = fg;
-    if (text.length === 1 && cp < 0x7f) {
+    if (text.length === 1 && text.charCodeAt(0) < 0x7f) {
       ctx.fillText(text, x, top + baseline);
       return;
     }
     const avail = cells * cellW;
     const w = this.measure(text);
     if (w > avail + 0.5) {
-      // Glyphs wider than their cells are clipped, not scaled.
       ctx.save();
       ctx.beginPath();
       ctx.rect(x, top, avail, cellH);
       ctx.clip();
       ctx.fillText(text, x, top + baseline);
       ctx.restore();
+      this.invalidate();
     } else {
       ctx.fillText(text, x + (cells > 1 && w < avail ? (avail - w) / 2 : 0), top + baseline);
     }

@@ -1,7 +1,7 @@
-import { Flag } from "./proto";
 import type { Grid } from "./grid";
 import type { Metrics } from "./metrics";
-import { css } from "./painter/color";
+import { drawOps } from "./painter/draw";
+import { planCursor, planGlyph, type PaintOp } from "./painter/plan";
 import { TextContext } from "./painter/text";
 import { graphemes, graphemeWidth } from "./wcwidth";
 
@@ -94,77 +94,42 @@ export class CursorLayer {
     if (!grid) return;
     const c = grid.cursor;
     if (!c.in_viewport || c.y >= this.rows) return;
-    const { cellW, cellH, lineW } = this.m;
     const col = this.cursorColumn(grid);
-    const top = c.y * cellH;
-    const x = col * cellW;
 
     if (this.preedit) {
-      this.drawPreedit(grid, col, top);
+      this.drawPreedit(grid, col, c.y);
       return;
     }
     if (!c.visible) return;
     if (this.focused && c.blinking && !this.blinkOn) return;
 
-    const color = css(c.color ?? grid.defaultFg);
-    const cell = grid.cellAt(col, c.y);
-    const cells = c.wide || cell.width === 2 ? 2 : 1;
-    const w = Math.min(cells, Math.max(1, this.cols - col)) * cellW;
     const style = this.focused ? c.style : "block_hollow";
-
-    switch (style) {
-      case "block": {
-        ctx.fillStyle = color;
-        ctx.fillRect(x, top, w, cellH);
-        if (cell.text && cell.text !== " " && !(cell.style.flags & Flag.INVISIBLE)) {
-          const textColor = css(cell.style.bg ?? grid.defaultBg);
-          this.text.invalidate();
-          this.text.useFont(cell.style.flags);
-          ctx.fillStyle = textColor;
-          this.text.drawGlyph(cell.text, col, top, cells, textColor, color);
-        }
-        break;
-      }
-      case "block_hollow":
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lineW;
-        ctx.strokeRect(x + lineW / 2, top + lineW / 2, w - lineW, cellH - lineW);
-        break;
-      case "bar":
-        ctx.fillStyle = color;
-        ctx.fillRect(x, top, Math.max(lineW, Math.round(cellW / 8)), cellH);
-        break;
-      case "underline": {
-        const th = Math.max(lineW, Math.round(cellH / 14));
-        ctx.fillStyle = color;
-        ctx.fillRect(x, top + cellH - th, w, th);
-        break;
-      }
-    }
+    this.text.invalidate();
+    drawOps(ctx, this.text, planCursor(grid, col, c.y, this.cols, style, this.m));
   }
 
-  private drawPreedit(grid: Grid, col: number, top: number): void {
-    const ctx = this.ctx;
+  /** IME text being composed, at the cursor, underlined. */
+  private drawPreedit(grid: Grid, col: number, y: number): void {
     const { cellW, cellH, lineW, underlineY } = this.m;
-    const fg = css(grid.defaultFg);
-    const bg = css(grid.defaultBg);
+    const top = y * cellH;
+    const fg = grid.defaultFg;
+    const bg = grid.defaultBg;
     const parts = graphemes(this.preedit).map((g) => [g, Math.max(1, graphemeWidth(g))] as const);
     const total = parts.reduce((n, [, w]) => n + w, 0);
     // Long compositions start further left so the end, where typing happens, stays visible.
     const start = Math.max(0, Math.min(col, this.cols - total));
-    ctx.fillStyle = bg;
-    ctx.fillRect(start * cellW, top, Math.min(total, this.cols - start) * cellW, cellH);
-    this.text.invalidate();
-    this.text.useFont(0);
-    ctx.fillStyle = fg;
+    const ops: PaintOp[] = [
+      { k: "fill", x: start * cellW, y: top, w: Math.min(total, this.cols - start) * cellW, h: cellH, color: bg, alpha: 1 },
+    ];
     let x = start;
     for (const [g, w] of parts) {
       if (x + w > this.cols) break;
-      this.text.drawGlyph(g, x, top, w, fg, bg);
+      planGlyph(ops, this.m, g, x * cellW, top, w, 0, fg, bg, 1);
       x += w;
     }
-    ctx.fillStyle = fg;
-    ctx.fillRect(start * cellW, top + underlineY, (x - start) * cellW, lineW);
+    ops.push({ k: "fill", x: start * cellW, y: top + underlineY, w: (x - start) * cellW, h: lineW, color: fg, alpha: 1 });
+    this.text.invalidate();
+    drawOps(this.ctx, this.text, ops);
   }
 
   /** CSS-pixel position of the cursor cell, relative to the grid's origin. */
