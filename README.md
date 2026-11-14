@@ -42,7 +42,7 @@ Tabs and splits use Ghostty's default shortcuts:
 
 - Cmd+/ (or Help → Keyboard Shortcuts) shows every shortcut in the app, and any key closes it. You can change any shortcut in the config file (see [Keyboard shortcuts](#keyboard-shortcuts)).
 - Ctrl+Tab and Ctrl+Shift+Tab also switch tabs. On macOS, the actions are also in the menu bar.
-- You can drag the dividers. The right-click menu has Split Right, Split Down and Close.
+- You can drag the dividers. The right-click menu has Split Right, Split Down and Close. Double-clicking a pane's header zooms it to fill the tab, like Cmd+Shift+Enter, and double-clicking again brings the splits back.
 - With more than one tab, each tab shows its number, the one Cmd+1–8 goes to; the sidebar shows it on each pane's row.
 - New panes and tabs start in the focused pane's directory. A pane closes when its shell exits.
 

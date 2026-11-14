@@ -781,6 +781,14 @@ export class Workspace {
     });
     header.show(this.git[String(id)]);
     header.setActive(tab.focused === id);
+    // Double-clicking the header zooms the split, and again restores the
+    // layout (as Cmd+Shift+Enter). Not on ●N, which opens the diff.
+    header.el.addEventListener("dblclick", (e) => {
+      if ((e.target as HTMLElement).classList.contains("pane-changed")) return;
+      e.preventDefault();
+      const p = this.panes.get(id);
+      if (p) this.run({ kind: "zoom" }, p);
+    });
     // The terminal fills what the header leaves.
     const body = document.createElement("div");
     body.className = "pane-body";

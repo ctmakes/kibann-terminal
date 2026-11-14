@@ -274,7 +274,7 @@ pub fn quit(app: &AppHandle) {
     show_window(app);
     let handle = app.clone();
     app.dialog()
-        .message(quit_text(open))
+        .message(quit_text(open, restores(app)))
         .title("Quit Kibann Terminal?")
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
@@ -288,16 +288,28 @@ pub fn quit(app: &AppHandle) {
         });
 }
 
-fn quit_text(open: usize) -> String {
+/// Whether the next start reopens the tabs and splits (`restore-layout`).
+fn restores(app: &AppHandle) -> bool {
+    app.state::<Mutex<proto::config::Settings>>()
+        .lock()
+        .unwrap()
+        .restore_layout
+}
+
+fn quit_text(open: usize, restores: bool) -> String {
     let what = if open == 1 {
-        "1 terminal is open. It ends, with whatever runs in it".to_owned()
+        "This ends the open terminal and everything running in it".to_owned()
     } else {
-        format!("{open} terminals are open. They end, with whatever runs in them")
+        format!("This ends the {open} open terminals and everything running in them")
+    };
+    let next = if restores {
+        "Next time, the tabs and splits reopen with fresh shells."
+    } else {
+        "Next time starts with a fresh shell."
     };
     format!(
-        "{what}, Claude Code sessions too.\n\n\
-         The tabs and splits come back next time, with fresh shells. To keep \
-         the shells running, close the window instead."
+        "{what}, including Claude Code sessions.\n\n{next} To keep the shells \
+         running, close the window or press ⌘Q instead."
     )
 }
 
@@ -350,7 +362,16 @@ mod tests {
 
     #[test]
     fn quitting_says_what_ends() {
-        assert!(quit_text(1).starts_with("1 terminal is open. It ends,"));
-        assert!(quit_text(3).starts_with("3 terminals are open. They end,"));
+        assert_eq!(
+            quit_text(1, true),
+            "This ends the open terminal and everything running in it, including Claude Code \
+             sessions.\n\nNext time, the tabs and splits reopen with fresh shells. To keep the \
+             shells running, close the window or press ⌘Q instead."
+        );
+        assert!(
+            quit_text(3, false)
+                .starts_with("This ends the 3 open terminals and everything running in them,")
+        );
+        assert!(quit_text(3, false).contains("Next time starts with a fresh shell."));
     }
 }

@@ -178,6 +178,26 @@ test.describe("splits", () => {
     expect((await state(page)).zoomed).toBeNull();
   });
 
+  test("double-clicking a pane's header zooms it, and again comes back", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+d");
+    // The left pane's header: it zooms that one, not the focused one.
+    await page.locator('.pane[data-pane="1"] .pane-header').dblclick();
+    await settle(page);
+    let s = await state(page);
+    expect(s.zoomed).toBe(1);
+    expect(s.focused).toBe(1);
+    await page.locator('.pane[data-pane="1"] .pane-header').dblclick();
+    await settle(page);
+    s = await state(page);
+    expect(s.zoomed).toBeNull();
+    expect(s.panes).toHaveLength(2);
+    // One pane: nothing to zoom.
+    await press(page, "Meta+w");
+    await page.locator(".pane-header").first().dblclick();
+    expect((await state(page)).zoomed).toBeNull();
+  });
+
   test("Linux and Windows shortcuts", async ({ page }) => {
     await open(page, { platform: "other" });
     await press(page, "Control+Shift+o");
