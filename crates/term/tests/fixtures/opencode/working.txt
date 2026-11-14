@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command      ⠹ Running echo hi command       +
+     leans toward the edge of getting wet.
+
+     First comes the smell — that mineral hush,
+     the scent of stone about to drink,
+     a promise breathed across the roofs
+     before a single drop can sink.
+
+     Then one. Then two. A scattered tap
+     on window glass and garden shed,
+     like fingers practicing a scale
+     across the shingles overhead.
+
+     And then the whole world opens wide
+     and rain comes down in silver sheets,
+     a thousand rivers
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝■■■■ esc interrupt                           9.0K (4%)  ctrl+p commands

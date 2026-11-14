@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command      ? Running echo hi command       +
+  ┃
+  ┃  Use your question tool to ask me whether I prefer red or blue. Do
+  ┃  nothing else.
+  ┃
+
+     + Thought · 1.0s
+
+     → Asked 1 question
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Which color do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     You prefer red.
+  ┃  2. Blue
+  ┃     You prefer blue.
+  ┃  3. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃

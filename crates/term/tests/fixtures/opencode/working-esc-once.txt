@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command      ⠋ Running echo hi command       +
+     The lighthouse stood on a knuckle of black rock that the sea had been
+     trying to swallow since before there were maps to name it. Three hundred
+     and eleven steps spiraled up its spine, each one worn into a shallow bowl
+     by the boots of keepers who had come before him. Elias knew every step by
+     heart. He knew the seventh one that always groaned, the two hundredth
+     that caught the heel, the final turn where the wind found the gap in the
+     glass and sang a thin, silver note.
+
+     His wife, Maren, had come to the light as a bride, carrying a trunk of
+     books and a stubborn belief that the sea was beautiful. She had been
+     right, and she had been wrong, and she had stayed anyway. When the fever
+     took her in the winter of his nineteenth year as keeper, Elias stopped
+     speaking to the village. He spoke to the lamp instead.
+
+     Every evening at dusk he climbed, oil
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝⬝⬝ esc again to interrupt                  8.6K (4%)  ctrl+p commands

@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command        Running echo hi command       +
+
+  ┃
+  ┃  Run the shell command: echo hi. Then reply with one word.
+  ┃
+
+     + Thought · 560ms
+
+  ┃
+  ┃  $ echo hi
+  ┃
+  ┃  The user declined this tool call
+  ┃
+
+     Build · Big Pickle · 16.0s · 48.5 tok/s · interrupted
+
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/kbz/ocwork                           8.3K (4%)  ctrl+p commands

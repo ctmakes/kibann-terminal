@@ -59,6 +59,7 @@ describe("notifications", () => {
 
   it("names agents", () => {
     expect(agentName("claude")).toBe("Claude Code");
+    expect(agentName("opencode")).toBe("OpenCode");
     expect(agentName("codex")).toBe("Codex");
     expect(agentName("")).toBe("An agent");
   });

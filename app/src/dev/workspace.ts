@@ -269,8 +269,8 @@ const api = {
     };
   },
   /** A pane's agent changes state (as the daemon would detect it). */
-  setAgent(pane: number, state: string | null) {
-    backend.setAgent(pane, state as never);
+  setAgent(pane: number, state: string | null, agent?: string) {
+    backend.setAgent(pane, state as never, agent);
   },
   /** Where a pane is, as the daemon would report it. */
   setPlace(pane: number, place: unknown) {

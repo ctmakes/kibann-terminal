@@ -48,7 +48,8 @@ kibann pane wait P --exit         # the pane's shell exits
 kibann pane wait P --until done,blocked --timeout 900000
                                   # P's agent finished or waits for the user
 kibann pane list                  # every pane: id, tab, title, cwd, focused,
-                                  # agent ("claude" or null), state, and git:
+                                  # agent ("claude", "opencode" or null),
+                                  # state, and git:
                                   # {repo, worktree, branch, changed, ahead, ...}
 kibann pane diff P                # P's uncommitted changes (vs HEAD, untracked
                                   # files included) as a patch
@@ -86,7 +87,8 @@ p=$(kibann pane split --direction right | jq -r .pane.id)
 kibann pane run "$p" "claude -p 'review the diff in this repo' > review.md" --wait --timeout 900000
 ```
 
-Start another Claude Code where the user can watch it, and wait for it:
+Start another agent (Claude Code here; OpenCode works the same) where the
+user can watch it, and wait for it:
 
 ```sh
 p=$(kibann pane split --direction right | jq -r .pane.id)
@@ -98,9 +100,9 @@ kibann pane read "$p" --lines 60
 
 Agent states: `working`, `blocked` (waiting for the user to answer a
 prompt), `idle`, and `done` (finished while the user wasn't looking at the
-pane; it turns `idle` once they focus it). Kibann reads them from Claude
-Code's screen and title. Wait for `working` first: right after `run`, the
-agent hasn't started yet and the pane has no agent. If `blocked` comes back,
+pane; it turns `idle` once they focus it). Kibann reads them from the
+screen and title of Claude Code and OpenCode. Wait for `working` first:
+right after `run`, the agent hasn't started yet and the pane has no agent. If `blocked` comes back,
 read the pane and tell the user what it asks; don't answer it.
 
 To see what another pane's agent changed, use `kibann pane diff P` (or

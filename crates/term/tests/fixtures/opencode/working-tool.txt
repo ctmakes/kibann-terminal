@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command      ⠹ Running echo hi command       +
+     Let it rain.
+
+     Build · Big Pickle · 1m 4s · 60.0 tok/s
+
+  ┃
+  ┃  Run the shell command: sleep 12 && echo ok. Then reply with one word.
+  ┃
+
+     + Thought · 406ms
+
+  ┃
+  ┃  ⠼ sleep 12 && echo ok
+  ┃
+
+     Press ctrl+b to move running work to the background
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt               ↓ 1 shell · 9.5K (5%)  ctrl+p commands

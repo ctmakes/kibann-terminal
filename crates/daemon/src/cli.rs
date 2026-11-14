@@ -51,7 +51,8 @@ usage: kibann <command>
                                     full-screen viewer that follows changes
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
-  skill show | skill install        the guide for agents (to ~/.claude/skills/kibann)
+  skill show | skill install        the guide for agents (to ~/.claude/skills/kibann,
+                                    read by Claude Code and OpenCode)
 
 P is a pane id like p3, or --current (this pane, from $KIBANN_PANE).
 Without P where one is optional, the calling pane is used.";
@@ -858,7 +859,10 @@ fn skill_install() -> Out {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("SKILL.md");
     std::fs::write(&path, SKILL)?;
-    Ok(Some(json!({"installed": path})))
+    // OpenCode reads Claude Code's skills folder too.
+    Ok(Some(
+        json!({"installed": path, "read_by": ["Claude Code", "OpenCode"]}),
+    ))
 }
 
 #[cfg(test)]

@@ -1,0 +1,24 @@
+title: OC | Testing sleep 20 command
+   Testing sleep 20 command      +
+  ┃
+  ┃  Run the shell command: sleep 20 && echo done. Then reply with one word.
+  ┃
+
+     + Thought · 609ms
+
+  ┃
+  ┃  $ sleep 20 && echo done
+  ┃
+  ┃  done
+  ┃
+
+     Done
+
+     Build · Big Pickle · 24.5s · 18.7 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/kbz/ocwork                           8.3K (4%)  ctrl+p commands

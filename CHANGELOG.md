@@ -21,8 +21,8 @@ The first public build, for Macs with Apple silicon.
 - Every pane shows where it is: the repo, branch, worktree, uncommitted
   files and ahead/behind, kept current as files change. Click the count to
   see the diff.
-- Agent status at a glance: a dot on each pane running Claude Code
-  (working, waiting for you, finished), rolled up on tabs and the Dock
+- Agent status at a glance: a dot on each pane running Claude Code or
+  OpenCode (working, waiting for you, finished), rolled up on tabs and the Dock
   icon, with a notification when an agent you aren't looking at waits or
   finishes. Clicking it shows the pane.
 - A sidebar of every pane grouped by repository, with live previews; it
@@ -30,7 +30,8 @@ The first public build, for Macs with Apple silicon.
 - About 900 themes with a live picker; the whole window follows the theme.
   Font family and size in the config, and Cmd+= / Cmd+- to zoom.
 - A `kibann` command in every pane, so agents can open panes, run
-  commands, read output and wait on each other.
+  commands, read output and wait on each other; `kibann skill install`
+  teaches it to Claude Code and OpenCode.
 - An icon in the menu bar: closing the window (or Cmd+Q) keeps the app
   running there, so agents can still notify you, with a dot when one waits. Its menu
   shows the version and brings the window back; its Quit ends everything.

@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command        Running echo hi command       +
+     Every evening at dusk he climbed, oil can in hand, and spoke to it softly
+     as a man speaks to a horse. Steady now. Steady. He trimmed the w
+
+     Build · Big Pickle · 6.0s · interrupted
+
+  ┃
+  ┃  Use your question tool to ask me whether I prefer red or blue. Do
+  ┃  nothing else.
+  ┃
+
+     + Thought · 1.0s
+
+     → Asked 1 question
+
+     Build · Big Pickle · 14.5s · 54.5 tok/s · interrupted
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/kbz/ocwork                           9.0K (4%)  ctrl+p commands

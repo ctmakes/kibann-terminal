@@ -1,0 +1,24 @@
+title: OC | Running echo hi command
+   Testing sleep 20 command      ! Running echo hi command       +
+
+     + Thought · 25ms
+
+  ┃
+  ┃  ← Edit notes.txt
+  ┃
+
+  ┃
+  ┃  △ Permission required
+  ┃    → Edit notes.txt
+  ┃
+  ┃  1 - hello
+  ┃  1 + goodbye
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject  ctrl+f fullscreen  ⇆ select  enter con
+  ┃

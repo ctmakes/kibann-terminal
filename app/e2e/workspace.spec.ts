@@ -1151,6 +1151,21 @@ test.describe("notifications", () => {
   const agent = (page: Page, pane: number, s: string) =>
     page.evaluate(([p, st]) => (window as any).__ws.setAgent(p, st), [pane, s] as const);
 
+  test("other agents are named in their notifications", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+t"); // pane 2, focused; pane 1 is in the hidden tab
+    const set = (s: string) =>
+      page.evaluate((st) => (window as any).__ws.setAgent(1, st, "opencode"), s);
+    await set("working");
+    await set("blocked");
+    await settle(page);
+    expect((await notes(page)).at(-1)).toMatchObject({ pane: 1, title: "OpenCode is waiting for you" });
+    await set("working");
+    await set("idle");
+    await settle(page);
+    expect((await notes(page)).at(-1)).toMatchObject({ pane: 1, title: "OpenCode finished" });
+  });
+
   test("an agent elsewhere that waits or finishes says so; the pane in view doesn't", async ({ page }) => {
     await open(page);
     await press(page, "Meta+t"); // pane 2, focused; pane 1 is in the hidden tab

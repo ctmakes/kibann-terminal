@@ -60,6 +60,7 @@ export function arrivals(prev: StatusMap, next: StatusMap, looking: PaneId | nul
 /** How a notification names an agent: `claude` is Claude Code. */
 export function agentName(agent: string): string {
   if (agent === "claude") return "Claude Code";
+  if (agent === "opencode") return "OpenCode";
   return agent ? agent[0].toUpperCase() + agent.slice(1) : "An agent";
 }
 

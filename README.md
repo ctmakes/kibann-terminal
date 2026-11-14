@@ -2,7 +2,7 @@
 
 A terminal for working alongside coding agents, built on libghostty-vt (Ghostty's terminal core) in a Tauri app.
 
-- **Agents work where you can see them.** Claude Code (or any script) running in a pane can open splits and tabs beside you, run commands in them, read their output and wait on them. You can click into any of those panes and take over.
+- **Agents work where you can see them.** Claude Code, OpenCode (or any script) running in a pane can open splits and tabs beside you, run commands in them, read their output and wait on them. You can click into any of those panes and take over.
 - **See every agent at a glance.** A dot on each pane shows whether its agent is working, waiting for you or finished. Tabs, the sidebar and the Dock show it too, and you get a notification when an agent you aren't watching needs you.
 - **Every pane knows where it is.** Each pane shows its repo, worktree, branch, uncommitted files and ahead/behind. Click the count to see the diff.
 - **Shells outlive the window.** A background process keeps your shells running when the app closes. Tabs and splits come back after a restart.
@@ -76,10 +76,10 @@ kibann pane run "$p" "npm test" --wait                       # {"exit_code":0}
 kibann pane read "$p" --source recent --lines 40
 kibann pane wait "$p" --regex '^ready' --timeout 30000
 kibann pane list        # also: tab new, pane send / keys / focus / close / current
-kibann skill install    # the guide for Claude Code, to ~/.claude/skills/kibann
+kibann skill install    # the guide for agents, to ~/.claude/skills/kibann
 ```
 
-Run `kibann skill install` once, and Claude Code learns to use it.
+Run `kibann skill install` once, and Claude Code and OpenCode learn to use it (OpenCode reads Claude Code's skills folder too).
 
 - **Environment:** each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH`.
 - **Output:** results are JSON. Errors are JSON on stderr with exit code 1, and a bad command line exits 2.
@@ -88,7 +88,7 @@ Run `kibann skill install` once, and Claude Code learns to use it.
 
 ### Agent status at a glance
 
-Panes running Claude Code show what it is doing with a dot in their top-right corner:
+Panes running Claude Code or OpenCode show what it is doing with a dot in their top-right corner:
 
 - **Green, pulsing:** it's working.
 - **Amber:** it's waiting for you, at a permission prompt or a question.
@@ -96,14 +96,14 @@ Panes running Claude Code show what it is doing with a dot in their top-right co
 
 An idle agent and a plain shell show nothing. Each tab shows its most urgent dot (amber, then blue, then green), and the Dock icon counts the agents waiting for you.
 
-Kibann reads this from Claude Code's title and the bottom of its screen rather than from hooks, which miss an Esc mid-turn or a cancelled prompt (an approach learned from [herdr](https://github.com/herdrdev/herdr)). Agents and scripts can use it too:
+Kibann reads this from the agent's title and the bottom of its screen rather than from hooks, which miss an Esc mid-turn or a cancelled prompt (an approach learned from [herdr](https://github.com/herdrdev/herdr)). The signals were checked against Claude Code 2.1.323 and OpenCode 2.2.7; a new version that redraws its screen may need them updated. Agents and scripts can use it too:
 - `kibann pane list` shows each pane's `agent` and `state`.
 - `kibann pane wait P --until done,blocked` waits for one of those states.
 - A script can report its own state with `kibann pane report --agent NAME --state working|idle|blocked`, and stop with `pane release`.
 
 ### Notifications
 
-When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so, for example "Claude Code is waiting for you", with the repo, branch and pane title. A pane counts as looked at when it's the focused pane and the window is in front. With the window behind, every pane counts as not looked at. Clicking a notification brings the window forward and shows that pane. Turn them off with `agent-notifications = false`.
+When an agent in a pane you aren't looking at starts waiting for you or finishes, a system notification says so, for example "Claude Code is waiting for you" or "OpenCode finished", with the repo, branch and pane title. A pane counts as looked at when it's the focused pane and the window is in front. With the window behind, every pane counts as not looked at. Clicking a notification brings the window forward and shows that pane. Turn them off with `agent-notifications = false`.
 
 ### Where each pane is
 

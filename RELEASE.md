@@ -76,6 +76,7 @@ CI can't see these. Use the `.dmg` from the draft.
 | b | Splits, tabs, vim, htop, Claude Code | Look and behave right |
 | c | Quit, reopen | The shells are still running |
 | d | An agent waits in a background tab | The notification says Kibann, with its icon; clicking it shows the pane |
+| d1 | OpenCode in a background tab: ask it to run a command, with `"permission": {"bash": "ask"}` in its config | The pane's dot turns amber and "OpenCode is waiting for you" appears; after Allow, green, then blue when it finishes |
 | d2 | Close the window; an agent waits | The menu-bar icon gets a dot and "1 agent is waiting"; that item, the icon's Show and the Dock icon bring the window back |
 | d3 | Close the last pane, then the icon's Show | The window comes back with a fresh shell |
 | d4 | The icon's Quit with shells open | It asks; Quit ends the shells, and the next start reopens the tabs with fresh shells |
