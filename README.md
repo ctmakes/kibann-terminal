@@ -334,4 +334,5 @@ cargo run -p term --bin vt-replay -- out.cast -o out.jsonl # frames a session wo
 
 ## License
 
-MIT; see [LICENSE](LICENSE). The bundled themes come from [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) (MIT).
+MIT see [LICENSE](LICENSE).
+The bundled themes come from [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) (MIT).
