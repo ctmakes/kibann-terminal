@@ -24,7 +24,12 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 
-# The menu-bar icon (tray.rs).
+# The menu-bar / tray icon (tray.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Opening the app again shows the running one (macOS does this itself).
+tauri-plugin-single-instance = "2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 # The installed monospaced fonts (fonts.rs).

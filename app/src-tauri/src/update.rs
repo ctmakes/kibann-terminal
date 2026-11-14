@@ -149,7 +149,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
         Ok(bytes) => {
             set(app, |s| s.state = "ready");
             ready(app, &update);
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             crate::tray::set_update(app, update.version.clone());
             *app.state::<Ready>().0.lock().unwrap() = Some((update, bytes));
         }

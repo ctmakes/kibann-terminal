@@ -4,6 +4,8 @@ run-name: Release ${{ github.ref_name }}
 # A version tag (scripts/bump-version.sh pushes one, after the release
 # commit reaches main) builds, signs and notarizes the macOS app and
 # attaches it, with the updater's latest.json, to a draft GitHub release.
+# Then the Linux builds (AppImage and .deb, x86_64 and arm64) join the same
+# draft and latest.json, one at a time so they don't race on it.
 # Publishing the draft is by hand (RELEASE.md). A tag on a commit that
 # isn't on main builds nothing.
 
@@ -168,3 +170,74 @@ jobs:
           spctl --assess --type execute --verbose "$app"
           xcrun stapler validate "$app"
           xcrun stapler validate "$dmg" || echo "::warning::the dmg itself isn't stapled (the app inside is)"
+
+  linux:
+    name: Linux (${{ matrix.arch }})
+    needs: macos
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    # The older Ubuntu: its glibc lets the builds run on more distros.
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux packages for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+            patchelf file
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.arch }}
+      - name: Install npm packages
+        working-directory: app
+        run: npm ci
+
+      - name: Build and upload
+        uses: tauri-apps/tauri-action@v1
+        timeout-minutes: 45
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: Kibann Terminal ${{ github.ref_name }}
+          releaseDraft: true
+          uploadUpdaterJson: true
+          args: --bundles appimage,deb --config src-tauri/tauri.release.conf.json
+
+      # The AppImage starts (under a virtual display) and its update bundle
+      # is signed.
+      - name: Check the build
+        shell: bash
+        run: |
+          bundle=target/release/bundle
+          appimage=$(ls "$bundle"/appimage/*.AppImage | head -1)
+          ls "$bundle"/appimage/*.AppImage.sig
+          ls "$bundle"/deb/*.deb
+          sudo apt-get install -y xvfb
+          chmod +x "$appimage"
+          export APPIMAGE_EXTRACT_AND_RUN=1 KIBANN_SOCKET=/tmp/kbci/s.sock
+          xvfb-run -a timeout 20 "$appimage" > app.log 2>&1 || code=$?
+          cat app.log
+          # timeout's 124: it was still running after 20 s, as it should.
+          [ "${code:-0}" = 124 ] || { echo "::error::the AppImage exited early (${code:-0})"; exit 1; }

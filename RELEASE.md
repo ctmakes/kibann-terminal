@@ -86,6 +86,9 @@ CI can't see these. Use the `.dmg` from the draft.
 | d5 | The icon in a light and a dark menu bar; Help → What's New | The K is clear in both; Settings opens on Updates, with this version marked |
 | d6 | Cmd+, → General: turn a switch off, then Open in Editor | The config file opens in the text editor with the line in it |
 | d7 | Settings → Appearance: pick a font from the list, then − / + | The panes change font and size within a second |
+| l1 | Linux (Ubuntu 24.04, GNOME): run the AppImage; splits, vim, htop, a big `cat` | Draws and types without lag; fonts look right at the desktop's scale |
+| l2 | Linux: close the window; an agent waits | The tray icon gets a dot and a notification appears; the tray's Show brings the window back |
+| l3 | Linux: install the `.deb`, open it from the app menu twice | One window; the second launch shows it |
 | e | With the previous release installed, wait for (or Check for Updates…) the notice, Restart to update | The new version opens; shells kept, or the protocol prompt if the notes say so |
 
 ## How updates reach users

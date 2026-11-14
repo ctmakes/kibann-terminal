@@ -1081,9 +1081,10 @@ test.describe("settings modal", () => {
     await input.fill("Fira Code");
     await input.press("Enter");
     expect(await saved(page)).toEqual([["font-family", ["Fira Code"]]]);
-    // No menu bar off macOS.
+    // Off macOS: the tray, and Ctrl in the size hint.
+    await expect(page.locator(".settings-body")).toContainText("Ctrl+= and Ctrl+-");
     await tab(page, "general");
-    await expect(page.locator('.settings-switch[data-key="menu-bar-icon"]')).toHaveCount(0);
+    await expect(page.locator(".settings-body")).toContainText("Keep running in the tray");
     await expect(page.locator(".settings-body")).toContainText("Show in Folder");
   });
 

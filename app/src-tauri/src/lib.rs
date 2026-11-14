@@ -4,13 +4,13 @@
 //! frontend's commands into daemon requests, and frames and layouts into
 //! channel messages and events.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod fonts;
 mod open;
 mod theme;
 #[cfg(target_os = "macos")]
 mod titlebar;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod tray;
 mod update;
 
@@ -362,7 +362,7 @@ fn changelog(app: AppHandle) -> (String, String) {
 /// The Dock badge: how many agents wait for the user (none: no badge).
 #[tauri::command]
 fn set_badge(window: tauri::WebviewWindow, count: u32) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     tray::set_waiting(window.app_handle(), count);
     let r = window.set_badge_count((count > 0).then_some(i64::from(count)));
     if cfg!(debug_assertions) {
@@ -507,11 +507,10 @@ fn reload_choice(app: &AppHandle) {
         changed
     };
     if changed {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        tray::set_visible(app, settings.menu_bar_icon);
         #[cfg(target_os = "macos")]
-        {
-            tray::set_visible(app, settings.menu_bar_icon);
-            set_quit_labels(app, settings.menu_bar_icon);
-        }
+        set_quit_labels(app, settings.menu_bar_icon);
         let _ = app.emit("settings", settings);
     }
 }
@@ -595,9 +594,9 @@ fn config_open(app: AppHandle, reveal: bool) -> Result<(), String> {
 /// (Settings then takes a typed name).
 #[tauri::command]
 async fn fonts_list() -> Option<Vec<String>> {
-    #[cfg(target_os = "macos")]
-    return Some(fonts::monospaced());
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    return Some(fonts::monospaced()).filter(|f| !f.is_empty());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     None
 }
 
@@ -667,9 +666,9 @@ fn on_notification_click(app: &AppHandle) {
         let Some(pane) = done.notification().map(|n| n.id()) else {
             return;
         };
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         tray::show_window(&handle);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         if let Some(w) = handle.get_webview_window("main") {
             let _ = w.unminimize();
             let _ = w.show();
@@ -747,7 +746,7 @@ fn app_exe() -> Option<String> {
 }
 
 /// End every shell and the daemon, then quit.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn quit_ending_sessions(app: &AppHandle) {
     if let Some(t) = app.try_state::<Term>() {
         let _ = t.send(ClientMsg::Shutdown);
@@ -967,6 +966,20 @@ pub fn run() {
             tauri::async_runtime::spawn(async move { update::check(&app, true).await });
         }
     });
+    // No app menu on Linux: the only menu is the tray icon's.
+    #[cfg(target_os = "linux")]
+    let builder = builder.on_menu_event(|app, event| {
+        let id = event.id().0.as_str();
+        if id.starts_with(tray::PREFIX) {
+            tray::on_menu(app, id);
+        }
+    });
+    // Opening the app again (from the launcher, with the window hidden in
+    // the tray) shows the running one. It must be the first plugin.
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        tray::show_window(app);
+    }));
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1017,7 +1030,7 @@ pub fn run() {
             watch_config(handle.clone());
             on_notification_click(handle);
             update::start(handle);
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
                 let on = app
                     .state::<Mutex<proto::config::Settings>>()
@@ -1033,7 +1046,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             // With the menu-bar icon, closing the window hides it: the app
             // keeps running (see tray.rs).
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if tray::enabled(window.app_handle()) {
                     api.prevent_close();

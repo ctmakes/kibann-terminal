@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.2.0] - Unreleased
+
+- Linux: an AppImage and a `.deb`, for x86_64 and arm64, that update
+  themselves. A tray icon keeps it running when the window closes (where
+  the desktop shows tray icons), Settings lists the installed monospaced
+  fonts, and opening it again shows the running window.
+
 ## [0.1.0] - 2026-11-14
 
 The first public build, for Macs with Apple silicon.

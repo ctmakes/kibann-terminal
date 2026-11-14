@@ -1,4 +1,5 @@
-//! The menu-bar icon (macOS). With it, closing the window only hides it:
+//! The menu-bar icon (macOS), or the tray icon (Linux, where the desktop
+//! has a tray: GNOME needs the AppIndicator extension). With it, closing the window only hides it:
 //! the app keeps running, so agents in the shells can still notify, and the
 //! icon brings the window back. Its Quit ends everything: the shells, the
 //! daemon and the app. `menu-bar-icon = false` in the config turns it off
@@ -114,12 +115,22 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     m.build()
 }
 
+/// The icon: on macOS a template (black, drawn to suit the menu bar); on
+/// Linux the app's colored icon, as panels are light or dark.
 fn icon(waiting: bool) -> tauri::Result<Image<'static>> {
-    Image::from_bytes(if waiting {
+    #[cfg(target_os = "macos")]
+    let bytes: &[u8] = if waiting {
         include_bytes!("../icons/tray-dot.png")
     } else {
         include_bytes!("../icons/tray.png")
-    })
+    };
+    #[cfg(not(target_os = "macos"))]
+    let bytes: &[u8] = if waiting {
+        include_bytes!("../icons/tray-color-dot.png")
+    } else {
+        include_bytes!("../icons/tray-color.png")
+    };
+    Image::from_bytes(bytes)
 }
 
 /// Make the icon (hidden when the config turns it off).
@@ -127,7 +138,7 @@ pub fn create(app: &AppHandle, visible: bool) -> tauri::Result<()> {
     app.manage(Tray::default());
     let tray = TrayIconBuilder::with_id(ID)
         .icon(icon(false)?)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Kibann Terminal")
         .menu(&menu(app)?)
         .show_menu_on_left_click(true)
@@ -145,12 +156,71 @@ pub fn set_visible(app: &AppHandle, visible: bool) {
     }
 }
 
-/// Whether closing the window should only hide it.
+/// Whether closing the window should only hide it: the icon is on and,
+/// on Linux, a tray shows it (or the window could never come back).
 pub fn enabled(app: &AppHandle) -> bool {
-    app.state::<Mutex<proto::config::Settings>>()
+    let on = app
+        .state::<Mutex<proto::config::Settings>>()
         .lock()
         .unwrap()
-        .menu_bar_icon
+        .menu_bar_icon;
+    on && has_tray()
+}
+
+#[cfg(target_os = "macos")]
+fn has_tray() -> bool {
+    true
+}
+
+/// Whether the desktop shows tray icons: something owns the
+/// StatusNotifierWatcher name on the session bus (KDE, GNOME with the
+/// AppIndicator extension, XFCE, Cinnamon, …). Asked each time, as the
+/// tray can come and go; unknown counts as no.
+#[cfg(target_os = "linux")]
+fn has_tray() -> bool {
+    const NAME: &str = "org.kde.StatusNotifierWatcher";
+    let run = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let gdbus = run(
+        "gdbus",
+        &[
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.DBus",
+            "--object-path",
+            "/org/freedesktop/DBus",
+            "--method",
+            "org.freedesktop.DBus.NameHasOwner",
+            NAME,
+        ],
+    );
+    let reply = gdbus.or_else(|| {
+        run(
+            "dbus-send",
+            &[
+                "--session",
+                "--print-reply",
+                "--dest=org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus.NameHasOwner",
+                &format!("string:{NAME}"),
+            ],
+        )
+    });
+    reply.is_some_and(|r| says_true(&r))
+}
+
+/// `(true,)` from gdbus, `boolean true` from dbus-send.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn says_true(reply: &str) -> bool {
+    reply.contains("true")
 }
 
 fn refresh(app: &AppHandle, waiting: bool) {
@@ -163,7 +233,7 @@ fn refresh(app: &AppHandle, waiting: bool) {
     if let Ok(i) = icon(waiting) {
         let _ = t.set_icon(Some(i));
         // Setting the image drops its template flag.
-        let _ = t.set_icon_as_template(true);
+        let _ = t.set_icon_as_template(cfg!(target_os = "macos"));
     }
 }
 
@@ -209,7 +279,8 @@ pub fn show_window(app: &AppHandle) {
     let _ = app.emit("window-shown", ());
 }
 
-/// Close the window but keep running.
+/// Close the window but keep running (Cmd+Q on macOS).
+#[cfg(target_os = "macos")]
 pub fn hide_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let r = w.hide();
@@ -324,6 +395,13 @@ mod tests {
                 Entry::Separator => "-",
             })
             .collect()
+    }
+
+    #[test]
+    fn reading_the_bus() {
+        assert!(super::says_true("(true,)\n"));
+        assert!(super::says_true("method return ...\n   boolean true\n"));
+        assert!(!super::says_true("(false,)\n"));
     }
 
     #[test]

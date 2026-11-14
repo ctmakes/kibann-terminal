@@ -12,9 +12,16 @@ Kibann is at its first release (0.1.0). See [CHANGELOG.md](CHANGELOG.md) for wha
 
 ## Install
 
-Download the `.dmg` from the [latest release](https://github.com/ctmakes/kibann-terminal/releases/latest), open it, and drag **Kibann Terminal** to Applications. Builds are for Macs with Apple silicon. They are signed and notarized, and they update themselves.
+**macOS** (Apple silicon): download the `.dmg` from the [latest release](https://github.com/ctmakes/kibann-terminal/releases/latest), open it, and drag **Kibann Terminal** to Applications. Builds are signed and notarized, and they update themselves.
 
-Linux works when built from source (see [Development](#development)). Windows doesn't yet: sessions there run inside the app and end with it.
+**Linux** (x86_64 and arm64, from 0.2.0): download either package from the same page.
+- **AppImage:** make it executable (`chmod +x Kibann*.AppImage`) and run it. It updates itself.
+- **`.deb`** (Debian, Ubuntu and their relatives): `sudo apt install ./kibann*.deb`. Updates install with `dpkg`, so they ask for your password.
+- **What it needs:** WebKitGTK 4.1, which the `.deb` installs and most desktops already have.
+- **Tray icon:** it keeps running in the tray when you close the window, on desktops that show tray icons: KDE, Cinnamon, XFCE, and GNOME with the AppIndicator extension (Ubuntu has it on). Without a tray, closing the window quits the app, and your shells keep running for next time.
+- **Checked on:** Ubuntu 24.04 in a container. If the window is blank on an NVIDIA GPU, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+
+**Windows** doesn't work yet: sessions there run inside the app and end with it.
 
 ## Using it
 
@@ -284,6 +291,15 @@ KIBANN_COMMAND="htop" npm run tauri dev           # run a program instead of the
 KIBANN_LAYOUT="right,down,tab" npm run tauri dev  # start with splits and tabs
 KIBANN_RECORD=/tmp/s.cast npm run tauri dev       # record sessions (asciicast) for debugging
 ```
+
+On Linux you also need the WebKitGTK and GTK development packages. On Debian or Ubuntu:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+npm run tauri build -- --bundles appimage,deb
+```
+
+From a Mac, `scripts/linux-dev.sh` builds and runs the Linux app in Docker under a virtual display, and takes screenshots (`image`, `build`, `run`, `shot`; `scripts/linux/smoke.sh` drives it with the CLI).
 
 The daemon is the app's own executable, run with `--daemon`. Dev builds use `daemon-dev.sock` and replace a daemon left by an earlier build. As a result, a Rust rebuild ends your dev sessions, but sessions in the installed app are unaffected.
 

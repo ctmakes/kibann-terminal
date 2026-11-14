@@ -529,15 +529,16 @@ export class SettingsModal {
           this.switch("agent-notifications", s.agent_notifications, (x, on) => (x.agent_notifications = on)),
         ),
       ];
-      if (this.hooks.platform === "mac") {
-        rows.push(
-          this.row(
-            "Keep running in the menu bar",
-            "Closing the window or Cmd+Q hides it, so agents can still notify you. Quit Kibann Terminal… ends everything.",
-            this.switch("menu-bar-icon", s.menu_bar_icon, (x, on) => (x.menu_bar_icon = on)),
-          ),
-        );
-      }
+      const mac = this.hooks.platform === "mac";
+      rows.push(
+        this.row(
+          mac ? "Keep running in the menu bar" : "Keep running in the tray",
+          mac
+            ? "Closing the window or Cmd+Q hides it, so agents can still notify you. Quit Kibann Terminal… ends everything."
+            : "Closing the window hides it to the tray icon, so agents can still notify you; its Quit ends everything. Needs a desktop with a tray (on GNOME, the AppIndicator extension); without one, closing quits.",
+          this.switch("menu-bar-icon", s.menu_bar_icon, (x, on) => (x.menu_bar_icon = on)),
+        ),
+      );
       rows.push(
         this.row(
           "Preview panes in the sidebar",
@@ -682,7 +683,11 @@ export class SettingsModal {
       this.section(
         "Font",
         this.row("Family", help, family),
-        this.row("Size", "Cmd+= and Cmd+- change it for now; this is where they return.", sizeBox),
+        this.row(
+          "Size",
+          `${this.hooks.platform === "mac" ? "Cmd+= and Cmd+-" : "Ctrl+= and Ctrl+-"} change it for now; this is where they return.`,
+          sizeBox,
+        ),
       ),
     );
     return out;
