@@ -193,6 +193,9 @@ export class Workspace {
       onShortcuts: () => this.shortcuts.toggle(),
       onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
       onSettings: opts.settings ? () => this.run({ kind: "settings" }) : undefined,
+      onUpdate: opts.settings
+        ? () => void opts.settings?.installUpdate().catch((e) => this.notice(`Couldn't update: ${e}`))
+        : undefined,
       settingsKey: () => keyFor({ kind: "settings" }, this.platform),
       shortcutKey: sheetKey,
       sidebarKey: () => keyFor({ kind: "sidebar" }, this.platform),
@@ -377,9 +380,11 @@ export class Workspace {
     this.settings?.show(tab);
   }
 
-  /** Where updating stands, for Settings → Updates. */
+  /** Where updating stands, for Settings → Updates and the sidebar's
+   * update button. */
   setUpdateStatus(u: UpdateStatus): void {
     this.settings?.setUpdate(u);
+    this.sidebar.setUpdate(u.state === "ready" ? u.version : null);
   }
 
   /** The config file's path, problems and themes, for Settings. */

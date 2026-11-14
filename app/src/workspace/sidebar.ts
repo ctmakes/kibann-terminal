@@ -28,6 +28,28 @@ const THEME_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" 
 const KEYS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
 <rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/>
 <path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6" stroke-linecap="round" stroke-width="1.4"/></svg>`;
+/** Update: an arrow up. */
+const UPDATE_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+<path d="M8 13V3.5M3.75 7.5L8 3.25l4.25 4.25"/></svg>`;
+/** Below this width the update button drops its word. */
+const UPDATE_WORD_MIN = 200;
+/** The red dot that says an update is ready. */
+function redDot(): HTMLSpanElement {
+  const d = document.createElement("span");
+  d.className = "update-dot";
+  Object.assign(d.style, {
+    position: "absolute",
+    top: "1px",
+    right: "1px",
+    width: "7px",
+    height: "7px",
+    borderRadius: "50%",
+    background: "#e5484d",
+    boxShadow: "0 0 0 1.5px var(--k-sidebar)",
+    pointerEvents: "none",
+  });
+  return d;
+}
 /** Dragging the edge narrower than this collapses it. */
 const COLLAPSE_AT = 90;
 /** The preview redraws at most this often. */
@@ -134,6 +156,8 @@ export interface SidebarOptions {
   onShortcuts(): void;
   onThemes?(): void;
   onSettings?(): void;
+  /** The update button (shown once a new version is downloaded). */
+  onUpdate?(): void;
   /** Settings' key, shown in the gear's tooltip. */
   settingsKey?: () => string;
   /** The shortcut sheet's key, shown in its button's tooltip. */
@@ -158,6 +182,13 @@ export class Sidebar {
   /** The bottom row's buttons besides collapse, hidden on the rail. */
   private readonly extras: HTMLElement[] = [];
   private readonly bar: HTMLDivElement;
+  /** Restart into a downloaded version; shown while one waits. */
+  private readonly updateBtn: HTMLDivElement;
+  private readonly updateWord: HTMLSpanElement;
+  /** On the rail, the red dot goes on the expand button instead. */
+  private readonly foldDot: HTMLSpanElement;
+  /** The downloaded version, or null. */
+  private updateVersion: string | null = null;
   private last: { git: GitMap; status: StatusMap } | null = null;
 
   constructor(private readonly opts: SidebarOptions) {
@@ -292,9 +323,37 @@ export class Sidebar {
     const spacer = document.createElement("div");
     spacer.style.flex = "1";
     this.extras.push(spacer);
+    // A downloaded update: a button that stays (the notice can be dismissed).
+    this.updateBtn = icon("sidebar-update", UPDATE_ICON, () => opts.onUpdate?.());
+    Object.assign(this.updateBtn.style, {
+      position: "relative",
+      alignItems: "center",
+      gap: "4px",
+      marginRight: "2px",
+      color: "var(--k-strong)",
+      border: "1px solid var(--k-divider)",
+    });
+    this.updateBtn.addEventListener("mouseleave", () => (this.updateBtn.style.color = "var(--k-strong)"));
+    this.updateWord = document.createElement("span");
+    this.updateWord.textContent = "Update";
+    this.updateBtn.append(this.updateWord, redDot());
+    tooltip(this.updateBtn, () => `Kibann Terminal ${this.updateVersion} is ready: restart to update`, "", true);
     const fold = icon("sidebar-fold", ICON, () => this.toggle());
-    tooltip(fold, () => (this.expanded ? "Collapse sidebar" : "Expand sidebar"), opts.sidebarKey, true);
-    this.bar.append(...this.extras, fold);
+    fold.style.position = "relative";
+    this.foldDot = redDot();
+    fold.append(this.foldDot);
+    tooltip(
+      fold,
+      () =>
+        this.expanded
+          ? "Collapse sidebar"
+          : this.updateVersion
+            ? `Expand sidebar (Kibann Terminal ${this.updateVersion} is ready)`
+            : "Expand sidebar",
+      opts.sidebarKey,
+      true,
+    );
+    this.bar.append(...this.extras, this.updateBtn, fold);
     this.el.append(this.bar, this.list, grip, this.preview);
     this.load();
     this.apply();
@@ -326,10 +385,21 @@ export class Sidebar {
     this.el.dataset.expanded = String(this.expanded);
     // The rail has room for one button.
     for (const e of this.extras) e.style.display = this.expanded ? "flex" : "none";
+    const update = this.updateVersion !== null;
+    this.updateBtn.style.display = update && this.expanded ? "flex" : "none";
+    this.updateWord.style.display = this.width >= UPDATE_WORD_MIN ? "" : "none";
+    this.foldDot.style.display = update && !this.expanded ? "" : "none";
     this.bar.style.justifyContent = this.expanded ? "flex-end" : "center";
     this.bar.style.padding = this.expanded ? "0 6px" : "0";
     this.bar.style.right = this.expanded ? "5px" : "0";
     this.opts.onResize();
+  }
+
+  /** A downloaded version waiting for a restart, or null. */
+  setUpdate(version: string | null): void {
+    if (version === this.updateVersion) return;
+    this.updateVersion = version;
+    this.apply();
   }
 
   private load(): void {

@@ -90,6 +90,7 @@ CI can't see these. Use the `.dmg` from the draft.
 | l2 | Linux: close the window; an agent waits | The tray icon gets a dot and a notification appears; the tray's Show brings the window back |
 | l3 | Linux: install the `.deb`, open it from the app menu twice | One window; the second launch shows it |
 | e | With the previous release installed, wait for (or Check for Updates…) the notice, Restart to update | The new version opens; shells kept, or the protocol prompt if the notes say so |
+| e2 | Before restarting in e: dismiss the notice | The menu-bar/tray icon shows a "!"; the sidebar's bottom row has Update (a red dot on the rail), and it restarts into the new version |
 
 ## How updates reach users
 

@@ -5,8 +5,9 @@
 //! daemon and the app. `menu-bar-icon = false` in the config turns it off
 //! (closing the window quits the app, as before).
 //!
-//! The icon shows a dot while an agent waits for the user; its menu says
-//! how many, the version, and a downloaded update.
+//! The icon shows a dot while an agent waits for the user and a "!" when
+//! an update is downloaded; its menu says how many, the version, and the
+//! update.
 
 use std::sync::Mutex;
 
@@ -116,19 +117,22 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 }
 
 /// The icon: on macOS a template (black, drawn to suit the menu bar); on
-/// Linux the app's colored icon, as panels are light or dark.
-fn icon(waiting: bool) -> tauri::Result<Image<'static>> {
+/// Linux the app's colored icon, as panels are light or dark. A dot: an
+/// agent waits; a "!": an update is ready (red on Linux).
+fn icon(waiting: bool, update: bool) -> tauri::Result<Image<'static>> {
     #[cfg(target_os = "macos")]
-    let bytes: &[u8] = if waiting {
-        include_bytes!("../icons/tray-dot.png")
-    } else {
-        include_bytes!("../icons/tray.png")
+    let bytes: &[u8] = match (waiting, update) {
+        (false, false) => include_bytes!("../icons/tray.png"),
+        (true, false) => include_bytes!("../icons/tray-dot.png"),
+        (false, true) => include_bytes!("../icons/tray-update.png"),
+        (true, true) => include_bytes!("../icons/tray-dot-update.png"),
     };
     #[cfg(not(target_os = "macos"))]
-    let bytes: &[u8] = if waiting {
-        include_bytes!("../icons/tray-color-dot.png")
-    } else {
-        include_bytes!("../icons/tray-color.png")
+    let bytes: &[u8] = match (waiting, update) {
+        (false, false) => include_bytes!("../icons/tray-color.png"),
+        (true, false) => include_bytes!("../icons/tray-color-dot.png"),
+        (false, true) => include_bytes!("../icons/tray-color-update.png"),
+        (true, true) => include_bytes!("../icons/tray-color-dot-update.png"),
     };
     Image::from_bytes(bytes)
 }
@@ -137,7 +141,7 @@ fn icon(waiting: bool) -> tauri::Result<Image<'static>> {
 pub fn create(app: &AppHandle, visible: bool) -> tauri::Result<()> {
     app.manage(Tray::default());
     let tray = TrayIconBuilder::with_id(ID)
-        .icon(icon(false)?)
+        .icon(icon(false, false)?)
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Kibann Terminal")
         .menu(&menu(app)?)
@@ -223,14 +227,19 @@ fn says_true(reply: &str) -> bool {
     reply.contains("true")
 }
 
-fn refresh(app: &AppHandle, waiting: bool) {
+fn refresh(app: &AppHandle) {
     let Some(t) = app.tray_by_id(ID) else {
         return;
+    };
+    let (waiting, update) = {
+        let s = app.state::<Tray>();
+        let s = s.0.lock().unwrap();
+        (s.waiting > 0, s.update.is_some())
     };
     if let Ok(m) = menu(app) {
         let _ = t.set_menu(Some(m));
     }
-    if let Ok(i) = icon(waiting) {
+    if let Ok(i) = icon(waiting, update) {
         let _ = t.set_icon(Some(i));
         // Setting the image drops its template flag.
         let _ = t.set_icon_as_template(cfg!(target_os = "macos"));
@@ -249,7 +258,7 @@ pub fn set_waiting(app: &AppHandle, waiting: u32) {
         }
         s.waiting = waiting;
     }
-    refresh(app, waiting > 0);
+    refresh(app);
 }
 
 /// A version was downloaded and installs on restart.
@@ -257,12 +266,8 @@ pub fn set_update(app: &AppHandle, version: String) {
     let Some(tray) = app.try_state::<Tray>() else {
         return;
     };
-    let waiting = {
-        let mut s = tray.0.lock().unwrap();
-        s.update = Some(version);
-        s.waiting
-    };
-    refresh(app, waiting > 0);
+    tray.0.lock().unwrap().update = Some(version);
+    refresh(app);
 }
 
 /// Bring the window back (from the icon, the Dock or a notification).

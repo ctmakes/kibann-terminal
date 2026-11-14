@@ -718,6 +718,32 @@ test.describe("sidebar", () => {
     await expect(gear).toBeHidden();
   });
 
+  test("a downloaded update stays as a button, with a red dot on the rail", async ({ page }) => {
+    await three(page);
+    const btn = page.locator(".sidebar-update");
+    const foldDot = page.locator(".sidebar-fold .update-dot");
+    await expect(btn).toBeHidden();
+    await expect(foldDot).toBeHidden();
+    await page.evaluate(() =>
+      (window as any).__ws.setUpdate({ state: "ready", version: "0.3.0", error: null, checked: 0 }),
+    );
+    // On the rail: only a dot on the expand button.
+    await expect(btn).toBeHidden();
+    await expect(foldDot).toBeVisible();
+    await press(page, "Meta+Shift+b");
+    await expect(foldDot).toBeHidden();
+    await expect(btn).toBeVisible();
+    await btn.hover();
+    await expect(page.locator(".tooltip")).toHaveText("Kibann Terminal 0.3.0 is ready: restart to update");
+    await btn.click();
+    expect(await page.evaluate(() => (window as any).__ws.configCalls)).toContain("install");
+    // Not ready any more (a later check): gone.
+    await page.evaluate(() =>
+      (window as any).__ws.setUpdate({ state: "checking", version: null, error: null, checked: 0 }),
+    );
+    await expect(btn).toBeHidden();
+  });
+
   test("sidebar-preview = false: hovering shows no preview, and Settings turns it back on", async ({ page }) => {
     await three(page);
     await page.evaluate(() => (window as any).__ws.setSettings({ sidebar_preview: false }));

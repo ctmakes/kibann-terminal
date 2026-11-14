@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.2.1] - Unreleased
+
+- A downloaded update is hard to miss: the menu-bar icon (macOS) and the
+  tray icon (Linux) show a "!", and the sidebar's bottom row keeps an
+  Update button (a red dot when the sidebar is collapsed) after its notice
+  is dismissed.
+
 ## [0.2.0] - 2026-11-14
 
 The first public build, for Macs with Apple silicon and for Linux.
