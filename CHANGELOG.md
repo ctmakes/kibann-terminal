@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.3.0] - Unreleased
+
+- Drag the scrollbar to scroll through a pane's history.
+- Your tabs and splits are now saved, so they come back (with fresh
+  shells) after the terminal service ends, for example after "Quit and End
+  Sessions". Until now the layout was never written to disk.
+
 ## [0.2.2] - 2026-11-15
 
 - A pane no longer goes blank after the app sits unattended for a while
