@@ -9,6 +9,8 @@ mod fonts;
 mod open;
 mod theme;
 #[cfg(target_os = "macos")]
+mod titlebar;
+#[cfg(target_os = "macos")]
 mod tray;
 mod update;
 
@@ -991,6 +993,11 @@ pub fn run() {
             #[cfg(not(unix))]
             let client = local()?;
             app.manage(Term { client, channels });
+
+            #[cfg(target_os = "macos")]
+            if let Some(w) = app.get_webview_window("main") {
+                titlebar::install(&w);
+            }
 
             let dark = app
                 .get_webview_window("main")
