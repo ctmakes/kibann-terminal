@@ -1,0 +1,35 @@
+{
+  "1x": {
+    "dpr": 1,
+    "fontSize": 14,
+    "cellW": 8,
+    "cellH": 18,
+    "baseline": 14,
+    "lineW": 1,
+    "underlineY": 15,
+    "strikeY": 10,
+    "pad": 4
+  },
+  "2x": {
+    "dpr": 2,
+    "fontSize": 14,
+    "cellW": 17,
+    "cellH": 37,
+    "baseline": 29,
+    "lineW": 2,
+    "underlineY": 31,
+    "strikeY": 20,
+    "pad": 8
+  },
+  "odd": {
+    "dpr": 1.5,
+    "fontSize": 13,
+    "cellW": 12,
+    "cellH": 26,
+    "baseline": 20,
+    "lineW": 1,
+    "underlineY": 22,
+    "strikeY": 14,
+    "pad": 6
+  }
+}

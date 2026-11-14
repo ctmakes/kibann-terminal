@@ -1,7 +1,7 @@
 import type { Grid } from "./grid";
 import type { Metrics } from "./metrics";
 import { drawOps } from "./painter/draw";
-import { planCursor, planGlyph, type PaintOp } from "./painter/plan";
+import { cursorColumn, planCursor, planGlyph, type PaintOp } from "./painter/plan";
 import { TextContext } from "./painter/text";
 import { graphemes, graphemeWidth } from "./wcwidth";
 
@@ -82,9 +82,7 @@ export class CursorLayer {
 
   /** Column of the cell the cursor is drawn on, moved off a wide tail. */
   cursorColumn(grid: Grid): number {
-    const c = grid.cursor;
-    if (c.x > 0 && grid.cellAt(c.x, c.y).width === 0) return c.x - 1;
-    return c.x;
+    return cursorColumn(grid);
   }
 
   draw(): void {

@@ -4,3 +4,4 @@
 crates/term/recordings/** -text
 crates/term/tests/fixtures/** -text
 app/src/dev/recordings/** -text
+fixtures/paint/** -text

@@ -154,6 +154,14 @@ export function planDecorations(
   if (flags & Flag.OVERLINE) rect(x0, top, width, textColor);
 }
 
+/** The column the cursor is drawn on: moved off a wide character's tail
+ * onto its head. */
+export function cursorColumn(grid: Grid): number {
+  const c = grid.cursor;
+  if (c.x > 0 && grid.cellAt(c.x, c.y).width === 0) return c.x - 1;
+  return c.x;
+}
+
 /**
  * The cursor drawn on column `col` of row `y` (already moved off a wide
  * character's tail) in `style`, at most `cols` wide. Blinking, focus and
