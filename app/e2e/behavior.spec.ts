@@ -357,4 +357,35 @@ test.describe("selection and scrollback", () => {
     expect(b.y - t.y).toBeLessThan(20); // at the top of the history
     expect(b.height).toBeLessThan(t.height / 3);
   });
+
+  test("the scrollbar widens on hover and drags or pages the view", async ({ page }) => {
+    await openFixture(page, "cursor");
+    const rows = await page.evaluate(() => (window as any).__harness.view.grid.rows);
+    const total = rows * 4;
+    await frame(page, { scrollbar: { total, offset: 0, len: rows } });
+    const thumb = page.locator(".term-scrollbar");
+    const track = (await page.locator(".term-scrollbar-track").boundingBox())!;
+    const rest = (await thumb.boundingBox())!;
+
+    const scrolls = async () => (await inputs(page)).filter((e) => e.kind === "scroll");
+    const cx = track.x + track.width / 2;
+    await page.mouse.move(cx, rest.y + rest.height / 2);
+    await expect.poll(async () => (await thumb.boundingBox())!.width).toBeGreaterThan(rest.width);
+
+    // Dragging the thumb to the bottom of the track asks for the whole history, in rows.
+    await page.mouse.down();
+    await page.mouse.move(cx, rest.y + rest.height / 2 + track.height, { steps: 5 });
+    await page.mouse.up();
+    const dragged = await scrolls();
+    expect(dragged.length).toBeGreaterThan(0);
+    expect(dragged.every((e) => e.by === "rows")).toBe(true);
+    expect(dragged.reduce((n, e) => n + e.n, 0)).toBe(total - rows);
+
+    // Clicking the track below the thumb pages down.
+    await frame(page, { scrollbar: { total, offset: 0, len: rows } });
+    await page.mouse.click(cx, track.y + track.height - 4);
+    expect((await scrolls()).at(-1)).toEqual({ kind: "scroll", by: "pages", n: 1 });
+    // No mouse event reached the program.
+    expect((await inputs(page)).some((e) => e.kind === "mouse")).toBe(false);
+  });
 });

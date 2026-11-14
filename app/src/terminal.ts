@@ -12,6 +12,7 @@ import { KeyboardInput, detectPlatform, type Platform } from "./input/keyboard";
 import { MouseInput } from "./input/mouse";
 import { LinkLayer } from "./links";
 import { FindLayer } from "./findlayer";
+import { ScrollbarLayer } from "./scrollbar";
 import {
   DEFAULT_FONT_SIZE,
   computeMetrics,
@@ -75,8 +76,8 @@ export class TerminalView {
   readonly gridCanvas: HTMLCanvasElement;
   readonly overlay: HTMLCanvasElement;
   readonly textarea: HTMLTextAreaElement;
-  /** Shows where the view is while scrolled back into history. */
-  readonly scrollbarEl: HTMLDivElement;
+  /** Shows where the view is while scrolled back into history; drag it to scroll. */
+  readonly scrollbar: ScrollbarLayer;
   /** Dims the pane when another pane is active. */
   readonly dimEl: HTMLDivElement;
   readonly grid = new Grid();
@@ -165,17 +166,6 @@ export class TerminalView {
       zIndex: "-1",
     });
 
-    this.scrollbarEl = document.createElement("div");
-    this.scrollbarEl.className = "term-scrollbar";
-    Object.assign(this.scrollbarEl.style, {
-      position: "absolute",
-      right: "2px",
-      width: "4px",
-      borderRadius: "2px",
-      pointerEvents: "none",
-      display: "none",
-    });
-
     this.dimEl = document.createElement("div");
     this.dimEl.className = "term-dim";
     Object.assign(this.dimEl.style, {
@@ -188,7 +178,15 @@ export class TerminalView {
     });
 
     this.gridEl.append(this.gridCanvas, this.overlay, this.textarea);
-    this.root.append(this.gridEl, this.scrollbarEl, this.dimEl);
+    this.root.append(this.gridEl);
+    this.scrollbar = new ScrollbarLayer(this.root, {
+      send: (e) => this.transport.input(e),
+      wheel: (e) => {
+        e.preventDefault();
+        this.overlay.dispatchEvent(new WheelEvent("wheel", e));
+      },
+    });
+    this.root.append(this.dimEl);
     container.append(this.root);
 
     this.painter = new Painter(this.gridCanvas, this.m);
@@ -218,6 +216,7 @@ export class TerminalView {
       () => kb.dispose(),
       () => ime.dispose(),
       () => mouse.dispose(),
+      () => this.scrollbar.dispose(),
       attachPaste(this.textarea, send),
       attachCopy(this.textarea, () => this.grid.selectionText),
       watchSize(container, (w, h) => this.layout(w, h)),
@@ -416,25 +415,8 @@ export class TerminalView {
     });
   }
 
-  /** Visible only while scrolled back, sized and placed like the viewport in the history. */
   private updateScrollbar(): void {
-    const { total, offset, len } = this.grid.scrollbar;
-    const el = this.scrollbarEl;
-    if (total <= len || offset + len >= total) {
-      el.style.display = "none";
-      return;
-    }
-    const pad = this.m.pad / this.m.dpr;
-    const track = this.root.clientHeight - 2 * pad;
-    const h = Math.max(16, (len / total) * track);
-    const top = pad + (offset / Math.max(1, total - len)) * (track - h);
-    Object.assign(el.style, {
-      display: "block",
-      top: `${top}px`,
-      height: `${h}px`,
-      background: css(this.grid.defaultFg),
-      opacity: "0.35",
-    });
+    this.scrollbar.update(this.grid.scrollbar, this.m.pad / this.m.dpr, this.root.clientHeight, css(this.grid.defaultFg));
   }
 
   private positionTextarea(): void {
