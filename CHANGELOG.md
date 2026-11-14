@@ -5,6 +5,12 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.2.2] - Unreleased
+
+- A pane no longer goes blank after the app sits unattended for a while
+  (until you scrolled it): when the system drops a pane's pixels, it's
+  painted again from what it shows.
+
 ## [0.2.1] - 2026-11-15
 
 - A downloaded update is hard to miss: the menu-bar icon (macOS) and the
