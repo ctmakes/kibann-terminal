@@ -26,6 +26,7 @@ const WAITING: &str = "tray-waiting";
 const UPDATE: &str = "tray-update";
 const CHECK: &str = "tray-check";
 const WHATS_NEW: &str = "tray-whats-new";
+const SETTINGS: &str = "tray-settings";
 const QUIT: &str = "tray-quit";
 
 /// What the icon and its menu show.
@@ -87,6 +88,7 @@ fn entries(version: &str, waiting: u32, update: Option<&str>) -> Vec<Entry> {
     });
     e.push(item(WHATS_NEW, "What's New"));
     e.push(Entry::Separator);
+    e.push(item(SETTINGS, "Settings…"));
     e.push(item(QUIT, "Quit Kibann Terminal"));
     e
 }
@@ -248,6 +250,10 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             show_window(app);
             let _ = app.emit("whats-new", ());
         }
+        SETTINGS => {
+            show_window(app);
+            let _ = app.emit("menu-action", r#"{"kind":"settings"}"#);
+        }
         QUIT => quit(app),
         _ => {}
     }
@@ -313,7 +319,7 @@ mod tests {
         assert_eq!(
             ids(&quiet),
             [
-                VERSION, "-", SHOW, NEW_TAB, "-", CHECK, WHATS_NEW, "-", QUIT
+                VERSION, "-", SHOW, NEW_TAB, "-", CHECK, WHATS_NEW, "-", SETTINGS, QUIT
             ]
         );
         assert_eq!(
@@ -328,7 +334,8 @@ mod tests {
         assert_eq!(
             ids(&busy),
             [
-                VERSION, "-", SHOW, NEW_TAB, "-", WAITING, "-", UPDATE, WHATS_NEW, "-", QUIT
+                VERSION, "-", SHOW, NEW_TAB, "-", WAITING, "-", UPDATE, WHATS_NEW, "-", SETTINGS,
+                QUIT
             ]
         );
         assert!(busy.contains(&item(WAITING, "2 agents are waiting")));

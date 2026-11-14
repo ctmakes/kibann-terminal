@@ -13,6 +13,7 @@ import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
 import { KIBANN_DARK, type ThemeApi } from "../workspace/theme";
 import type { Settings, Theme } from "../proto";
+import type { ConfigInfo, SettingsApi, UpdateStatus } from "../workspace/settings";
 import { Screen } from "./screen";
 
 const params = Object.fromEntries(new URLSearchParams(location.search));
@@ -91,7 +92,68 @@ const themes: ThemeApi = {
   current: () => kept,
 };
 
+// Settings: writes go to `saved` and come back as the file's watcher would
+// bring them; `fonts=none` makes the font a typed name, as off macOS.
+const DEFAULTS: Settings = {
+  font_family: [],
+  font_size: null,
+  agent_notifications: true,
+  keybind: [],
+  restore_layout: true,
+  menu_bar_icon: true,
+};
+let current: Settings = { ...DEFAULTS };
+const saved: Array<[string, string[]]> = [];
+const configCalls: string[] = [];
+let problems: string[] = [];
+let update: UpdateStatus = { state: "idle", version: null, error: null, checked: null };
+const CHANGELOG = `# Changelog
+
+Intro, not shown.
+
+## [0.2.0] - Unreleased
+
+- Settings, with **tabs**.
+
+## [0.1.0] - 2026-11-14
+
+The first build.
+
+- Tabs and \`splits\`.
+`;
+const FIELDS: Record<string, keyof Settings> = {
+  "agent-notifications": "agent_notifications",
+  "menu-bar-icon": "menu_bar_icon",
+  "restore-layout": "restore_layout",
+  "font-family": "font_family",
+  "font-size": "font_size",
+};
+const info = (): ConfigInfo => ({ path: "/Users/x/.config/kibann/config", problems, light: "Kibann Light", dark: kept });
+const settingsApi: SettingsApi = {
+  set: async (key, values) => {
+    saved.push([key, values]);
+    const f = FIELDS[key];
+    const v =
+      f === "font_family" ? values : f === "font_size" ? (values[0] ? Number(values[0]) : null) : values[0] === "true";
+    current = { ...current, [f]: v };
+    // The watcher's echo, a moment later.
+    setTimeout(() => api.setSettings(current), 20);
+  },
+  info: async () => info(),
+  openConfig: async (reveal) => void configCalls.push(reveal ? "reveal" : "edit"),
+  fonts: async () => (params.fonts === "none" ? null : ["Berkeley Mono", "Menlo", "SF Mono"]),
+  updateStatus: async () => update,
+  checkUpdates: async () => {
+    configCalls.push("check");
+    api.setUpdate({ state: "latest", version: null, error: null, checked: Date.now() });
+  },
+  installUpdate: async () => void configCalls.push("install"),
+  changelog: async () => [CHANGELOG, "0.1.0"],
+  openUrl: (url) => void opened.push(url),
+};
+
 const ws = new Workspace(root, {
+  settings: settingsApi,
   themes,
   firstRunHint: params.hint === "1",
   backend,
@@ -103,12 +165,13 @@ const ws = new Workspace(root, {
   onBlocked: (n) => (badge = n),
   onDiff: (p) => diffs.push(p.id),
   onNotify: (n) => notes.push(n),
-  onWhatsNew: () => (api.whatsNew += 1),
   windowFocused: () => windowFocused,
 });
 /** System notifications asked for, and whether the window "has focus". */
 const notes: Array<{ pane: number; title: string; body: string }> = [];
 let windowFocused = true;
+// The app sends the file's settings at start; here only Settings needs them.
+ws.settings?.setSettings(current);
 backend.onLayout = (l) => ws.apply(l);
 backend.onStatus = (m) => ws.setStatus(m);
 backend.onGit = (m) => ws.setGit(m);
@@ -143,10 +206,20 @@ const api = {
   noticeWithButton(text: string, label: string) {
     ws.notice(text, 0, { label, run: () => (api.clicked += 1) });
   },
-  /** Times the sidebar's What's New button was used. */
-  whatsNew: 0,
-  /** Help → What's New, with this changelog text. */
-  showChanges: (text: string, version: string) => ws.showChanges(text, version),
+  /** Settings' writes to the config file, as [key, values]. */
+  saved,
+  /** Open in Editor ("edit"), Show in Finder ("reveal"), Check ("check"), Restart ("install"). */
+  configCalls,
+  /** The config file's problems, as the app would report them. */
+  setProblems(p: string[]) {
+    problems = p;
+    ws.setConfigInfo(info());
+  },
+  /** Where updating stands. */
+  setUpdate(u: UpdateStatus) {
+    update = u;
+    ws.setUpdateStatus(u);
+  },
   /** The menu-bar icon's "N agents are waiting". */
   showWaiting: () => ws.showWaiting(),
   /** The window gains or loses focus (as far as notifications care). */
@@ -155,7 +228,8 @@ const api = {
   },
   /** The config file's settings changed. */
   setSettings(s: Partial<Settings>) {
-    ws.setSettings({ font_family: [], font_size: null, agent_notifications: true, keybind: [], restore_layout: true, menu_bar_icon: true, ...s });
+    current = { ...DEFAULTS, ...s };
+    ws.setSettings(current);
   },
   /** The font size in use, and each pane's cell size (device px). */
   font() {

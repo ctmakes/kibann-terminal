@@ -2184,6 +2184,8 @@ name = "kibann"
 version = "0.1.0-rc.1"
 dependencies = [
  "daemon",
+ "objc2-core-foundation",
+ "objc2-core-text",
  "proto",
  "serde",
  "serde_json",

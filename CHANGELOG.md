@@ -35,5 +35,8 @@ The first public build, for Macs with Apple silicon.
   so agents can still notify you, with a dot when one waits. Its menu
   shows the version and brings the window back; its Quit ends everything.
 - Updates itself: it checks hourly, downloads in the background and offers
-  to restart (the shells keep running). Help → What's New shows these
-  notes.
+  to restart (the shells keep running). Settings → Updates (or Help →
+  What's New) shows these notes.
+- Settings (Cmd+,): the switches, theme, font and size, every shortcut,
+  updates and About in one place. It writes the config file, so editing by
+  hand still works.

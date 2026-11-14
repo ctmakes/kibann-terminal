@@ -21,6 +21,51 @@ const FIRST: Duration = Duration::from_secs(20);
 #[derive(Default)]
 pub struct Ready(Mutex<Option<(Update, Vec<u8>)>>);
 
+/// Where updating stands, for Settings → Updates.
+#[derive(Clone, Serialize)]
+pub struct Status {
+    /// "idle" (not checked yet), "checking", "downloading", "ready",
+    /// "latest" (none newer), "error", or "dev" (dev builds don't update).
+    state: &'static str,
+    /// The version found (downloading or ready).
+    version: Option<String>,
+    error: Option<String>,
+    /// When the last check ended, in ms since 1970.
+    checked: Option<u64>,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self {
+            state: if tauri::is_dev() { "dev" } else { "idle" },
+            version: None,
+            error: None,
+            checked: None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Now(Mutex<Status>);
+
+/// Change the status and tell the window.
+fn set(app: &AppHandle, change: impl FnOnce(&mut Status)) {
+    let s = {
+        let now = app.state::<Now>();
+        let mut s = now.0.lock().unwrap();
+        change(&mut s);
+        s.clone()
+    };
+    let _ = app.emit("update-status", s);
+}
+
+fn now_ms() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+}
+
 #[derive(Clone, Serialize)]
 struct UpdateReady {
     version: String,
@@ -30,6 +75,7 @@ struct UpdateReady {
 /// Look for updates now and then. Not in dev builds.
 pub fn start(app: &AppHandle) {
     app.manage(Ready::default());
+    app.manage(Now::default());
     if tauri::is_dev() {
         return;
     }
@@ -64,6 +110,10 @@ pub async fn check(app: &AppHandle, asked: bool) {
         }
         return;
     }
+    set(app, |s| {
+        s.state = "checking";
+        s.error = None;
+    });
     let found = match app.updater() {
         Ok(updater) => updater.check().await,
         Err(e) => Err(e),
@@ -71,24 +121,43 @@ pub async fn check(app: &AppHandle, asked: bool) {
     let update = match found {
         Ok(Some(u)) => u,
         Ok(None) => {
+            set(app, |s| {
+                s.state = "latest";
+                s.checked = now_ms();
+            });
             let v = app.package_info().version.to_string();
             say(format!("Kibann Terminal {v} is the newest version."));
             return;
         }
         Err(e) => {
+            set(app, |s| {
+                s.state = "error";
+                s.error = Some(e.to_string());
+                s.checked = now_ms();
+            });
             eprintln!("kibann: update check: {e}");
             say(format!("Couldn't check for updates: {e}"));
             return;
         }
     };
+    set(app, |s| {
+        s.state = "downloading";
+        s.version = Some(update.version.clone());
+        s.checked = now_ms();
+    });
     match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
+            set(app, |s| s.state = "ready");
             ready(app, &update);
             #[cfg(target_os = "macos")]
             crate::tray::set_update(app, update.version.clone());
             *app.state::<Ready>().0.lock().unwrap() = Some((update, bytes));
         }
         Err(e) => {
+            set(app, |s| {
+                s.state = "error";
+                s.error = Some(format!("couldn't download {}: {e}", update.version));
+            });
             eprintln!("kibann: update download: {e}");
             say(format!("Couldn't download version {}: {e}", update.version));
         }
@@ -115,8 +184,15 @@ pub fn update_install(app: AppHandle) -> Result<(), String> {
     app.restart();
 }
 
-/// Kibann Terminal → Check for Updates….
+/// Kibann Terminal → Check for Updates…, or Settings → Updates (`quiet`:
+/// the answer shows there, not as a notice).
 #[tauri::command]
-pub async fn update_check(app: AppHandle) {
-    check(&app, true).await;
+pub async fn update_check(app: AppHandle, quiet: Option<bool>) {
+    check(&app, !quiet.unwrap_or(false)).await;
+}
+
+/// Where updating stands.
+#[tauri::command]
+pub fn update_status(now: tauri::State<'_, Now>) -> Status {
+    now.0.lock().unwrap().clone()
 }

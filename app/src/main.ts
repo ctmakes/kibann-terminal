@@ -8,6 +8,7 @@ import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
 import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
+import type { ConfigInfo, SettingsApi, UpdateStatus } from "./workspace/settings";
 import type { ThemeApi, ThemeEntry } from "./workspace/theme";
 import { Workspace, type Pane } from "./workspace/workspace";
 
@@ -63,8 +64,20 @@ async function start(): Promise<void> {
     choose: (name) => invoke("theme_choose", { name }),
     current: () => themeName,
   };
+  // Settings writes the config file; the file's watcher applies it.
+  const settingsApi: SettingsApi = {
+    set: (key, values) => invoke("settings_set", { key, values }),
+    info: () => invoke<ConfigInfo>("config_info"),
+    openConfig: (reveal) => invoke("config_open", { reveal }),
+    fonts: () => invoke<string[] | null>("fonts_list"),
+    updateStatus: () => invoke<UpdateStatus>("update_status"),
+    checkUpdates: () => invoke("update_check", { quiet: true }),
+    installUpdate: () => invoke("update_install"),
+    changelog: () => invoke<[string, string]>("changelog"),
+    openUrl: (url) => void invoke("open_link", { target: url }),
+  };
   const ws = new Workspace(el, {
-    onWhatsNew: () => void whatsNew(),
+    settings: settingsApi,
     backend,
     themes,
     firstRunHint: true,
@@ -100,12 +113,12 @@ async function start(): Promise<void> {
   );
   // A notification was clicked: show the pane it's about.
   await listen<number>("focus-pane", (e) => ws.show(e.payload));
-  // What's New (Help menu, the sidebar, the menu-bar icon, or the notice after an update).
-  const whatsNew = async () => {
-    const [text, version] = await invoke<[string, string]>("changelog");
-    ws.showChanges(text, version);
-  };
-  await listen("whats-new", () => void whatsNew());
+  await listen<UpdateStatus>("update-status", (e) => ws.setUpdateStatus(e.payload));
+  await listen<ConfigInfo>("config-info", (e) => ws.setConfigInfo(e.payload));
+  // What's New (Help menu, the menu-bar icon, or the notice after an
+  // update): the release notes in Settings → Updates.
+  const whatsNew = () => ws.openSettings("updates");
+  await listen("whats-new", whatsNew);
   // The first start of a new version (an update): say so, once.
   const [, version] = await invoke<[string, string]>("changelog");
   const SEEN = "kibann.version.seen";
@@ -117,7 +130,7 @@ async function start(): Promise<void> {
     // Storage unavailable: no notice.
   }
   if (seen && seen !== version) {
-    ws.notice(`Updated to Kibann Terminal ${version}.`, 15000, { label: "What's New", run: () => void whatsNew() });
+    ws.notice(`Updated to Kibann Terminal ${version}.`, 15000, { label: "What's New", run: whatsNew });
   }
   // The menu-bar icon: "N agents are waiting" shows one.
   await listen("show-waiting", () => ws.showWaiting());

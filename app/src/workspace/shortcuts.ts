@@ -32,6 +32,7 @@ const PC_MODS: Array<[string, string]> = [
 const KEY_NAMES: Record<string, string> = {
   BracketLeft: "[",
   BracketRight: "]",
+  Comma: ",",
   Equal: "=",
   Minus: "−",
   Slash: "/",
@@ -124,6 +125,7 @@ export function sheetFor(platform: Platform): SheetGroup[] {
       rows: [
         row("Sidebar", { kind: "sidebar" }),
         row("Keyboard shortcuts", { kind: "shortcuts" }),
+        row("Settings", { kind: "settings" }),
         row("Bigger / smaller text", { kind: "fontSize", step: 1 }, { kind: "fontSize", step: -1 }),
         row("Default text size", { kind: "fontSize", step: 0 }),
       ],
@@ -155,6 +157,53 @@ export function sheetFor(platform: Platform): SheetGroup[] {
     },
   ];
   return groups.map((g) => ({ ...g, rows: g.rows.filter((r) => r.keys.length > 0) }));
+}
+
+/** Every shortcut on `platform` in columns of groups: the sheet's body,
+ * and Settings → Shortcuts. */
+export function sheetGrid(platform: Platform): HTMLDivElement {
+  const cols = document.createElement("div");
+  Object.assign(cols.style, {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
+    columnGap: "28px",
+    rowGap: "12px",
+  });
+  for (const g of sheetFor(platform)) {
+    const box = document.createElement("div");
+    box.className = "shortcut-group";
+    const h = document.createElement("div");
+    h.textContent = g.title;
+    Object.assign(h.style, { color: "var(--k-muted)", fontSize: "11px", fontWeight: "600", margin: "4px 0 4px" });
+    box.append(h);
+    for (const r of g.rows) {
+      const line = document.createElement("div");
+      line.className = "shortcut-row";
+      Object.assign(line.style, { display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" });
+      const label = document.createElement("span");
+      label.textContent = r.label;
+      label.style.flex = "1";
+      line.append(label);
+      for (const key of r.keys) {
+        const kbd = document.createElement("kbd");
+        kbd.textContent = key;
+        Object.assign(kbd.style, {
+          font: "11px -apple-system, system-ui, sans-serif",
+          letterSpacing: "0.5px",
+          color: "var(--k-bright)",
+          background: "var(--k-kbd)",
+          border: "1px solid var(--k-divider)",
+          borderRadius: "4px",
+          padding: "1px 6px",
+          whiteSpace: "nowrap",
+        });
+        line.append(kbd);
+      }
+      box.append(line);
+    }
+    cols.append(box);
+  }
+  return cols;
 }
 
 /** The sheet itself: an overlay over the workspace. */
@@ -208,47 +257,7 @@ export class ShortcutSheet {
     hint.textContent = "Esc to close";
     hint.style.color = "var(--k-muted)";
     head.append(title, hint);
-    const cols = document.createElement("div");
-    Object.assign(cols.style, {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
-      columnGap: "28px",
-      rowGap: "12px",
-    });
-    for (const g of sheetFor(platform)) {
-      const box = document.createElement("div");
-      box.className = "shortcut-group";
-      const h = document.createElement("div");
-      h.textContent = g.title;
-      Object.assign(h.style, { color: "var(--k-muted)", fontSize: "11px", fontWeight: "600", margin: "4px 0 4px" });
-      box.append(h);
-      for (const r of g.rows) {
-        const line = document.createElement("div");
-        line.className = "shortcut-row";
-        Object.assign(line.style, { display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" });
-        const label = document.createElement("span");
-        label.textContent = r.label;
-        label.style.flex = "1";
-        line.append(label);
-        for (const key of r.keys) {
-          const kbd = document.createElement("kbd");
-          kbd.textContent = key;
-          Object.assign(kbd.style, {
-            font: "11px -apple-system, system-ui, sans-serif",
-            letterSpacing: "0.5px",
-            color: "var(--k-bright)",
-            background: "var(--k-kbd)",
-            border: "1px solid var(--k-divider)",
-            borderRadius: "4px",
-            padding: "1px 6px",
-            whiteSpace: "nowrap",
-          });
-          line.append(kbd);
-        }
-        box.append(line);
-      }
-      cols.append(box);
-    }
+    const cols = sheetGrid(platform);
     panel.append(head, cols);
     this.el.replaceChildren(panel);
   }

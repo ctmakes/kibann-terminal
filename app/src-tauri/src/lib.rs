@@ -4,6 +4,8 @@
 //! frontend's commands into daemon requests, and frames and layouts into
 //! channel messages and events.
 
+#[cfg(target_os = "macos")]
+mod fonts;
 mod open;
 mod theme;
 #[cfg(target_os = "macos")]
@@ -477,10 +479,14 @@ fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<boo
 fn reload_choice(app: &AppHandle) {
     let (choice, errors) = theme::read_choice();
     let (settings, more) = theme::read_settings();
-    for e in errors.into_iter().chain(more) {
+    let problems: Vec<String> = errors.into_iter().chain(more).collect();
+    for e in &problems {
         let _ = app.emit("notice", format!("Config: {e}"));
     }
+    *app.state::<Problems>().0.lock().unwrap() = problems;
     app.state::<Mutex<Looks>>().lock().unwrap().choice = choice;
+    // Settings, if open, shows the file's problems and themes.
+    let _ = app.emit("config-info", config_info(app.clone()));
     show_theme(app);
     let changed = {
         let state = app.state::<Mutex<proto::config::Settings>>();
@@ -494,6 +500,91 @@ fn reload_choice(app: &AppHandle) {
         tray::set_visible(app, settings.menu_bar_icon);
         let _ = app.emit("settings", settings);
     }
+}
+
+/// The config file's lines that couldn't be used, as of its last read.
+#[derive(Default)]
+struct Problems(Mutex<Vec<String>>);
+
+/// What Settings shows about the config file.
+#[derive(Clone, Serialize)]
+struct ConfigInfo {
+    path: String,
+    problems: Vec<String>,
+    /// The themes chosen for each appearance.
+    light: String,
+    dark: String,
+}
+
+#[tauri::command]
+fn config_info(app: AppHandle) -> ConfigInfo {
+    let choice = app.state::<Mutex<Looks>>().lock().unwrap().choice.clone();
+    ConfigInfo {
+        path: theme::config_file()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        problems: app.state::<Problems>().0.lock().unwrap().clone(),
+        light: choice.light,
+        dark: choice.dark,
+    }
+}
+
+/// Settings changed a setting: write it to the config file, where the
+/// watcher picks it up as it would an edit by hand.
+#[tauri::command]
+fn settings_set(key: String, values: Vec<String>) -> Result<(), String> {
+    theme::save_values(&key, &values)
+}
+
+/// Open the config file in the text editor, or show it in the file
+/// manager (`reveal`); made first if it doesn't exist.
+#[tauri::command]
+fn config_open(app: AppHandle, reveal: bool) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let file = theme::config_file().ok_or("no home directory")?;
+    if !file.exists() {
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(
+            &file,
+            "# Kibann Terminal's settings, in Ghostty's syntax. They apply when saved.\n\
+             # See https://github.com/ctmakes/kibann-terminal#configuration\n",
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if reveal {
+        return app
+            .opener()
+            .reveal_item_in_dir(&file)
+            .map_err(|e| e.to_string());
+    }
+    // The text editor, not whatever opens files without an extension.
+    #[cfg(target_os = "macos")]
+    return std::process::Command::new("/usr/bin/open")
+        .arg("-t")
+        .arg(&file)
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| format!("open: {s}"))
+        });
+    #[cfg(not(target_os = "macos"))]
+    app.opener()
+        .open_path(file.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// The installed monospaced fonts, or `None` where they can't be listed
+/// (Settings then takes a typed name).
+#[tauri::command]
+async fn fonts_list() -> Option<Vec<String>> {
+    #[cfg(target_os = "macos")]
+    return Some(fonts::monospaced());
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 #[tauri::command]
@@ -673,6 +764,8 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let app_menu = SubmenuBuilder::new(app, "Kibann Terminal")
         .about(None)
         .separator()
+        .item(&item(r#"{"kind":"settings"}"#, "Settings…", "Cmd+Comma")?)
+        .separator()
         .services()
         .separator()
         .hide()
@@ -850,6 +943,7 @@ pub fn run() {
                 theme: proto::theme::Theme::kibann_dark(),
             }));
             app.manage(Mutex::new(proto::config::Settings::default()));
+            app.manage(Problems::default());
             reload_choice(handle);
             watch_config(handle.clone());
             on_notification_click(handle);
@@ -901,7 +995,12 @@ pub fn run() {
             menu_keys,
             update::update_install,
             update::update_check,
+            update::update_status,
             settings_current,
+            settings_set,
+            config_info,
+            config_open,
+            fonts_list,
             theme_current,
             theme_list,
             theme_preview,

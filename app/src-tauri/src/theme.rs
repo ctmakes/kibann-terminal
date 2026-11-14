@@ -56,7 +56,7 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config").join("kibann"))
 }
 
-fn config_file() -> Option<PathBuf> {
+pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("config"))
 }
 
@@ -162,9 +162,21 @@ pub fn read_settings() -> (proto::config::Settings, Vec<String>) {
 
 /// Save `choice` to the config file, keeping its other lines.
 pub fn save_choice(choice: &ThemeChoice) -> Result<(), String> {
+    edit_config(|old| set_config_theme(old, choice))
+}
+
+/// Set `key` to `values` in the config file (Settings), keeping its other
+/// lines. Only the keys Settings shows, with values the parser takes.
+pub fn save_values(key: &str, values: &[String]) -> Result<(), String> {
+    proto::config::check_values(key, values)?;
+    edit_config(|old| proto::config::set_config_values(old, key, values))
+}
+
+/// Rewrite the config file with `change`, made if missing.
+fn edit_config(change: impl FnOnce(&str) -> String) -> Result<(), String> {
     let file = config_file().ok_or("no home directory")?;
     let old = std::fs::read_to_string(&file).unwrap_or_default();
-    let new = set_config_theme(&old, choice);
+    let new = change(&old);
     let dir = file.parent().ok_or("bad config path")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // Write beside it and rename, so a reader never sees half a file.

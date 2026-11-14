@@ -112,9 +112,123 @@ impl Settings {
     }
 }
 
+/// The keys Settings (the app's modal) may write. `theme` has its own
+/// writer, and `keybind` is only edited by hand.
+pub const SETTABLE: &[&str] = &[
+    "agent-notifications",
+    "menu-bar-icon",
+    "restore-layout",
+    "font-family",
+    "font-size",
+];
+
+/// Whether `values` can be written for `key` (a key Settings may write,
+/// values the parser takes as they are).
+pub fn check_values(key: &str, values: &[String]) -> Result<(), String> {
+    if !SETTABLE.contains(&key) {
+        return Err(format!("{key} can't be set here"));
+    }
+    if values.len() > 1 && key != "font-family" {
+        return Err(format!("{key} takes one value"));
+    }
+    for v in values {
+        if v.trim().is_empty() || v.trim() != v || v.contains(['\n', '\r', '"']) || v.contains(" #")
+        {
+            return Err(format!("bad {key}: {v:?}"));
+        }
+    }
+    let text: String = values.iter().map(|v| format!("{key} = {v}\n")).collect();
+    match Settings::parse(&text).1.into_iter().next() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// `text` (a config file) with `key`'s lines replaced by `values`, one line
+/// each, where the first of them was (or at the end). Everything else, and
+/// comments, stay as they were. No values removes the key: its default.
+pub fn set_config_values(text: &str, key: &str, values: &[String]) -> String {
+    let mut out = Vec::new();
+    let mut done = false;
+    let new = || values.iter().map(|v| format!("{key} = {v}"));
+    for l in text.lines() {
+        let t = l.trim();
+        let ours = !t.starts_with('#') && t.split_once('=').is_some_and(|(k, _)| k.trim() == key);
+        if !ours {
+            out.push(l.to_owned());
+        } else if !done {
+            out.extend(new());
+            done = true;
+        }
+    }
+    if !done {
+        out.extend(new());
+    }
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn v(x: &[&str]) -> Vec<String> {
+        x.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn setting_values_keeps_the_rest() {
+        let file = "# mine\nfont-family = A\ntheme = Nord\n# font-family = old\nfont-family = B # icons\nfont-size = 12\n";
+        assert_eq!(
+            set_config_values(file, "font-family", &v(&["X", "Y Mono"])),
+            "# mine\nfont-family = X\nfont-family = Y Mono\ntheme = Nord\n# font-family = old\nfont-size = 12\n"
+        );
+        assert_eq!(
+            set_config_values(file, "font-size", &v(&["14"])),
+            "# mine\nfont-family = A\ntheme = Nord\n# font-family = old\nfont-family = B # icons\nfont-size = 14\n"
+        );
+        // A key not there yet goes at the end; none removes it.
+        assert_eq!(
+            set_config_values("theme = Nord", "menu-bar-icon", &v(&["false"])),
+            "theme = Nord\nmenu-bar-icon = false\n"
+        );
+        assert_eq!(
+            set_config_values(file, "font-family", &[]),
+            "# mine\ntheme = Nord\n# font-family = old\nfont-size = 12\n"
+        );
+        assert_eq!(
+            set_config_values("", "font-size", &v(&["13"])),
+            "font-size = 13\n"
+        );
+        assert_eq!(set_config_values("", "font-size", &[]), "");
+        // The result reads back as what was set.
+        let (s, e) = Settings::parse(&set_config_values(
+            file,
+            "font-family",
+            &v(&["X", "Y Mono"]),
+        ));
+        assert!(e.is_empty());
+        assert_eq!(s.font_family, ["X", "Y Mono"]);
+    }
+
+    #[test]
+    fn only_settable_keys_and_good_values() {
+        assert!(check_values("menu-bar-icon", &v(&["false"])).is_ok());
+        assert!(check_values("font-family", &v(&["JetBrains Mono", "Symbols Nerd Font"])).is_ok());
+        assert!(check_values("font-size", &v(&["13.5"])).is_ok());
+        assert!(check_values("font-size", &[]).is_ok());
+        assert!(check_values("keybind", &v(&["clear"])).is_err());
+        assert!(check_values("theme", &v(&["Nord"])).is_err());
+        assert!(check_values("menu-bar-icon", &v(&["yes"])).is_err());
+        assert!(check_values("font-size", &v(&["500"])).is_err());
+        assert!(check_values("font-size", &v(&["12", "13"])).is_err());
+        assert!(check_values("font-family", &v(&["A\nkeybind = clear"])).is_err());
+        assert!(check_values("font-family", &v(&["A # b"])).is_err());
+        assert!(check_values("font-family", &v(&[" "])).is_err());
+    }
 
     #[test]
     fn parses_fonts_and_switches() {

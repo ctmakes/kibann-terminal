@@ -300,28 +300,7 @@ pub fn config_theme(text: &str) -> (Option<ThemeChoice>, Vec<String>) {
 /// `text` with its `theme` line set to `choice`, keeping every other line
 /// and comment; the line is added at the end if there is none.
 pub fn set_config_theme(text: &str, choice: &ThemeChoice) -> String {
-    let line = format!("theme = {}", choice.to_value());
-    let mut out = Vec::new();
-    let mut done = false;
-    for l in text.lines() {
-        let t = l.trim();
-        let is_theme =
-            !t.starts_with('#') && t.split_once('=').is_some_and(|(k, _)| k.trim() == "theme");
-        if is_theme {
-            if !done {
-                out.push(line.clone());
-                done = true;
-            }
-        } else {
-            out.push(l.to_owned());
-        }
-    }
-    if !done {
-        out.push(line);
-    }
-    let mut s = out.join("\n");
-    s.push('\n');
-    s
+    crate::config::set_config_values(text, "theme", &[choice.to_value()])
 }
 
 #[cfg(test)]

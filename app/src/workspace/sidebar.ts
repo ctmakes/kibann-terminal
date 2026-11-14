@@ -10,6 +10,7 @@ import type { AgentState, PaneDir } from "../proto";
 import type { PaneId } from "./layout";
 import { headerParts, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
+import { GEAR_ICON } from "./settings";
 import { tooltip } from "./tooltip";
 
 export const SIDEBAR = { min: 140, max: 480, default: 220 };
@@ -27,9 +28,6 @@ const THEME_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" 
 const KEYS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
 <rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/>
 <path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6" stroke-linecap="round" stroke-width="1.4"/></svg>`;
-/** What's New: a sparkle. */
-const NEWS_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
-<path d="M8 2 9.3 6.7 14 8 9.3 9.3 8 14 6.7 9.3 2 8 6.7 6.7z"/></svg>`;
 /** Dragging the edge narrower than this collapses it. */
 const COLLAPSE_AT = 90;
 /** The preview redraws at most this often. */
@@ -135,7 +133,9 @@ export interface SidebarOptions {
   /** The bottom row's buttons. */
   onShortcuts(): void;
   onThemes?(): void;
-  onWhatsNew?(): void;
+  onSettings?(): void;
+  /** Settings' key, shown in the gear's tooltip. */
+  settingsKey?: () => string;
   /** The shortcut sheet's key, shown in its button's tooltip. */
   shortcutKey: () => string;
   /** The key that collapses and expands it, shown in its button's tooltip. */
@@ -232,7 +232,7 @@ export class Sidebar {
       border: "1px solid var(--k-divider)",
       boxShadow: "0 6px 24px var(--k-shadow)",
     });
-    // Bottom: the theme picker, the shortcut sheet and What's New on the left, the
+    // Bottom: the theme picker, the shortcut sheet and Settings on the left, the
     // button that collapses and expands it on the right.
     this.bar = document.createElement("div");
     this.bar.className = "sidebar-bar";
@@ -283,10 +283,10 @@ export class Sidebar {
     const keys = icon("sidebar-shortcuts", KEYS_ICON, opts.onShortcuts);
     tooltip(keys, "Keyboard shortcuts", opts.shortcutKey, true);
     this.extras.push(keys);
-    if (opts.onWhatsNew) {
-      const news = icon("sidebar-whats-new", NEWS_ICON, opts.onWhatsNew);
-      tooltip(news, "What's New", "", true);
-      this.extras.push(news);
+    if (opts.onSettings) {
+      const gear = icon("sidebar-settings", GEAR_ICON, opts.onSettings);
+      tooltip(gear, "Settings", opts.settingsKey ?? "", true);
+      this.extras.push(gear);
     }
     const spacer = document.createElement("div");
     spacer.style.flex = "1";

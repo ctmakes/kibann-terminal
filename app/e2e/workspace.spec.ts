@@ -684,17 +684,18 @@ test.describe("sidebar", () => {
     await expect(page.locator(".tab-bar")).toBeHidden();
   });
 
-  test("its What's New button asks for the changelog", async ({ page }) => {
+  test("its gear opens Settings, and says its key", async ({ page }) => {
     await three(page);
     await press(page, "Meta+Shift+b");
-    const news = page.locator(".sidebar-whats-new");
-    await news.hover();
-    await expect(page.locator(".tooltip")).toHaveText("What's New");
-    await news.click();
-    expect(await page.evaluate(() => (window as any).__ws.whatsNew)).toBe(1);
+    const gear = page.locator(".sidebar-settings");
+    await gear.hover();
+    await expect(page.locator(".tooltip")).toHaveText("Settings⌘,");
+    await gear.click();
+    await expect(page.locator(".settings-modal")).toBeVisible();
     // Like the other extras, it isn't on the rail.
+    await page.keyboard.press("Escape");
     await press(page, "Meta+Shift+b");
-    await expect(news).toBeHidden();
+    await expect(gear).toBeHidden();
   });
 
   test("the rail: a badge shows its pane and previews it", async ({ page }) => {
@@ -969,23 +970,143 @@ test.describe("settings", () => {
   });
 });
 
-test.describe("what's new", () => {
-  test("shows the changelog's sections, marks this version, and a key closes it", async ({ page }) => {
+test.describe("settings modal", () => {
+  const modal = (page: Page) => page.locator(".settings-modal");
+  const tab = (page: Page, t: string) => page.locator(`.settings-tab[data-tab="${t}"]`).click();
+  const saved = (page: Page) => page.evaluate(() => (window as any).__ws.saved);
+  const calls = (page: Page) => page.evaluate(() => (window as any).__ws.configCalls);
+
+  test("Cmd+, opens it; Esc, Cmd+, ×, and a click outside close it; keys stay out of the panes", async ({ page }) => {
     await open(page);
-    const text = "# Changelog\n\nIntro.\n\n## [0.2.0] - 2026-12-01\n\n- New **thing** with `code`\n\n## [0.1.0] - 2026-11-14\n\nFirst.\n";
-    await page.evaluate(([t]) => (window as any).__ws.showChanges(t, "0.2.0"), [text] as const);
-    const sheet = page.locator(".changes-sheet");
-    await expect(sheet).toBeVisible();
-    await expect(sheet.locator(".changes-release")).toHaveCount(2);
-    await expect(sheet.locator(".changes-release").first()).toContainText("0.2.0");
-    await expect(sheet.locator(".changes-release").first()).toContainText("this version");
-    await expect(sheet.locator("strong")).toHaveText("thing");
-    await expect(sheet.locator("code")).toHaveText("code");
-    await expect(sheet).not.toContainText("Intro.");
+    await press(page, "Meta+Comma");
+    await expect(modal(page)).toBeVisible();
+    await page.keyboard.type("ab");
+    expect(await typed(page)).toEqual({});
     await page.keyboard.press("Escape");
-    await expect(sheet).toBeHidden();
+    await expect(modal(page)).toBeHidden();
+    // Focus is back in the terminal.
+    await page.keyboard.type("x");
+    expect(await typed(page)).toEqual({ 1: "x" });
+    await press(page, "Meta+Comma");
+    await press(page, "Meta+Comma");
+    await expect(modal(page)).toBeHidden();
+    await press(page, "Meta+Comma");
+    await page.locator(".settings-close").click();
+    await expect(modal(page)).toBeHidden();
+    await press(page, "Meta+Comma");
+    await page.mouse.click(10, 10);
+    await expect(modal(page)).toBeHidden();
+  });
+
+  test("a switch writes its setting, and follows the file", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+Comma");
+    await tab(page, "general");
+    const sw = page.locator('.settings-switch[data-key="menu-bar-icon"]');
+    await expect(sw).toHaveAttribute("aria-checked", "true");
+    await sw.click();
+    await expect(sw).toHaveAttribute("aria-checked", "false");
+    expect(await saved(page)).toEqual([["menu-bar-icon", ["false"]]]);
+    // An edit by hand shows while it's open.
+    await page.evaluate(() => (window as any).__ws.setSettings({ agent_notifications: false, menu_bar_icon: false }));
+    await expect(page.locator('.settings-switch[data-key="agent-notifications"]')).toHaveAttribute("aria-checked", "false");
+    await expect(modal(page)).toHaveScreenshot("settings-general.png");
+  });
+
+  test("the font: a family from the list keeps the file's fallbacks; the size steps and resets", async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => (window as any).__ws.setSettings({ font_family: ["Ghost Font", "Symbols Nerd Font"], font_size: 13 }));
+    await press(page, "Meta+Comma");
+    await tab(page, "appearance");
+    const family = page.locator("select.settings-font");
+    await expect(family).toHaveValue("Ghost Font");
+    await expect(family.locator("option").nth(1)).toHaveText("Ghost Font (not installed)");
+    await expect(page.locator(".settings-body")).toContainText("Then Symbols Nerd Font");
+    await family.selectOption("Menlo");
+    await page.locator(".settings-size button", { hasText: "+" }).click();
+    await page.locator(".settings-size a", { hasText: "Default" }).click();
+    expect(await saved(page)).toEqual([
+      ["font-family", ["Menlo", "Symbols Nerd Font"]],
+      ["font-size", ["14"]],
+      ["font-size", []],
+    ]);
+    // The built-in font: the family lines go.
+    await family.selectOption("");
+    expect((await saved(page)).at(-1)).toEqual(["font-family", []]);
+  });
+
+  test("off macOS the font is a typed name", async ({ page }) => {
+    await open(page, { fonts: "none", platform: "other" });
+    await press(page, "Control+Comma");
+    await tab(page, "appearance");
+    const input = page.locator("input.settings-font");
+    await input.fill("Fira Code");
+    await input.press("Enter");
+    expect(await saved(page)).toEqual([["font-family", ["Fira Code"]]]);
+    // No menu bar off macOS.
+    await tab(page, "general");
+    await expect(page.locator('.settings-switch[data-key="menu-bar-icon"]')).toHaveCount(0);
+    await expect(page.locator(".settings-body")).toContainText("Show in Folder");
+  });
+
+  test("Choose… closes it and opens the theme picker", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+Comma");
+    await tab(page, "appearance");
+    await expect(page.locator(".settings-theme")).toHaveText("Light: Kibann Light · Dark: Kibann Dark");
+    await page.locator(".settings-button", { hasText: "Choose…" }).click();
+    await expect(modal(page)).toBeHidden();
+    await expect(page.locator(".theme-picker")).toBeVisible();
+  });
+
+  test("the config file: open, show, and the lines it can't use", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+Comma");
+    await tab(page, "general");
+    await expect(page.locator(".settings-path")).toHaveText("/Users/x/.config/kibann/config");
+    await page.locator(".settings-button", { hasText: "Open in Editor" }).click();
+    await page.locator(".settings-button", { hasText: "Show in Finder" }).click();
+    expect(await calls(page)).toEqual(["edit", "reveal"]);
+    await expect(page.locator(".settings-problems")).toHaveCount(0);
+    await page.evaluate(() => (window as any).__ws.setProblems(["line 4: bad font-size: huge"]));
+    await expect(page.locator(".settings-problems")).toContainText("1 line can't be used:line 4: bad font-size: huge");
+  });
+
+  test("updates: the release notes, Check, and a ready update", async ({ page }) => {
+    await open(page);
+    // Help → What's New opens it here.
+    await page.evaluate(() => (window as any).__ws.ws.openSettings("updates"));
+    const body = page.locator(".settings-body");
+    await expect(page.locator(".settings-title")).toHaveText("Updates");
+    await expect(body.locator(".changes-release")).toHaveCount(2);
+    await expect(body.locator(".changes-release").nth(1)).toContainText("0.1.02026-11-14 · this version");
+    await expect(body.locator(".changes-release strong")).toHaveText("tabs");
+    await expect(body.locator(".changes-release code")).toHaveText("splits");
+    await expect(body).not.toContainText("Intro, not shown.");
+    await expect(page.locator(".settings-update-state")).toHaveText("Checks every hour.");
+    await page.locator(".settings-button", { hasText: "Check for Updates" }).click();
+    await expect(page.locator(".settings-update-state")).toHaveText("0.1.0 is the newest version, checked just now.");
+    await page.evaluate(() => (window as any).__ws.setUpdate({ state: "ready", version: "0.1.1", error: null, checked: Date.now() }));
+    await expect(page.locator(".settings-update-dot")).toBeVisible();
+    await page.locator(".settings-button", { hasText: "Restart to Update" }).click();
+    expect(await calls(page)).toEqual(["check", "install"]);
+  });
+
+  test("About: the version and its links; the tab is remembered", async ({ page }) => {
+    await open(page);
+    await press(page, "Meta+Comma");
+    await tab(page, "about");
+    await expect(page.locator(".settings-version")).toHaveText("Version 0.1.0");
+    await page.locator(".settings-about a", { hasText: "GitHub" }).click();
+    expect(await page.evaluate(() => (window as any).__ws.opened)).toEqual(["https://github.com/ctmakes/kibann-terminal"]);
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await settle(page);
+    await press(page, "Meta+Comma");
+    await expect(page.locator(".settings-title")).toHaveText("About");
   });
 });
+
 
 test.describe("notifications", () => {
   const notes = (page: Page) => page.evaluate(() => (window as any).__ws.notes);

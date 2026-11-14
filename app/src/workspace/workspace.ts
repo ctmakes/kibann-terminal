@@ -17,7 +17,7 @@ import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
-import { ChangesSheet } from "./changes";
+import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
 import { FindBar } from "./find";
@@ -91,8 +91,8 @@ export interface Tab {
 }
 
 export interface WorkspaceOptions {
-  /** What's New was asked for (the sidebar's button). */
-  onWhatsNew?(): void;
+  /** Settings (Cmd+,, the sidebar's gear); without it there's no modal. */
+  settings?: SettingsApi;
   /** Where layout actions go. */
   backend: LayoutBackend;
   /** A transport for the pane (session) `pane`. */
@@ -130,7 +130,8 @@ export class Workspace {
   readonly root: HTMLDivElement;
   readonly sidebar: Sidebar;
   private readonly shortcuts: ShortcutSheet;
-  private readonly changes = new ChangesSheet();
+  /** Settings, when the app gives it what it needs. */
+  readonly settings: SettingsModal | null;
   private readonly picker: ThemePicker | null;
   /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
   private readonly help: HTMLDivElement;
@@ -191,7 +192,8 @@ export class Workspace {
       onResize: () => {},
       onShortcuts: () => this.shortcuts.toggle(),
       onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
-      onWhatsNew: opts.onWhatsNew,
+      onSettings: opts.settings ? () => this.run({ kind: "settings" }) : undefined,
+      settingsKey: () => keyFor({ kind: "settings" }, this.platform),
       shortcutKey: sheetKey,
       sidebarKey: () => keyFor({ kind: "sidebar" }, this.platform),
     });
@@ -247,7 +249,16 @@ export class Workspace {
     this.picker = opts.themes
       ? new ThemePicker(opts.themes, () => this.focusedPane?.view?.focus())
       : null;
-    this.root.append(this.sidebar.el, main, this.shortcuts.el, this.changes.el);
+    this.settings = opts.settings
+      ? new SettingsModal(opts.settings, {
+          platform: this.platform,
+          defaultFontSize: opts.view?.fontSize ?? DEFAULT_FONT_SIZE,
+          chooseTheme: () => this.run({ kind: "themes" }),
+          onClose: () => this.focusedPane?.view?.focus(),
+        })
+      : null;
+    this.root.append(this.sidebar.el, main, this.shortcuts.el);
+    if (this.settings) this.root.append(this.settings.el);
     if (this.picker) this.root.append(this.picker.el);
     if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
@@ -297,8 +308,14 @@ export class Workspace {
       this.shortcuts.toggle();
       return;
     }
+    if (action.kind === "settings") {
+      this.shortcuts.hide();
+      this.settings?.toggle();
+      return;
+    }
     if (action.kind === "themes") {
       this.shortcuts.hide();
+      this.settings?.hide();
       void this.picker?.open();
       return;
     }
@@ -354,10 +371,20 @@ export class Workspace {
     }
   }
 
-  /** What's New: the changelog, with the running version marked. */
-  showChanges(changelog: string, version: string): void {
+  /** Settings, on `tab` (What's New is the Updates tab). */
+  openSettings(tab?: SettingsTab): void {
     this.shortcuts.hide();
-    this.changes.show(changelog, version);
+    this.settings?.show(tab);
+  }
+
+  /** Where updating stands, for Settings → Updates. */
+  setUpdateStatus(u: UpdateStatus): void {
+    this.settings?.setUpdate(u);
+  }
+
+  /** The config file's path, problems and themes, for Settings. */
+  setConfigInfo(info: ConfigInfo): void {
+    this.settings?.setInfo(info);
   }
 
   /** Show a pane whose agent waits for the user (the menu-bar icon's
@@ -427,12 +454,15 @@ export class Workspace {
     // The theme picker's search field takes the keys while it's open.
     if (this.picker?.visible) return;
     const action = actionFor(e, this.platform);
-    // What's New: a key closes it (scroll it with the mouse).
-    if (this.changes.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
-      e.preventDefault();
-      e.stopPropagation();
-      this.changes.hide();
-      this.focusedPane?.view?.focus();
+    // Settings takes the keys while open (its fields): Esc closes it, and
+    // so does its own shortcut. Nothing reaches the panes.
+    if (this.settings?.visible) {
+      if (e.key === "Escape" || action?.kind === "settings") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Escape") this.settings.hide();
+        else this.runOnce(action!, "key");
+      }
       return;
     }
     // While the shortcut sheet is open, a key closes it and goes nowhere
@@ -556,6 +586,7 @@ export class Workspace {
 
   /** The config file's settings: fonts and notifications. */
   setSettings(s: Settings): void {
+    this.settings?.setSettings(s);
     this.notifyOn = s.agent_notifications;
     const keys = JSON.stringify(s.keybind);
     if (keys !== this.keybinds) {

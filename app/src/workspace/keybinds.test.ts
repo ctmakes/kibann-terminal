@@ -38,6 +38,7 @@ describe("keybind lines", () => {
     expect(parseAction("goto_tab:3")).toEqual({ kind: "goToTab", index: 2 });
     expect(parseAction("navigate_search:previous")).toEqual({ kind: "findStep", older: false });
     expect(parseAction("toggle_sidebar")).toEqual({ kind: "sidebar" });
+    expect(parseAction("open_settings")).toEqual({ kind: "settings" });
     expect(parseAction("unbind")).toBe("unbind");
     expect(parseAction("toggle_quick_terminal")).toBe('unknown action "toggle_quick_terminal"');
   });
