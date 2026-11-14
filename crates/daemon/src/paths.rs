@@ -33,11 +33,16 @@ pub fn runtime_dir() -> PathBuf {
     std::env::temp_dir().join("kibann")
 }
 
+/// The socket a build uses when `KIBANN_SOCKET` doesn't name another.
+pub fn default_socket(dev: bool) -> PathBuf {
+    runtime_dir().join(socket_name(dev))
+}
+
 /// `KIBANN_SOCKET` if set, else the default socket for this kind of build.
 pub fn socket_path(dev: bool) -> PathBuf {
     match std::env::var_os("KIBANN_SOCKET") {
         Some(p) => PathBuf::from(p),
-        None => runtime_dir().join(socket_name(dev)),
+        None => default_socket(dev),
     }
 }
 

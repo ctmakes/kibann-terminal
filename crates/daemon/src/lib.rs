@@ -96,8 +96,11 @@ pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
             }
         }
     }
-    let own_socket = socket.is_some() || std::env::var_os("KIBANN_SOCKET").is_some();
-    let socket = socket.unwrap_or_else(|| paths::socket_path(cfg!(debug_assertions)));
+    let dev = cfg!(debug_assertions);
+    let socket = socket.unwrap_or_else(|| paths::socket_path(dev));
+    // The app always passes `--socket`, so only a socket other than the
+    // default one counts as a test's own (which keeps no layout).
+    let own_socket = socket != paths::default_socket(dev);
     // Read at start: the file may be rebuilt while we run.
     let build = std::env::current_exe()
         .and_then(|p| build_id(&p))
