@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-14
 
 The first public build, for Macs with Apple silicon.
 
