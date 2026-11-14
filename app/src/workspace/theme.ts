@@ -94,6 +94,17 @@ export function chromeFor(t: Theme): Record<string, string> {
   // The focused row in the sidebar: a tint of the theme's blue.
   v["--k-current"] = hex(mix(bg, t.palette[4] ?? 0x58a6ff, dark ? 0.32 : 0.22));
   v["--k-current-text"] = hex(dark ? mix(fg, 0xffffff, 0.5) : mix(fg, 0x000000, 0.3));
+  // Buttons, switches and links (Settings): the theme's blue, moved toward
+  // the foreground until it reads on the panel, with whichever text reads
+  // on it.
+  const panel = mix(bg, fg, MIX.panel);
+  let accent = t.palette[4] ?? (dark ? 0x58a6ff : 0x0969da);
+  for (let i = 0; i < 30 && contrast(accent, panel) < 4.5; i++) accent = mix(accent, dark ? 0xffffff : 0x000000, 0.08);
+  const onAccent =
+    [bg, fg].find((c) => contrast(c, accent) >= 4.5) ??
+    (contrast(0x000000, accent) > contrast(0xffffff, accent) ? 0x000000 : 0xffffff);
+  v["--k-accent"] = hex(accent);
+  v["--k-accent-text"] = hex(onAccent);
   v["--k-scrim"] = dark ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.25)";
   v["--k-shadow"] = dark ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.18)";
   return v;

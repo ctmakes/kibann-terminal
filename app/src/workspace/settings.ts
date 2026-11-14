@@ -104,18 +104,31 @@ function div(cls?: string, text?: string): HTMLDivElement {
   return d;
 }
 
+/** A button: `primary` is the tab's main action, solid in the accent
+ * blue; the others are outlined. */
 function button(text: string, run: () => void, primary = false): HTMLButtonElement {
   const b = document.createElement("button");
-  b.className = "settings-button";
+  b.className = primary ? "settings-button settings-primary" : "settings-button";
   b.textContent = text;
+  const rest = primary ? "var(--k-accent)" : "transparent";
   css(b, {
-    font: "12px -apple-system, system-ui, sans-serif",
-    padding: "3px 12px",
+    flex: "0 0 auto",
+    font: `${primary ? "500 " : ""}12px -apple-system, system-ui, sans-serif`,
+    padding: "4px 12px",
     borderRadius: "6px",
-    border: "1px solid var(--k-divider)",
-    background: primary ? "var(--k-current)" : "var(--k-tab)",
-    color: primary ? "var(--k-current-text)" : "var(--k-strong)",
+    border: primary ? "1px solid var(--k-accent)" : "1px solid var(--k-muted)",
+    background: rest,
+    color: primary ? "var(--k-accent-text)" : "var(--k-bright)",
     cursor: "default",
+  });
+  b.addEventListener("mouseenter", () => {
+    if (b.disabled) return;
+    if (primary) b.style.filter = "brightness(1.1)";
+    else b.style.background = "var(--k-tab)";
+  });
+  b.addEventListener("mouseleave", () => {
+    b.style.filter = "";
+    b.style.background = rest;
   });
   b.addEventListener("click", run);
   return b;
@@ -125,7 +138,7 @@ function link(text: string, run: () => void): HTMLAnchorElement {
   const a = document.createElement("a");
   a.textContent = text;
   a.href = "#";
-  css(a, { color: "var(--k-done)", textDecoration: "none", cursor: "pointer" });
+  css(a, { color: "var(--k-accent)", textDecoration: "none", cursor: "pointer" });
   a.addEventListener("click", (e) => {
     e.preventDefault();
     run();
@@ -400,7 +413,7 @@ export class SettingsModal {
         if (t.id === "updates" && this.update?.state === "ready") {
           const dot = document.createElement("span");
           dot.className = "settings-update-dot";
-          css(dot, { width: "7px", height: "7px", borderRadius: "50%", background: "var(--k-done)" });
+          css(dot, { width: "7px", height: "7px", borderRadius: "50%", background: "var(--k-accent)" });
           b.append(dot);
         }
         b.addEventListener("mousedown", (e) => {
@@ -462,7 +475,7 @@ export class SettingsModal {
       borderRadius: "9px",
       border: "none",
       padding: "0",
-      background: on ? "var(--k-done)" : "var(--k-divider)",
+      background: on ? "var(--k-accent)" : "var(--k-divider)",
       cursor: "default",
     });
     const knob = document.createElement("span");
@@ -527,6 +540,11 @@ export class SettingsModal {
       }
       rows.push(
         this.row(
+          "Preview panes in the sidebar",
+          "Hovering a pane in the sidebar shows it, live, beside the sidebar.",
+          this.switch("sidebar-preview", s.sidebar_preview, (x, on) => (x.sidebar_preview = on)),
+        ),
+        this.row(
           "Reopen tabs and splits",
           "After a restart, the tabs and splits come back with fresh shells in the same directories.",
           this.switch("restore-layout", s.restore_layout, (x, on) => (x.restore_layout = on)),
@@ -572,10 +590,14 @@ export class SettingsModal {
     css(themeBox, { display: "flex", alignItems: "center", gap: "12px" });
     themeBox.append(
       theme,
-      button("Choose…", () => {
-        this.hide();
-        this.hooks.chooseTheme();
-      }),
+      button(
+        "Choose…",
+        () => {
+          this.hide();
+          this.hooks.chooseTheme();
+        },
+        true,
+      ),
     );
     const out = [
       this.section(
@@ -753,7 +775,11 @@ export class SettingsModal {
         ),
       );
     } else if (u.state !== "dev") {
-      const b = button("Check for Updates", () => void this.api.checkUpdates().catch((e) => this.flash(`Couldn't check: ${e}`)));
+      const b = button(
+        "Check for Updates",
+        () => void this.api.checkUpdates().catch((e) => this.flash(`Couldn't check: ${e}`)),
+        true,
+      );
       b.disabled = !said.canCheck;
       if (b.disabled) b.style.opacity = "0.5";
       card.append(b);

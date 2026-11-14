@@ -101,6 +101,7 @@ const DEFAULTS: Settings = {
   keybind: [],
   restore_layout: true,
   menu_bar_icon: true,
+  sidebar_preview: true,
 };
 let current: Settings = { ...DEFAULTS };
 const saved: Array<[string, string[]]> = [];
@@ -125,6 +126,7 @@ const FIELDS: Record<string, keyof Settings> = {
   "agent-notifications": "agent_notifications",
   "menu-bar-icon": "menu_bar_icon",
   "restore-layout": "restore_layout",
+  "sidebar-preview": "sidebar_preview",
   "font-family": "font_family",
   "font-size": "font_size",
 };

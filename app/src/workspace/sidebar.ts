@@ -151,6 +151,7 @@ export class Sidebar {
   private readonly preview: HTMLCanvasElement;
   private previewing: PaneId | null = null;
   private previewTimer = 0;
+  private previews = true;
   /** Expanded to a list; otherwise the rail. */
   expanded = false;
   width = SIDEBAR.default;
@@ -527,7 +528,14 @@ export class Sidebar {
     return this.panes.find((p) => p.id === id);
   }
 
+  /** Hovering a row shows the pane (the config's `sidebar-preview`). */
+  setPreviews(on: boolean): void {
+    this.previews = on;
+    if (!on) this.hidePreview();
+  }
+
   private showPreview(id: PaneId): void {
+    if (!this.previews) return;
     this.previewing = id;
     this.paintPreview();
   }

@@ -41,8 +41,22 @@ describe("chromeFor", () => {
         }
       }
       expect(contrast(num(v["--k-current-text"]), num(v["--k-current"]))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent"]), num(v["--k-panel"])), "accent on panel").toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent-text"]), num(v["--k-accent"])), "text on accent").toBeGreaterThanOrEqual(4.5);
     });
   }
+
+  it("takes the accent from the theme's blue, and fixes one that wouldn't read", () => {
+    const cyan = { ...DRACULA, palette: [...DRACULA.palette.slice(0, 4), 0x8be9fd, ...DRACULA.palette.slice(5)] };
+    expect(chromeFor(cyan)["--k-accent"]).toBe("#8be9fd");
+    // A pale blue on white, and a navy on black, are moved until they read.
+    const pale = chromeFor({ ...LIGHT, palette: [...LIGHT.palette.slice(0, 4), 0xa0c8ff, ...LIGHT.palette.slice(5)] });
+    const navy = chromeFor({ ...KIBANN_DARK, palette: [...KIBANN_DARK.palette.slice(0, 4), 0x000060, ...KIBANN_DARK.palette.slice(5)] });
+    for (const v of [pale, navy]) {
+      expect(contrast(num(v["--k-accent"]), num(v["--k-panel"]))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent-text"]), num(v["--k-accent"]))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 
   it("uses the status colors meant for the background", () => {
     expect(chromeFor(KIBANN_DARK)["--k-working"]).toBe("#3fb950");

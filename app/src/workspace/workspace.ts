@@ -587,6 +587,7 @@ export class Workspace {
   /** The config file's settings: fonts and notifications. */
   setSettings(s: Settings): void {
     this.settings?.setSettings(s);
+    this.sidebar.setPreviews(s.sidebar_preview);
     this.notifyOn = s.agent_notifications;
     const keys = JSON.stringify(s.keybind);
     if (keys !== this.keybinds) {

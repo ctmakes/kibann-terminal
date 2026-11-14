@@ -8,6 +8,7 @@
 //! agent-notifications = false
 //! keybind = super+shift+d=new_split:down   # repeated; see app/src/workspace/keybinds.ts
 //! restore-layout = false
+//! sidebar-preview = false
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,8 @@ pub struct Settings {
     /// bar, so agents can still notify. Off: closing the window quits the
     /// app (the shells keep running in the daemon either way).
     pub menu_bar_icon: bool,
+    /// Hovering a pane's row in the sidebar shows the pane beside it.
+    pub sidebar_preview: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +52,7 @@ impl Default for Settings {
             keybind: Vec::new(),
             restore_layout: true,
             menu_bar_icon: true,
+            sidebar_preview: true,
         }
     }
 }
@@ -105,6 +109,11 @@ impl Settings {
                     "false" => s.menu_bar_icon = false,
                     _ => errors.push(bad("menu-bar-icon (true or false)")),
                 },
+                "sidebar-preview" => match v {
+                    "true" => s.sidebar_preview = true,
+                    "false" => s.sidebar_preview = false,
+                    _ => errors.push(bad("sidebar-preview (true or false)")),
+                },
                 _ => {}
             }
         }
@@ -118,6 +127,7 @@ pub const SETTABLE: &[&str] = &[
     "agent-notifications",
     "menu-bar-icon",
     "restore-layout",
+    "sidebar-preview",
     "font-family",
     "font-size",
 ];
@@ -233,7 +243,7 @@ mod tests {
     #[test]
     fn parses_fonts_and_switches() {
         let (s, e) = Settings::parse(
-            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\nkeybind = clear\nkeybind = super+d=new_split:down # mine\nrestore-layout = false\nmenu-bar-icon = false\n",
+            "# mine\ntheme = Nord\nfont-family = \"Berkeley Mono\"\nfont-family = Symbols Nerd Font # icons\nfont-size = 13.5\nagent-notifications = false\nkeybind = clear\nkeybind = super+d=new_split:down # mine\nrestore-layout = false\nmenu-bar-icon = false\nsidebar-preview = false\n",
         );
         assert!(e.is_empty(), "{e:?}");
         assert_eq!(s.font_family, ["Berkeley Mono", "Symbols Nerd Font"]);
@@ -242,6 +252,7 @@ mod tests {
         assert_eq!(s.keybind, ["clear", "super+d=new_split:down"]);
         assert!(!s.restore_layout);
         assert!(!s.menu_bar_icon);
+        assert!(!s.sidebar_preview);
     }
 
     #[test]

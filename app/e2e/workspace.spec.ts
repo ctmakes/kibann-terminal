@@ -698,6 +698,24 @@ test.describe("sidebar", () => {
     await expect(gear).toBeHidden();
   });
 
+  test("sidebar-preview = false: hovering shows no preview, and Settings turns it back on", async ({ page }) => {
+    await three(page);
+    await page.evaluate(() => (window as any).__ws.setSettings({ sidebar_preview: false }));
+    await page.locator('.sidebar-card[data-pane="3"]').hover();
+    await page.waitForTimeout(100);
+    await expect(page.locator(".sidebar-preview")).toBeHidden();
+    await press(page, "Meta+Comma");
+    await page.locator('.settings-tab[data-tab="general"]').click();
+    const sw = page.locator('.settings-switch[data-key="sidebar-preview"]');
+    await expect(sw).toHaveAttribute("aria-checked", "false");
+    await sw.click();
+    expect(await page.evaluate(() => (window as any).__ws.saved)).toEqual([["sidebar-preview", ["true"]]]);
+    await page.keyboard.press("Escape");
+    await page.mouse.move(600, 300);
+    await page.locator('.sidebar-card[data-pane="2"]').hover();
+    await expect(page.locator(".sidebar-preview")).toBeVisible();
+  });
+
   test("the rail: a badge shows its pane and previews it", async ({ page }) => {
     await three(page);
     await page.locator('.sidebar-card[data-pane="2"]').click();

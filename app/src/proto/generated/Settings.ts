@@ -30,4 +30,8 @@ restore_layout: boolean,
  * bar, so agents can still notify. Off: closing the window quits the
  * app (the shells keep running in the daemon either way).
  */
-menu_bar_icon: boolean, };
+menu_bar_icon: boolean, 
+/**
+ * Hovering a pane's row in the sidebar shows the pane beside it.
+ */
+sidebar_preview: boolean, };

@@ -133,7 +133,7 @@ Ahead/behind are as fresh as your last fetch; Kibann never fetches. `kibann pane
 
 The sidebar on the left lists every pane of every tab, one compact row each (agent dot, title, branch, `●5`), grouped by repository (panes outside one are grouped by directory).
 - **Order:** groups with an agent waiting for you come first, then finished, then working.
-- **Hover** a row to see a live preview of the pane beside the sidebar.
+- **Hover** a row to see a live preview of the pane beside the sidebar (`sidebar-preview = false` turns it off).
 - **Click** a row to go to its pane, or its `●5` for the diff.
 
 The sidebar never hides completely.
@@ -187,7 +187,7 @@ The app checks for a new version a few seconds after it starts and then every ho
 
 **Cmd+,** (Ctrl+, elsewhere), Kibann Terminal → Settings…, or the gear at the bottom of the sidebar opens Settings:
 
-- **General:** notifications, the menu-bar icon (macOS) and restoring tabs and splits. Also the config file's location, with buttons to open it or show it in Finder, and any lines in it that can't be used.
+- **General:** notifications, the menu-bar icon (macOS), the sidebar's hover preview, and restoring tabs and splits. Also the config file's location, with buttons to open it or show it in Finder, and any lines in it that can't be used.
 - **Appearance:** the theme (Choose… opens the live picker), the font (a list of your installed monospaced fonts on macOS) and its size.
 - **Shortcuts:** every shortcut. They're changed in the config file, below.
 - **About** and **Updates:** the version, Check for Updates, and the release notes.
@@ -207,6 +207,7 @@ keybind = super+shift+d=new_split:down
 agent-notifications = true   # notify when an agent waits or finishes
 restore-layout = true        # bring tabs and splits back after a reboot
 menu-bar-icon = true         # macOS: keep running in the menu bar when the window closes
+sidebar-preview = true       # hovering a pane in the sidebar shows it
 ```
 
 ### Themes
