@@ -93,7 +93,24 @@ impl Selector {
         self.active = false;
     }
 
-    pub fn press(&mut self, term: &Terminal<'_, '_>, size: Resize, x: f32, y: f32) -> Result<()> {
+    /// A left press. With `extend` (Shift) and a selection whose gesture is
+    /// still known, the press continues that gesture as a drag, as in
+    /// Ghostty: the selection runs from where it started to the pointer
+    /// (by words or lines after a double or triple click), and dragging on
+    /// keeps extending it.
+    pub fn press(
+        &mut self,
+        term: &Terminal<'_, '_>,
+        size: Resize,
+        x: f32,
+        y: f32,
+        extend: bool,
+    ) -> Result<()> {
+        if extend && term.selection()?.is_some() && self.gesture.anchor(term)?.is_some() {
+            self.active = true;
+            let rectangle = self.rectangle;
+            return self.drag(term, size, x, y, rectangle);
+        }
         let (cx, cy) = cell(size, x, y);
         let at = term.grid_ref(viewport(cx, cy))?;
         self.press

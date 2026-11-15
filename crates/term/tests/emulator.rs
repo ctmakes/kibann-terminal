@@ -474,6 +474,57 @@ fn drag_selects_and_reports_text() {
     assert!(e.build_frame(false).unwrap().is_none());
 }
 
+fn shift_click(e: &mut Emulator, col: f32, row: f32) {
+    let m = proto::mods::SHIFT;
+    e.input(&mouse(MouseAction::Press, col, row, m)).unwrap();
+    e.input(&mouse(MouseAction::Release, col, row, m)).unwrap();
+}
+
+#[test]
+fn shift_click_extends_the_selection() {
+    let mut e = emu();
+    e.write(b"hello world");
+    drag(&mut e, (2.0, 0.0), (4.0, 0.0), 0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("llo"));
+    // Past the end: up to the pointer, from where the drag started.
+    shift_click(&mut e, 8.3, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("llo wor"));
+    // Before the start: from the start back to the pointer.
+    shift_click(&mut e, 0.0 - 0.3, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("he"));
+}
+
+#[test]
+fn shift_click_after_a_double_click_extends_by_words() {
+    let mut e = emu();
+    e.write(b"hello big world");
+    click(&mut e, 1.0, 0.0);
+    click(&mut e, 1.0, 0.0);
+    shift_click(&mut e, 11.0, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(f.selection_text.as_deref(), Some("hello big world"));
+}
+
+#[test]
+fn shift_click_without_a_selection_is_a_click() {
+    let mut e = emu();
+    e.write(b"hello world");
+    shift_click(&mut e, 3.0, 0.0);
+    e.build_frame(false).unwrap();
+    drag(&mut e, (0.0, 0.0), (1.0, 0.0), 0);
+    click(&mut e, 5.0, 0.0);
+    shift_click(&mut e, 8.0, 0.0);
+    let f = e.build_frame(false).unwrap().unwrap();
+    assert_eq!(
+        f.selection_text.as_deref(),
+        Some(""),
+        "a plain click cleared it"
+    );
+}
+
 #[test]
 fn double_and_triple_click() {
     let mut e = emu();

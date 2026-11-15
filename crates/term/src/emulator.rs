@@ -546,7 +546,10 @@ impl Emulator {
                     MouseAction::Press
                         if *button == Some(1) && (!tracking || m.contains(Mods::SHIFT)) =>
                     {
-                        return self.sel.press(&self.term, self.size, *x, *y);
+                        // Shift extends a selection, unless it's what takes the
+                        // mouse back from a program.
+                        let extend = !tracking && m.contains(Mods::SHIFT);
+                        return self.sel.press(&self.term, self.size, *x, *y, extend);
                     }
                     MouseAction::Motion if self.sel.active() => {
                         return self
