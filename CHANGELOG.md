@@ -5,6 +5,18 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.5.0] - Unreleased
+
+- Updates now take full effect. The terminal service that keeps your shells
+  running survived updates, so fixes to how the terminal behaves (such as
+  0.4.0's Shift-click) only arrived once it happened to restart. After an
+  update, Kibann now restarts the service on its own when every shell is at
+  its prompt, and your tabs and splits come back in the same folders.
+  When something is running in a pane, it asks first and names what would
+  end.
+- The first time, the service from the earlier version hadn't saved your
+  layout; Kibann now saves it before restarting, so your tabs come back.
+
 ## [0.4.0] - 2026-11-15
 
 - Shift-click extends the selection to where you click, as in Ghostty (by
