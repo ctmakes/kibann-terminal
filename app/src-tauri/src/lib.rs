@@ -7,6 +7,8 @@
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod fonts;
 mod open;
+#[cfg(unix)]
+mod service;
 mod theme;
 #[cfg(target_os = "macos")]
 mod titlebar;
@@ -73,10 +75,19 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
     }
 }
 
-/// A running daemon this build can't talk to (a release build found one
-/// from a version with another protocol).
+/// The daemon [`connect`] found or started.
 #[cfg(unix)]
-struct Outdated;
+enum Connected {
+    /// This build's.
+    Current(Client),
+    /// An earlier version's, with programs running in its shells (so it
+    /// wasn't restarted on its own; see [`service`]). The update's terminal
+    /// changes wait for it to restart.
+    Older(Client, Vec<String>),
+    /// An earlier version's that this build can't talk to (another
+    /// protocol).
+    Outdated,
+}
 
 /// What to do with the daemon found on the socket.
 #[derive(Debug, PartialEq, Eq)]
@@ -84,13 +95,18 @@ enum Found {
     Use,
     /// End it and start ours (dev builds only: it ends the sessions).
     Restart,
+    /// An earlier release's: usable, but its terminal behaviour is old
+    /// (release builds, same protocol).
+    Older,
     /// Ask the user (release builds, protocol changed).
     Outdated,
 }
 
 fn decide(dev: bool, same_protocol: bool, same_build: bool, restarted: bool) -> Found {
-    if restarted || (same_protocol && (same_build || !dev)) {
+    if restarted || (same_protocol && same_build) {
         Found::Use
+    } else if same_protocol && !dev {
+        Found::Older
     } else if dev {
         Found::Restart
     } else {
@@ -115,7 +131,8 @@ mod tests {
     fn which_daemons_are_kept() {
         // Release: an upgrade keeps the sessions unless the protocol changed.
         assert_eq!(decide(false, true, true, false), Found::Use);
-        assert_eq!(decide(false, true, false, false), Found::Use);
+        assert_eq!(decide(false, true, false, false), Found::Older);
+        assert_eq!(decide(false, true, false, true), Found::Use);
         assert_eq!(decide(false, false, false, false), Found::Outdated);
         // Dev: any other build is replaced, once.
         assert_eq!(decide(true, true, true, false), Found::Use);
@@ -144,11 +161,13 @@ fn stop_daemon(client: Client, socket: &std::path::Path) -> std::io::Result<()> 
 /// binary, and nothing extra has to be packaged).
 ///
 /// A daemon from another build: a dev build restarts it, so new terminal
-/// code takes effect (ending dev sessions); a release build keeps using it
-/// when the protocol matches, so upgrading doesn't end running sessions, and
-/// otherwise reports it as [`Outdated`] for the user to decide.
+/// code takes effect (ending dev sessions). A release build restarts it too
+/// when the protocol matches and every shell is at its prompt, keeping the
+/// layout; with programs running it keeps using it ([`Connected::Older`])
+/// and asks. Another protocol is [`Connected::Outdated`], for the user to
+/// decide.
 #[cfg(unix)]
-fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Result<Client, Outdated>> {
+fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
     use proto::wire::PROTOCOL_VERSION;
 
     let dev = cfg!(debug_assertions);
@@ -163,8 +182,22 @@ fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Result<Clien
         let (version, build) = client.hello()?;
         let same_build = Some(&build) == expected.as_ref();
         match decide(dev, version == PROTOCOL_VERSION, same_build, restarted) {
-            Found::Use => return Ok(Ok(client)),
-            Found::Outdated => return Ok(Err(Outdated)),
+            Found::Use => return Ok(Connected::Current(client)),
+            Found::Outdated => return Ok(Connected::Outdated),
+            Found::Older => {
+                let running = service::running_programs(&socket);
+                let keeps_layout = theme::read_settings().0.restore_layout;
+                if running.as_ref().is_none_or(|r| !r.is_empty()) || !keeps_layout {
+                    return Ok(Connected::Older(client, running.unwrap_or_default()));
+                }
+                eprintln!("kibann: restarting the idle daemon of build {build}");
+                if let Err(e) = service::save_layout(&client) {
+                    eprintln!("kibann: saving the layout: {e}");
+                    return Ok(Connected::Older(client, Vec::new()));
+                }
+                stop_daemon(client, &socket)?;
+                restarted = true;
+            }
             Found::Restart => {
                 eprintln!("kibann: restarting the daemon (build {build}, want {expected:?})");
                 stop_daemon(client, &socket)?;
@@ -199,6 +232,54 @@ fn offer_restart(app: &AppHandle) {
             }
             let socket = daemon::paths::socket_path(cfg!(debug_assertions));
             if let Ok(old) = Client::connect(&socket, |_| {}) {
+                let _ = stop_daemon(old, &socket);
+            }
+            handle.restart();
+        });
+}
+
+/// The service from an earlier version still runs programs in its shells:
+/// ask before restarting it, which ends them.
+#[cfg(unix)]
+fn offer_update_restart(app: &AppHandle, running: &[String]) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let keeps_layout = theme::read_settings().0.restore_layout;
+    let ends = if running.is_empty() {
+        "Restarting ends the open terminals".to_owned()
+    } else {
+        format!(
+            "Restarting ends what runs in them ({})",
+            service::list(running)
+        )
+    };
+    let after = if keeps_layout {
+        "your tabs and splits come back with fresh shells"
+    } else {
+        "the tabs close (restore-layout is off)"
+    };
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "This update changes how the terminal behaves, but the terminal service \
+             from the earlier version is still running your shells.\n\n\
+             {ends}; {after}. Until then the earlier behaviour stays. \
+             Next time every shell is at its prompt, the restart happens on its own."
+        ))
+        .title("Restart the terminal service?")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Restart Now".into(),
+            "Later".into(),
+        ))
+        .show(move |restart| {
+            if !restart {
+                return;
+            }
+            let socket = daemon::paths::socket_path(cfg!(debug_assertions));
+            if let Ok(old) = Client::connect(&socket, |_| {}) {
+                if keeps_layout && let Err(e) = service::save_layout(&old) {
+                    eprintln!("kibann: saving the layout: {e}");
+                }
                 let _ = stop_daemon(old, &socket);
             }
             handle.restart();
@@ -993,8 +1074,12 @@ pub fn run() {
             let local = || Client::in_process(on_event(handle.clone(), channels.clone()));
             #[cfg(unix)]
             let client = match connect(handle, &channels) {
-                Ok(Ok(client)) => client,
-                Ok(Err(Outdated)) => {
+                Ok(Connected::Current(client)) => client,
+                Ok(Connected::Older(client, running)) => {
+                    offer_update_restart(handle, &running);
+                    client
+                }
+                Ok(Connected::Outdated) => {
                     offer_restart(handle);
                     local()?
                 }

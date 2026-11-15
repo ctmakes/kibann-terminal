@@ -80,6 +80,13 @@ impl Saver {
     }
 }
 
+/// Write `s` to `path` now, for a client saving the layout of a daemon that
+/// can't save it itself (one from before layouts were saved).
+pub fn save(path: &Path, s: &Saved) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(s).map_err(std::io::Error::other)?;
+    write(path, &text)
+}
+
 /// Write through a temporary file, so a crash never leaves half a file.
 fn write(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
