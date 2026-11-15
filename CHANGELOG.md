@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-11-15
 
 - Updates now take full effect. The terminal service that keeps your shells
   running survived updates, so fixes to how the terminal behaves (such as
