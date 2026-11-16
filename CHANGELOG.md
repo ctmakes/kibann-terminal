@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.5.1] - Unreleased
+
+- A folder you turn into a git repository (`git init`, or a clone into
+  it) now shows its branch and uncommitted changes as soon as you're back
+  at the prompt. Until now they appeared only after you left the folder
+  and came back.
+
 ## [0.5.0] - 2026-11-15
 
 - Updates now take full effect. The terminal service that keeps your shells
