@@ -811,6 +811,46 @@ fn panes_know_their_checkout() {
     h.join().unwrap().unwrap();
 }
 
+#[test]
+fn git_init_in_place_shows_up() {
+    let path = socket();
+    let dir = path.parent().unwrap().join("fresh");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.canonicalize().unwrap();
+
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let app = Client::connect(&path, f).unwrap();
+    app.watch().unwrap();
+    let (p, _) = app
+        .act(Action::NewTab {
+            near: None,
+            cwd: Some(dir.to_string_lossy().into_owned()),
+            argv: Some(vec!["/bin/sh".into()]),
+            focus: true,
+        })
+        .unwrap();
+    let p = p.unwrap();
+    next_git(&rx, p, "the directory", |d| {
+        d.git.is_none() && d.dir == dir.to_string_lossy()
+    });
+
+    // Same directory, now a repository: found once the prompt is back.
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    type_text(
+        &app,
+        p,
+        "GIT_CONFIG_GLOBAL=/dev/null git -c init.defaultBranch=main init -q\r",
+    );
+    next_git(&rx, p, "the new repository", |d| {
+        d.git
+            .as_ref()
+            .is_some_and(|g| g.branch.as_deref() == Some("main") && g.changed == 1)
+    });
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
 /// The next frame for `session` whose default background is `bg`.
 fn frame_with_bg(c: &Client, rx: &Receiver<Ev>, session: SessionId, bg: u32) {
     let deadline = Instant::now() + Duration::from_secs(5);

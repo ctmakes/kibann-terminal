@@ -63,6 +63,25 @@ pub struct Foreground {
     pub at_shell: bool,
     /// The working directory, as [`Session::cwd`] finds it.
     pub cwd: Option<PathBuf>,
+    /// Lines entered so far (Enter, or a newline typed or pasted). A
+    /// quick command can start and end between two looks at the
+    /// foreground; this still tells that one ran.
+    pub entered: u64,
+}
+
+/// Whether `e` enters a line.
+fn enters(e: &InputEvent) -> bool {
+    use proto::KeyAction;
+    match e {
+        InputEvent::Key {
+            action: KeyAction::Press | KeyAction::Repeat,
+            code,
+            composing: false,
+            ..
+        } => code == "Enter" || code == "NumpadEnter",
+        InputEvent::Text { data } | InputEvent::Paste { data } => data.contains(['\r', '\n']),
+        _ => false,
+    }
 }
 
 /// How often at most to look at the screen for an agent's state while
@@ -485,6 +504,7 @@ impl Pty {
             agent,
             at_shell: fg.is_some() && fg == shell,
             cwd: emu.reported_dir().or_else(|| self.cwd()),
+            entered: 0,
         }
     }
 
@@ -530,6 +550,7 @@ fn run(
     // Next look at the screen for an agent's state, and the last result.
     let mut agent_due: Option<Instant> = None;
     let mut foreground: Option<Foreground> = None;
+    let mut entered: u64 = 0;
 
     loop {
         let exit_wait = exit
@@ -593,6 +614,9 @@ fn run(
                         )
                     {
                         let _ = r.marker(&serde_json::to_string(&e).unwrap_or_default());
+                    }
+                    if enters(&e) {
+                        entered += 1;
                     }
                     let _ = emu.input(&e);
                     // Selection and scrolling change the screen with no output.
@@ -701,7 +725,10 @@ fn run(
             && let Some(m) = &master
         {
             agent_due = None;
-            let now_fg = m.foreground(&emu);
+            let now_fg = Foreground {
+                entered,
+                ..m.foreground(&emu)
+            };
             if foreground.as_ref() != Some(&now_fg) {
                 foreground = Some(now_fg.clone());
                 if let Some(sink) = p.sink.as_mut() {

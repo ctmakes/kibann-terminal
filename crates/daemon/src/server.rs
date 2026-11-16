@@ -52,6 +52,8 @@ struct Place {
     /// The checkout's root (watched in [`Daemon::git`] for this pane).
     root: Option<PathBuf>,
     at_shell: bool,
+    /// [`Foreground::entered`] when last seen.
+    entered: u64,
 }
 
 /// `dir` with the home directory shown as `~`.
@@ -811,12 +813,28 @@ impl Daemon {
         // Where it is. A new directory is looked up off this (the
         // session's) thread: it runs git.
         let place = st.places.entry(id).or_default();
-        let back_at_shell = fg.at_shell && !place.at_shell;
+        // Back at the prompt, or a line entered there (a command too quick
+        // to be seen running, like `git init`).
+        let back_at_shell = fg.at_shell && (!place.at_shell || fg.entered != place.entered);
         place.at_shell = fg.at_shell;
+        place.entered = fg.entered;
+        let moved = fg.cwd.as_ref().is_some_and(|dir| *dir != place.dir);
         if let Some(dir) = fg.cwd
-            && dir != place.dir
+            && moved
         {
-            place.dir = dir.clone();
+            place.dir = dir;
+        }
+        // Events can be missed; a prompt coming back or an agent finishing
+        // is a good moment to look again. Look the checkout up again too:
+        // `git init`, a clone into `.` or `rm -rf .git` change it without
+        // a new directory.
+        if (back_at_shell || finished)
+            && let Some(root) = &place.root
+        {
+            self.git.refresh(root);
+        }
+        if moved || ((back_at_shell || finished) && !place.dir.as_os_str().is_empty()) {
+            let dir = place.dir.clone();
             let me = self.me.clone();
             let _ = thread::Builder::new()
                 .name("daemon-git-discover".into())
@@ -826,13 +844,6 @@ impl Daemon {
                         d.pane_checkout(id, &dir, checkout);
                     }
                 });
-        }
-        // Events can be missed; a prompt coming back or an agent finishing
-        // is a good moment to look again.
-        if (back_at_shell || finished)
-            && let Some(root) = &place.root
-        {
-            self.git.refresh(root);
         }
         st.git_changed(&self.git);
     }
