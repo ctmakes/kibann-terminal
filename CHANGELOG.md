@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.5.1] - Unreleased
+## [0.5.1] - 2026-11-16
 
 - A folder you turn into a git repository (`git init`, or a clone into
   it) now shows its branch and uncommitted changes as soon as you're back
