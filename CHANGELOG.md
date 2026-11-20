@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.5.2] - Unreleased
+## [0.5.2] - 2026-11-21
 
 - A pane no longer freezes after the Mac sleeps. A busy pane, such as
   one running Claude Code, could stop updating for good: it showed the
