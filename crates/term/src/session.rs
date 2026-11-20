@@ -102,6 +102,8 @@ enum Msg {
     Attach(Sink),
     Cwd(Sender<Option<PathBuf>>),
     Title(Sender<String>),
+    Program(Sender<Option<Vec<String>>>),
+    Show(Vec<u8>),
     Read(ReadSource, Option<usize>, Sender<String>),
     Shutdown,
 }
@@ -271,6 +273,20 @@ impl Session {
         self.send(Msg::Title(tx));
         rx.recv_timeout(Duration::from_millis(500))
             .unwrap_or_default()
+    }
+
+    /// The program running in the foreground, `argv[0]` first, when it
+    /// isn't the shell itself. `None` at the prompt, or when unknown.
+    pub fn program(&self) -> Option<Vec<String>> {
+        let (tx, rx) = mpsc::channel();
+        self.send(Msg::Program(tx));
+        rx.recv_timeout(Duration::from_millis(500)).ok().flatten()
+    }
+
+    /// Put `text` on the screen as if the program had printed it, without
+    /// it reaching the program: Kibann's own notes in a pane.
+    pub fn show(&self, text: &str) {
+        self.send(Msg::Show(text.as_bytes().to_vec()));
     }
 
     /// The pane's text (see [`crate::read::text`]). Empty if the session is
@@ -480,6 +496,16 @@ impl Pty {
         self.shell_pid.and_then(|p| i32::try_from(p).ok())
     }
 
+    /// The foreground program's arguments, when it isn't the shell.
+    fn program(&self) -> Option<Vec<String>> {
+        let fg = self.foreground_pid()?;
+        let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok());
+        if Some(fg) == shell {
+            return None;
+        }
+        crate::process::argv(fg).filter(|a| !a.is_empty())
+    }
+
     /// The foreground program, and if it is a known agent, its state.
     fn foreground(&self, emu: &Emulator) -> Foreground {
         let fg = self.foreground_pid();
@@ -663,6 +689,13 @@ fn run(
                 }
                 Msg::Title(reply) => {
                     let _ = reply.send(emu.title());
+                }
+                Msg::Program(reply) => {
+                    let _ = reply.send(master.as_ref().and_then(Pty::program));
+                }
+                Msg::Show(data) => {
+                    emu.write(&data);
+                    p.dirty = true;
                 }
                 Msg::Read(source, lines, reply) => {
                     let text = crate::read::text(emu.terminal(), emu.size(), source, lines);

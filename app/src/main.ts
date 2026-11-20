@@ -10,6 +10,7 @@ import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
 import type { ConfigInfo, SettingsApi, UpdateStatus } from "./workspace/settings";
 import type { ThemeApi, ThemeEntry } from "./workspace/theme";
+import type { LayoutApi, LayoutEntry } from "./workspace/layouts";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -76,10 +77,17 @@ async function start(): Promise<void> {
     changelog: () => invoke<[string, string]>("changelog"),
     openUrl: (url) => void invoke("open_link", { target: url }),
   };
+  // Layout files: read, checked and written by the app's backend.
+  const layouts: LayoutApi = {
+    list: (pane) => invoke<LayoutEntry[]>("layouts_list", { pane }),
+    open: (entry, pane) => invoke<boolean>("layout_open", { name: entry.name, path: entry.path ?? null, pane }),
+    save: (name, force) => invoke<string>("layout_save", { name, force }),
+  };
   const ws = new Workspace(el, {
     settings: settingsApi,
     backend,
     themes,
+    layouts,
     firstRunHint: true,
     transport: (pane) => new TauriTransport(pane),
     onTitle: (title) => void win.setTitle(title),

@@ -102,8 +102,33 @@ impl Model {
             tree: Tree::leaf(pane),
             focused: pane,
             zoomed: None,
+            title: None,
         });
         if focus || self.layout.active.is_none() {
+            self.layout.active = Some(id);
+        }
+        id
+    }
+
+    /// A new tab holding `tree`, after the others, focused on `focused`;
+    /// shown with `show` (or when it's the only one).
+    pub fn add_tab(
+        &mut self,
+        tree: Tree,
+        focused: PaneId,
+        title: Option<String>,
+        show: bool,
+    ) -> TabId {
+        self.next_tab += 1;
+        let id = self.next_tab;
+        self.layout.tabs.push(Tab {
+            id,
+            tree,
+            focused,
+            zoomed: None,
+            title,
+        });
+        if show || self.layout.active.is_none() {
             self.layout.active = Some(id);
         }
         id

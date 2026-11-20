@@ -31,6 +31,16 @@ export class Model {
     return id;
   }
 
+  /** A new tab holding `tree`, after the others (a layout file's). */
+  addTab(tree: LayoutTab["tree"], focused: PaneId, title: string | null, show: boolean): TabId {
+    const id = ++this.nextTab;
+    const tab: LayoutTab = { id, tree, focused, zoomed: null };
+    if (title) tab.title = title;
+    this.layout.tabs.push(tab);
+    if (show || this.layout.active === null) this.layout.active = id;
+    return id;
+  }
+
   split(target: PaneId, dir: Dir, pane: PaneId, focus: boolean): TabId | null {
     const tab = this.tabOf(target);
     if (!tab) return null;

@@ -159,6 +159,9 @@ pub struct PaneInfo {
     pub state: Option<AgentState>,
     /// The git checkout the pane is in, if any.
     pub git: Option<GitInfo>,
+    /// The program running in it, `argv[0]` first, when it isn't the shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

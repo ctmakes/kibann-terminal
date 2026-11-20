@@ -619,7 +619,10 @@ pub fn write(
             .cloned()
             .flatten()
             .filter(|d| dirs.iter().all(|x| x.as_deref() == Some(d)));
-        if let Some(d) = &common {
+        if let Some(d) = common
+            .as_ref()
+            .filter(|d| !(d.as_str() == "." && opts.relative_to.is_some()))
+        {
             out.push_str(&format!("cwd = {}\n", quote(d)));
         }
         let focus = (order.first() != Some(&t.focused)).then_some(t.focused);
@@ -679,7 +682,13 @@ impl Writer<'_> {
             match node {
                 Tree::Leaf { pane } => {
                     let cwd = self.cwd(*pane);
-                    if let Some(c) = cwd.as_deref().filter(|c| Some(*c) != tab_cwd) {
+                    // "." is where relative paths start anyway.
+                    let implied =
+                        |c: &str| tab_cwd.is_none() && c == "." && self.opts.relative_to.is_some();
+                    if let Some(c) = cwd
+                        .as_deref()
+                        .filter(|c| Some(*c) != tab_cwd && !implied(c))
+                    {
                         keys.push(format!("cwd = {}", quote(c)));
                     }
                     if let Some(c) = &self.pane(*pane).command {

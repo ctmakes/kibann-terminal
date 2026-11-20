@@ -53,6 +53,11 @@ pub struct Tab {
     pub focused: PaneId,
     /// The pane shown alone, filling the tab.
     pub zoomed: Option<PaneId>,
+    /// A name given to the tab (by a layout file); the tab bar shows it in
+    /// place of the focused pane's title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
@@ -116,6 +121,10 @@ pub enum Action {
         tab: TabId,
         #[ts(optional)]
         pane: Option<PaneId>,
+    },
+    /// Open a layout file's tabs after the others, and show its active one.
+    OpenLayout {
+        template: Template,
     },
 }
 

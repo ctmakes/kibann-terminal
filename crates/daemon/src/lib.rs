@@ -8,7 +8,9 @@
 
 pub mod cli;
 pub mod client;
+pub mod installed;
 pub mod layout;
+pub mod layouts;
 pub mod outbox;
 pub mod paths;
 pub mod pipe;

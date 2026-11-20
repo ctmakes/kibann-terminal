@@ -5,4 +5,9 @@ export type LayoutTab = { id: number, tree: Tree, focused: number,
 /**
  * The pane shown alone, filling the tab.
  */
-zoomed: number | null, };
+zoomed: number | null, 
+/**
+ * A name given to the tab (by a layout file); the tab bar shows it in
+ * place of the focused pane's title.
+ */
+title?: string, };

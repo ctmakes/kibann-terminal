@@ -46,14 +46,7 @@ fn bundled() -> &'static [(&'static str, &'static str, bool)] {
 
 /// Where the config file and the user's themes live.
 pub fn config_dir() -> Option<PathBuf> {
-    if let Some(d) = std::env::var_os("KIBANN_CONFIG_DIR") {
-        return Some(PathBuf::from(d));
-    }
-    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(d).join("kibann"));
-    }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".config").join("kibann"))
+    daemon::paths::config_dir()
 }
 
 pub fn config_file() -> Option<PathBuf> {

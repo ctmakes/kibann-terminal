@@ -1,0 +1,14 @@
+# An agent on the left; the changes on the right: lazygit (or tig, or the
+# log) above the status, refreshed every 5 seconds.
+name = "review"
+
+[[tab]]
+title = "review"
+split = "right"
+panes = [
+  { command = ["claude", "codex", "opencode"], focus = true, missing = "no agent installed: Claude Code, Codex or OpenCode" },
+  { split = "down", panes = [
+    { command = ["lazygit", "tig", "git log --oneline --graph --decorate -40"], size = 65 },
+    { command = "kibann watch 5 -- git status --short --branch" },
+  ] },
+]

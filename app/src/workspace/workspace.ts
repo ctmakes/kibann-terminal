@@ -17,6 +17,7 @@ import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
+import { LayoutPicker, type LayoutApi } from "./layouts";
 import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
@@ -82,6 +83,8 @@ export interface Pane {
 
 export interface Tab {
   id: number;
+  /** Its name, from a layout file; else the focused pane's title shows. */
+  title: string | null;
   tree: Tree;
   focused: PaneId;
   zoomed: PaneId | null;
@@ -112,6 +115,8 @@ export interface WorkspaceOptions {
   onDiff?(pane: Pane): void;
   /** Themes to pick from (View → Theme…); without it there's no picker. */
   themes?: ThemeApi;
+  /** Layout files to open and save (View → Open Layout…). */
+  layouts?: LayoutApi;
   /** Say once, on the first launch, where the shortcuts are. */
   firstRunHint?: boolean;
   /** An agent in a pane the user isn't looking at started waiting for them
@@ -133,6 +138,7 @@ export class Workspace {
   /** Settings, when the app gives it what it needs. */
   readonly settings: SettingsModal | null;
   private readonly picker: ThemePicker | null;
+  private readonly layoutPicker: LayoutPicker | null;
   /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
   private readonly help: HTMLDivElement;
   private readonly notices: HTMLDivElement;
@@ -263,6 +269,13 @@ export class Workspace {
     this.root.append(this.sidebar.el, main, this.shortcuts.el);
     if (this.settings) this.root.append(this.settings.el);
     if (this.picker) this.root.append(this.picker.el);
+    this.layoutPicker = opts.layouts
+      ? new LayoutPicker(opts.layouts, {
+          onClose: () => this.focusedPane?.view?.focus(),
+          notice: (text) => this.notice(text),
+        })
+      : null;
+    if (this.layoutPicker) this.root.append(this.layoutPicker.el);
     if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
 
@@ -314,6 +327,12 @@ export class Workspace {
     if (action.kind === "settings") {
       this.shortcuts.hide();
       this.settings?.toggle();
+      return;
+    }
+    if (action.kind === "layouts" || action.kind === "saveLayout") {
+      this.shortcuts.hide();
+      this.settings?.hide();
+      void this.layoutPicker?.open(action.kind === "layouts" ? "open" : "save", on?.id ?? null);
       return;
     }
     if (action.kind === "themes") {
@@ -457,7 +476,7 @@ export class Workspace {
 
   private onKeyDown(e: KeyboardEvent): void {
     // The theme picker's search field takes the keys while it's open.
-    if (this.picker?.visible) return;
+    if (this.picker?.visible || this.layoutPicker?.visible) return;
     const action = actionFor(e, this.platform);
     // Settings takes the keys while open (its fields): Esc closes it, and
     // so does its own shortcut. Nothing reaches the panes.
@@ -517,6 +536,7 @@ export class Workspace {
     const next: Tab[] = layout.tabs.map((lt) => {
       const tab = byId.get(lt.id) ?? this.makeTab(lt.id, lt.tree, lt.focused);
       tab.tree = lt.tree;
+      tab.title = lt.title ?? null;
       tab.focused = lt.focused;
       tab.zoomed = lt.zoomed;
       return tab;
@@ -636,7 +656,7 @@ export class Workspace {
     this.stage.append(el);
     const button = document.createElement("div");
     const dot = makeDot({ marginRight: "6px" });
-    const tab: Tab = { id, tree, focused, zoomed: null, el, button, dot };
+    const tab: Tab = { id, title: null, tree, focused, zoomed: null, el, button, dot };
     this.makeTabButton(tab);
     return tab;
   }
@@ -699,7 +719,7 @@ export class Workspace {
       t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
       t.button.style.color = on ? COLORS.activeText : COLORS.text;
       const branch = branchOf(this.git[String(t.focused)]);
-      const title = (this.panes.get(t.focused)?.title || "shell") + (branch ? ` · ${branch}` : "");
+      const title = (t.title || this.panes.get(t.focused)?.title || "shell") + (branch ? ` · ${branch}` : "");
       t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
       t.button.title = title;
       t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent = String(i + 1);

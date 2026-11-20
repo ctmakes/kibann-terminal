@@ -19,9 +19,15 @@ use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
 use crate::client::{Client, unexpected};
+use crate::layouts::{self, Found};
 
 /// The agent guide, installed by `kibann skill install`.
 pub const SKILL: &str = include_str!("../../../skills/kibann/SKILL.md");
+/// The guide to layout files, installed beside it.
+pub const SKILL_LAYOUTS: &str = include_str!("../../../skills/kibann-layouts/SKILL.md");
+
+/// Every skill `kibann skill install` writes, by folder name.
+const SKILLS: &[(&str, &str)] = &[("kibann", SKILL), ("kibann-layouts", SKILL_LAYOUTS)];
 
 const USAGE: &str = "\
 usage: kibann <command>
@@ -51,10 +57,21 @@ usage: kibann <command>
                                     full-screen viewer that follows changes
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
-  skill show                        the guide for agents
+  layout list                       the layouts: the project's, yours, built-in
+  layout check [NAME|FILE]          read a layout without opening it: what it
+                                    runs, or every problem in it
+  layout open [NAME|FILE] [--yes]   open a layout's tabs (no NAME: the project's
+                                    .kibann/layout.toml); --yes runs a file's
+                                    commands without asking
+  layout save NAME [--tab T] [--to FILE] [--relative] [--force]
+                                    write the window (or tab T) as a layout,
+                                    to your layouts folder or FILE
+  layout save NAME --from LAYOUT    copy a layout (a built-in one) to edit
+  watch SECS -- CMD...              run CMD every SECS seconds, like watch
+  skill show [layouts]              the guide for agents (or the layouts one)
   skill install [--claude|--codex|--opencode]
-                                    install it: ~/.claude/skills/kibann (Claude
-                                    Code, OpenCode), and ~/.agents/skills/kibann
+                                    install both: ~/.claude/skills/ (Claude
+                                    Code, OpenCode), and ~/.agents/skills/
                                     when Codex is installed (Codex)
 
 P is a pane id like p3, or --current (this pane, from $KIBANN_PANE).
@@ -64,7 +81,7 @@ Without P where one is optional, the calling pane is used.";
 pub fn is_command(first: Option<&OsString>) -> bool {
     matches!(
         first.and_then(|a| a.to_str()),
-        Some("pane" | "tab" | "skill" | "help" | "--help" | "-h")
+        Some("pane" | "tab" | "layout" | "watch" | "skill" | "help" | "--help" | "-h")
     )
 }
 
@@ -142,6 +159,9 @@ const VALUED: &[&str] = &[
     "--agent",
     "--state",
     "--seq",
+    "--tab",
+    "--to",
+    "--from",
 ];
 
 impl Args {
@@ -286,12 +306,35 @@ fn dispatch(args: &[String]) -> Out {
         args.first().map(String::as_str),
         args.get(1).map(String::as_str),
     );
+    if noun == Some("watch") {
+        return watch(&args[1..]);
+    }
     let mut a = Args::parse(args.get(2..).unwrap_or_default())?;
     match (noun, verb) {
         (Some("help" | "--help" | "-h"), _) | (None, _) => Err(usage("")),
         (Some("skill"), Some("show")) => {
-            print!("{SKILL}");
+            match a.pos.first().map(String::as_str) {
+                None => print!("{SKILL}"),
+                Some("layouts") => print!("{SKILL_LAYOUTS}"),
+                Some(o) => return Err(usage(format!("no skill {o}; there's layouts"))),
+            }
             Ok(None)
+        }
+        (Some("layout"), Some("list")) => {
+            a.only(&[])?;
+            Ok(Some(json!({"layouts": layouts::list(&here()?)})))
+        }
+        (Some("layout"), Some("check")) => {
+            a.only(&[])?;
+            layout_check(&a)
+        }
+        (Some("layout"), Some("open")) => {
+            a.only(&["--yes"])?;
+            layout_open(&a)
+        }
+        (Some("layout"), Some("save")) => {
+            a.only(&["--tab", "--to", "--relative", "--force", "--from"])?;
+            layout_save(&a)
         }
         (Some("skill"), Some("install")) => {
             a.only(&["--claude", "--codex", "--opencode"])?;
@@ -862,12 +905,8 @@ fn press_release(code: String, key: String, text: Option<String>, m: u16) -> Vec
 /// Where each agent reads skills, under `$HOME`, and who reads it.
 /// OpenCode reads Claude Code's folder; Codex reads `~/.agents/skills`.
 const SKILL_DIRS: &[(&str, &str, &[&str])] = &[
-    (
-        "claude",
-        ".claude/skills/kibann",
-        &["Claude Code", "OpenCode"],
-    ),
-    ("codex", ".agents/skills/kibann", &["Codex"]),
+    ("claude", ".claude/skills", &["Claude Code", "OpenCode"]),
+    ("codex", ".agents/skills", &["Codex"]),
 ];
 
 /// The skill folders to write: the agents named with `--claude`, `--codex`
@@ -909,13 +948,246 @@ fn skill_install(a: &Args) -> Out {
     let mut installed = Vec::new();
     for key in skill_targets(a, has_codex) {
         let (_, rel, readers) = SKILL_DIRS.iter().find(|(k, ..)| *k == key).unwrap();
-        let dir = home.join(rel);
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join("SKILL.md");
-        std::fs::write(&path, SKILL)?;
-        installed.push(json!({"path": path, "read_by": readers}));
+        for (name, text) in SKILLS {
+            let dir = home.join(rel).join(name);
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join("SKILL.md");
+            std::fs::write(&path, text)?;
+            installed.push(json!({"path": path, "read_by": readers}));
+        }
     }
     Ok(Some(json!({"installed": installed})))
+}
+
+fn here() -> Result<PathBuf, Fail> {
+    std::env::current_dir().map_err(|e| error("no_cwd", format!("no current directory: {e}")))
+}
+
+/// Find and read the layout named on the command line.
+fn layout_found(
+    a: &Args,
+    here: &std::path::Path,
+) -> Result<(Found, proto::layout::Template), Fail> {
+    if a.pos.len() > 1 {
+        return Err(usage("give one layout: a name or a file"));
+    }
+    let f = layouts::find(a.pos.first().map(String::as_str), here)
+        .map_err(|m| error("not_found", m))?;
+    let t = layouts::parse(&f, here).map_err(|p| {
+        let file = f
+            .path
+            .as_ref()
+            .map_or_else(|| f.name.clone(), |p| p.display().to_string());
+        let lines: Vec<String> = p.0.iter().map(|p| format!("{file}:{p}")).collect();
+        error("invalid", lines.join("\n"))
+    })?;
+    Ok((f, t))
+}
+
+fn layout_check(a: &Args) -> Out {
+    let here = here()?;
+    let (f, t) = layout_found(a, &here)?;
+    let panes: usize = t.tabs.iter().map(|t| t.tree.leaves().len()).sum();
+    Ok(Some(json!({
+        "name": t.name,
+        "origin": f.origin,
+        "path": f.path,
+        "tabs": t.tabs.len(),
+        "panes": panes,
+        "runs": layouts::commands(&t),
+        "asks": layouts::needs_asking(&f, &t),
+        "layout": t,
+    })))
+}
+
+fn layout_open(a: &Args) -> Out {
+    let here = here()?;
+    let (f, t) = layout_found(a, &here)?;
+    if layouts::needs_asking(&f, &t) {
+        if !a.has("--yes") {
+            ask_to_run(&f, &t)?;
+        }
+        if let Some(p) = &f.path {
+            layouts::trust(p, &f.text)?;
+        }
+    }
+    let name = t.name.clone();
+    let (p, tab) = connect()?
+        .act(Action::OpenLayout { template: t })
+        .map_err(|e| error("open", e.to_string()))?;
+    Ok(Some(
+        json!({"opened": name, "tab": tab.map(tab_id), "pane": made(p, tab)}),
+    ))
+}
+
+/// Ask on the terminal before running a file's commands; without one (an
+/// agent, a script), refuse and say how to agree.
+fn ask_to_run(f: &Found, t: &proto::layout::Template) -> Result<(), Fail> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let file = f
+        .path
+        .as_ref()
+        .map_or_else(|| f.name.clone(), |p| p.display().to_string());
+    let mut list = String::new();
+    for r in layouts::commands(t) {
+        list.push_str(&format!("  {}  (in {})\n", r.run, r.cwd));
+    }
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Err(error(
+            "untrusted",
+            format!(
+                "{file} runs commands you haven't agreed to:\n{list}Run kibann layout open again with --yes once the user agrees."
+            ),
+        ));
+    }
+    eprint!("{file} runs:\n{list}Run them? [y/N] ");
+    let _ = io::stderr().flush();
+    let mut line = String::new();
+    io::stdin().lock().read_line(&mut line)?;
+    if matches!(line.trim(), "y" | "Y" | "yes") {
+        Ok(())
+    } else {
+        Err(error("declined", "not opened"))
+    }
+}
+
+fn layout_save(a: &Args) -> Out {
+    let here = here()?;
+    let home = crate::paths::home_dir();
+    let to = a.get("--to").map(|t| {
+        crate::template::resolve_path(t, &here, home.as_deref()).unwrap_or_else(|| here.join(t))
+    });
+    let name = match (a.pos.first(), &to) {
+        (Some(n), _) => n.clone(),
+        (None, Some(t)) if t.ends_with(layouts::PROJECT_FILE) => t
+            .parent()
+            .and_then(std::path::Path::parent)
+            .and_then(|d| d.file_name())
+            .map_or_else(|| "project".into(), |n| n.to_string_lossy().into_owned()),
+        (None, Some(t)) => t
+            .file_stem()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+        (None, None) => return Err(usage("give the layout a name (or --to FILE)")),
+    };
+    if a.pos.len() > 1 {
+        return Err(usage("give one name"));
+    }
+    if to.is_none() && (name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.')) {
+        return Err(usage(format!("{name:?} can't be a layout's name")));
+    }
+    let target = match to {
+        Some(t) => t,
+        None => crate::paths::layouts_dir()
+            .ok_or_else(|| error("no_home", "no home directory for the layouts folder"))?
+            .join(format!("{name}.toml")),
+    };
+    if target.exists() && !a.has("--force") {
+        return Err(error(
+            "exists",
+            format!("{} exists; --force replaces it", target.display()),
+        ));
+    }
+    let text = match a.get("--from") {
+        Some(from) => {
+            layouts::find(Some(from), &here)
+                .map_err(|m| error("not_found", m))?
+                .text
+        }
+        None => {
+            let c = connect()?;
+            let layout = c.layout()?;
+            let panes = match c.request(|req| ClientMsg::Panes { req })? {
+                Reply::Panes { panes } => panes,
+                other => return Err(unexpected(other).into()),
+            };
+            let tab = match a.get("--tab") {
+                Some(t) => Some(
+                    t.strip_prefix('t')
+                        .unwrap_or(t)
+                        .parse::<TabId>()
+                        .map_err(|_| usage(format!("not a tab id: {t}")))?,
+                ),
+                None => None,
+            };
+            let in_project = target
+                .parent()
+                .filter(|d| d.file_name().is_some_and(|n| n == ".kibann"))
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf);
+            let relative_to = if a.has("--relative") {
+                Some(here.clone())
+            } else {
+                in_project
+            };
+            layouts::snapshot(
+                &layout,
+                &panes,
+                &layouts::SaveSpec {
+                    name: Some(&name),
+                    tab,
+                    relative_to: relative_to.as_deref(),
+                },
+            )
+            .map_err(|m| error("not_found", m))?
+        }
+    };
+    if let Some(d) = target.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(&target, &text)?;
+    // Saved by the user: opening it again needn't ask.
+    layouts::trust(&target, &text)?;
+    Ok(Some(json!({"saved": target, "name": name})))
+}
+
+/// `kibann watch SECS -- CMD...`: run CMD every SECS seconds, showing its
+/// output in place of the last. Works where `watch` isn't installed
+/// (macOS) or doesn't exist (Windows).
+fn watch(args: &[String]) -> Out {
+    use std::io::Write;
+    let secs: f64 = args
+        .first()
+        .and_then(|s| s.parse().ok())
+        .filter(|s: &f64| *s >= 0.1 && s.is_finite())
+        .ok_or_else(|| usage("watch SECS -- CMD...: SECS is how often, in seconds"))?;
+    let mut cmd: &[String] = &args[1..];
+    if cmd.first().is_some_and(|a| a == "--") {
+        cmd = &cmd[1..];
+    }
+    let Some((prog, rest)) = cmd.split_first() else {
+        return Err(usage("watch SECS -- CMD...: which command?"));
+    };
+    let shown = layouts::shell_line(cmd);
+    loop {
+        let mut screen = format!("\x1b[H\x1b[2mEvery {secs}s: {shown}\x1b[0m\x1b[K\n\x1b[K\n");
+        match std::process::Command::new(prog)
+            .args(rest)
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(o) => {
+                for part in [&o.stdout, &o.stderr] {
+                    for line in String::from_utf8_lossy(part).lines() {
+                        screen.push_str(line);
+                        screen.push_str("\x1b[K\n");
+                    }
+                }
+            }
+            Err(e) => screen.push_str(&format!("kibann watch: can't run {prog}: {e}\x1b[K\n")),
+        }
+        // Clear what's left of the last run below.
+        screen.push_str("\x1b[J");
+        let mut out = io::stdout().lock();
+        if out
+            .write_all(screen.as_bytes())
+            .and_then(|_| out.flush())
+            .is_err()
+        {
+            return Ok(None);
+        }
+        drop(out);
+        std::thread::sleep(Duration::from_secs_f64(secs));
+    }
 }
 
 #[cfg(test)]

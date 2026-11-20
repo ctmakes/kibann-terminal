@@ -1,0 +1,14 @@
+# Two agents side by side, with a shell under them. The agent is the first
+# of Claude Code, Codex and OpenCode that's installed.
+name = "agents"
+
+[[tab]]
+title = "agents"
+split = "down"
+panes = [
+  { split = "right", size = 75, panes = [
+    { command = ["claude", "codex", "opencode"], focus = true, missing = "no agent installed: Claude Code, Codex or OpenCode" },
+    { command = ["claude", "codex", "opencode"], missing = "no agent installed: Claude Code, Codex or OpenCode" },
+  ] },
+  {},
+]

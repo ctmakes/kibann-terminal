@@ -1,0 +1,15 @@
+# What the machine is doing: CPU, memory and processes on the left, the
+# GPU and the disks on the right. Each pane runs the first program of its
+# list that's installed.
+name = "system"
+
+[[tab]]
+title = "system"
+split = "right"
+panes = [
+  { command = ["btop", "htop", "top"], size = 60, focus = true, missing = "btop is the nicest: brew install btop, or your package manager" },
+  { split = "down", panes = [
+    { command = { macos = "macmon", linux = ["nvtop", "nvidia-smi -l 2"], windows = "nvidia-smi -l 2" }, missing = "no GPU monitor: macmon on Apple Silicon (brew install macmon), nvtop on Linux" },
+    { command = { default = "kibann watch 10 -- df -h", windows = "kibann watch 10 -- powershell -NoProfile -Command Get-PSDrive -PSProvider FileSystem" } },
+  ] },
+]

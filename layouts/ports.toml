@@ -1,0 +1,6 @@
+# Which ports are listening, refreshed every 5 seconds: who has :3000.
+name = "ports"
+
+[[tab]]
+title = "ports"
+command = { macos = "kibann watch 5 -- lsof -iTCP -sTCP:LISTEN -P -n", linux = "kibann watch 5 -- ss -ltnp", windows = "kibann watch 5 -- netstat -ano -p tcp" }

@@ -72,6 +72,40 @@ pub fn layout_file(dev: bool) -> Option<PathBuf> {
     dir.map(|d| d.join(name))
 }
 
+/// The user's home directory.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Where the config file, the user's themes and layouts live:
+/// `KIBANN_CONFIG_DIR` if set, else `$XDG_CONFIG_HOME/kibann`, else
+/// `~/.config/kibann`.
+pub fn config_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("KIBANN_CONFIG_DIR") {
+        return Some(PathBuf::from(d));
+    }
+    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(d).join("kibann"));
+    }
+    Some(home_dir()?.join(".config").join("kibann"))
+}
+
+/// The layouts the user keeps: `<config>/layouts/NAME.toml`.
+pub fn layouts_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("layouts"))
+}
+
+/// The layout files the user said may run their commands (see
+/// [`crate::layouts`]), next to the saved layout.
+pub fn trusted_layouts_file() -> Option<PathBuf> {
+    layout_file(false)?
+        .parent()
+        .map(|d| d.join("trusted-layouts.json"))
+}
+
 /// Make the socket's directory, readable by the user only, and check that
 /// nobody else owns it (another user could otherwise pre-create it).
 #[cfg(unix)]

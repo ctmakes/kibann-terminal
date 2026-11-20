@@ -698,6 +698,7 @@ impl Daemon {
                 st.broadcast(None);
                 Ok((None, Some(tab)))
             }
+            Action::OpenLayout { template } => self.open_layout(template),
             Action::Zoom { tab, pane } => {
                 let mut st = self.lock();
                 if !st.model.zoom(tab, pane) {
@@ -707,6 +708,160 @@ impl Daemon {
                 Ok((pane, Some(tab)))
             }
         }
+    }
+
+    /// Open a layout file's tabs after the others: every pane started,
+    /// then the tabs added in one go (one redraw, nothing half built). A
+    /// pane that can't start is left out. Returns the shown tab and pane.
+    fn open_layout(
+        &self,
+        template: proto::layout::Template,
+    ) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
+        use proto::layout::{Run, TemplateTree};
+        if template.tabs.is_empty() {
+            return Err(err("the layout has no tabs"));
+        }
+        // Which programs are installed, for commands with alternatives (or
+        // a note for when none is): asked once, before anything starts.
+        let mut names = Vec::new();
+        for t in &template.tabs {
+            for leaf in t.tree.leaves() {
+                if let TemplateTree::Leaf {
+                    run: Some(Run::Type { commands, missing }),
+                    ..
+                } = leaf
+                    && (commands.len() > 1 || missing.is_some())
+                {
+                    names.extend(
+                        commands
+                            .iter()
+                            .filter_map(|c| crate::installed::program_of(c)),
+                    );
+                }
+            }
+        }
+        let have = crate::installed::check(&names);
+
+        let mut failed = Vec::new();
+        // What to do in each pane once it's up: a command to type, a note.
+        let mut todo: Vec<(PaneId, Option<String>, Option<String>)> = Vec::new();
+        let mut start = |cwd: &str, run: &Option<Run>| -> PaneId {
+            let dir = Some(PathBuf::from(cwd)).filter(|d| d.is_dir());
+            let (argv, typed, note) = match run {
+                None => (None, None, None),
+                Some(Run::Exec { argv }) => (Some(argv.clone()), None, None),
+                Some(Run::Type { commands, missing }) => {
+                    if commands.len() == 1 && missing.is_none() {
+                        (None, Some(commands[0].clone()), None)
+                    } else {
+                        let pick = commands.iter().find(|c| {
+                            crate::installed::program_of(c).is_some_and(|p| have.contains(p))
+                        });
+                        let note = match (pick, missing) {
+                            (Some(_), _) => None,
+                            (None, m) if commands.is_empty() => m.clone(),
+                            (None, m) => {
+                                let names: Vec<&str> = commands
+                                    .iter()
+                                    .filter_map(|c| crate::installed::program_of(c))
+                                    .collect();
+                                let what = if names.len() == 1 {
+                                    format!("{} isn't installed", names[0])
+                                } else {
+                                    format!("none of {} is installed", names.join(", "))
+                                };
+                                Some(match m {
+                                    Some(m) => format!("{what}: {m}"),
+                                    None => what,
+                                })
+                            }
+                        };
+                        (None, pick.cloned(), note)
+                    }
+                }
+            };
+            match self.spawn(DEFAULT_SIZE, dir, argv) {
+                Ok(id) => {
+                    if typed.is_some() || note.is_some() {
+                        todo.push((id, typed, note));
+                    }
+                    id
+                }
+                Err(e) => {
+                    eprintln!("kibannd: opening a layout's pane: {e}");
+                    let id = PaneId::MAX - failed.len() as PaneId;
+                    failed.push(id);
+                    id
+                }
+            }
+        };
+        fn build(
+            t: &TemplateTree,
+            start: &mut dyn FnMut(&str, &Option<Run>) -> PaneId,
+        ) -> proto::layout::Tree {
+            match t {
+                TemplateTree::Leaf { cwd, run } => proto::layout::Tree::leaf(start(cwd, run)),
+                TemplateTree::Split { dir, ratio, a, b } => proto::layout::Tree::Split {
+                    dir: *dir,
+                    ratio: ratio.clamp(0.05, 0.95),
+                    a: Box::new(build(a, start)),
+                    b: Box::new(build(b, start)),
+                },
+            }
+        }
+        let trees: Vec<_> = template
+            .tabs
+            .iter()
+            .map(|t| build(&t.tree, &mut start))
+            .collect();
+        let mut st = self.lock();
+        for (i, (tree, t)) in trees.into_iter().zip(&template.tabs).enumerate() {
+            let order = tree.panes();
+            let focused = order.get(t.focused as usize).copied().unwrap_or(order[0]);
+            st.model.add_tab(
+                tree,
+                focused,
+                t.title.clone(),
+                i == template.active as usize,
+            );
+        }
+        for id in &failed {
+            st.model.remove(*id);
+        }
+        st.broadcast(None);
+        let shown = st.model.layout().active;
+        let pane = shown
+            .and_then(|t| st.model.layout().tab(t))
+            .map(|t| t.focused);
+        let sessions: Vec<_> = todo
+            .into_iter()
+            .filter_map(|(id, typed, note)| {
+                st.sessions
+                    .get(&id)
+                    .map(|e| (e.session.clone(), typed, note))
+            })
+            .collect();
+        drop(st);
+        let opened = template
+            .tabs
+            .iter()
+            .map(|t| t.tree.leaves().len())
+            .sum::<usize>();
+        if failed.len() == opened {
+            return Err(err("none of the layout's panes could start"));
+        }
+        for (session, typed, note) in sessions {
+            if let Some(n) = note {
+                // Dim, above the prompt.
+                session.show(&format!("\x1b[2mkibann: {n}\x1b[0m\r\n"));
+            }
+            if let Some(cmd) = typed {
+                let _ = thread::Builder::new()
+                    .name("layout-type".into())
+                    .spawn(move || type_when_ready(&session, &cmd));
+            }
+        }
+        Ok((pane, shown))
     }
 
     /// Start a shell for a new pane (not yet in the layout).
@@ -906,6 +1061,7 @@ impl Daemon {
                 agent: status.as_ref().map(|a| a.agent.clone()),
                 state: status.map(|a| a.state),
                 title: s.as_ref().map(|s| s.title()).unwrap_or_default(),
+                program: s.as_ref().and_then(|s| s.program()),
                 cwd: s
                     .and_then(|s| s.cwd())
                     .map(|d| d.to_string_lossy().into_owned()),
@@ -987,6 +1143,7 @@ impl Daemon {
                 focused: map.get(&t.focused).copied().unwrap_or(first),
                 tree,
                 zoomed: None,
+                title: t.title.clone(),
             });
             if saved.layout.active == Some(t.id) {
                 layout.active = Some(id);
@@ -1054,6 +1211,22 @@ impl Daemon {
             .filter(|e| !e.exited.load(Ordering::SeqCst))
             .count()
     }
+}
+
+/// Type `cmd` and Enter into a pane just opened, once its shell is
+/// reading: text typed before the first output (the prompt) shows twice.
+fn type_when_ready(session: &Session, cmd: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while session
+        .read(proto::wire::ReadSource::Visible, None)
+        .trim()
+        .is_empty()
+        && std::time::Instant::now() < deadline
+    {
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+    session.input(proto::InputEvent::Text { data: cmd.into() });
+    session.input(proto::InputEvent::Text { data: "\r".into() });
 }
 
 fn spawn_error(e: io::Error) -> Reply {

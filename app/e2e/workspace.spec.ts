@@ -968,6 +968,48 @@ test.describe("themes", () => {
     expect((await typed(page))[1]).toBe("x");
   });
 
+  test("layouts open from the picker, with their tab's name, and save by name", async ({ page }) => {
+    await open(page, { w: "900", h: "560" });
+    const run = (kind: string) => page.evaluate((k) => (window as any).__ws.ws.run({ kind: k }), kind);
+    const rows = () => page.locator(".layout-picker-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.name));
+    const calls = () => page.evaluate(() => (window as any).__ws.layoutCalls);
+    await run("layouts");
+    await expect(page.locator(".layout-picker-input")).toBeFocused();
+    await expect.poll(rows).toEqual(["myapp", "system", "agents"]);
+    // Searching looks at the descriptions too.
+    await page.keyboard.type("machine");
+    expect(await rows()).toEqual(["system"]);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".layout-picker")).toBeHidden();
+    expect(await calls()).toEqual([]);
+
+    await run("layouts");
+    await expect.poll(rows).toHaveLength(3);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect.poll(calls).toEqual(["open system"]);
+    await settle(page);
+    const s = await state(page);
+    expect(s.tabs).toBe(2);
+    expect(s.panes).toHaveLength(2);
+    // The new tab shows the layout's name, and its second pane has focus.
+    await expect(page.locator(".tab-title").nth(1)).toHaveText("system");
+    expect(s.focused).toBe(Math.max(...s.panes.map((p) => p.id)));
+    // Keys typed in the picker never reached a pane.
+    expect((await typed(page))[0] ?? "").toBe("");
+
+    // Saving: a name taken asks before replacing it.
+    await run("saveLayout");
+    await expect(page.locator(".layout-picker-input")).toBeFocused();
+    await page.keyboard.type("system");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".layout-picker")).toContainText("system exists");
+    await page.keyboard.press("Enter");
+    await expect.poll(calls).toEqual(["open system", "save system", "save system force"]);
+    await expect(page.locator(".layout-picker")).toBeHidden();
+    await expect(page.locator(".notice").last()).toContainText("Saved the layout as system");
+  });
+
   test("the shortcut sheet is a click away; the first launch says so", async ({ page }) => {
     await open(page, { w: "900", h: "560", hint: "1" });
     await expect(page.locator(".notice")).toContainText("⌘/");

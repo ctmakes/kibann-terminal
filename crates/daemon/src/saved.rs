@@ -136,6 +136,7 @@ mod tests {
                     tree,
                     focused: 7,
                     zoomed: None,
+                    title: None,
                 }],
                 active: Some(2),
             },

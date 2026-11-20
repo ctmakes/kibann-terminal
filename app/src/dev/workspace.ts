@@ -12,6 +12,7 @@ import { ReplayTransport } from "../transport/replay";
 import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
 import { KIBANN_DARK, type ThemeApi } from "../workspace/theme";
+import type { LayoutApi } from "../workspace/layouts";
 import type { Settings, Theme } from "../proto";
 import type { ConfigInfo, SettingsApi, UpdateStatus } from "../workspace/settings";
 import { Screen } from "./screen";
@@ -154,9 +155,45 @@ const settingsApi: SettingsApi = {
   openUrl: (url) => void opened.push(url),
 };
 
+// Layouts, as the app would list them; opening one sends the daemon's
+// action with a made-up template, and saving records the name.
+const layoutCalls: string[] = [];
+const layoutsApi: LayoutApi = {
+  list: async () => [
+    { name: "myapp", origin: "project", path: "/src/myapp/.kibann/layout.toml", about: "The app and its API." },
+    { name: "system", origin: "builtin", about: "What the machine is doing." },
+    { name: "agents", origin: "builtin", about: "Two agents side by side." },
+  ],
+  open: async (entry) => {
+    layoutCalls.push(`open ${entry.name}`);
+    const leaf = { kind: "leaf" as const, cwd: "/src/myapp" };
+    await backend.act({
+      t: "open_layout",
+      template: {
+        name: entry.name,
+        tabs: [
+          {
+            title: entry.name,
+            tree: { kind: "split", dir: "row", ratio: 0.6, a: leaf, b: leaf },
+            focused: 1,
+          },
+        ],
+        active: 0,
+      },
+    });
+    return true;
+  },
+  save: async (name, force) => {
+    layoutCalls.push(`save ${name}${force ? " force" : ""}`);
+    if (name === "system" && !force) throw new Error("/x/layouts/system.toml exists");
+    return `/x/layouts/${name}.toml`;
+  },
+};
+
 const ws = new Workspace(root, {
   settings: settingsApi,
   themes,
+  layouts: layoutsApi,
   firstRunHint: params.hint === "1",
   backend,
   transport,
@@ -203,6 +240,8 @@ const api = {
   diffs,
   previews,
   notes,
+  /** What the layout picker asked the app for. */
+  layoutCalls,
   /** A notice with a button (as "update ready"); `clicked` counts uses. */
   clicked: 0,
   noticeWithButton(text: string, label: string) {

@@ -152,6 +152,10 @@ export function parseAction(a: string): Action | "unbind" | string {
       return { kind: "shortcuts" };
     case "open_theme_picker":
       return { kind: "themes" };
+    case "open_layout":
+      return { kind: "layouts" };
+    case "save_layout":
+      return { kind: "saveLayout" };
     case "open_settings":
       return { kind: "settings" };
     default:

@@ -60,6 +60,10 @@ kibann pane focus P
 kibann pane close P
 ```
 
+To set up a whole workspace at once (tabs, splits and their commands, in a
+file that can be saved and shared), use `kibann layout`; `kibann skill show
+layouts` is its guide.
+
 Errors are JSON on stderr with exit code 1 (`timeout`, `not_found`,
 `not_running`, ...); a bad command line exits 2.
 

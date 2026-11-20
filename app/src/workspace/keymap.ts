@@ -26,6 +26,10 @@ export type Action =
   | { kind: "settings" }
   /** The theme picker (no key; View → Theme…). */
   | { kind: "themes" }
+  /** The layout picker (no key; View → Open Layout…). */
+  | { kind: "layouts" }
+  /** Save the window as a layout (no key; View → Save Layout…). */
+  | { kind: "saveLayout" }
   /** The find bar on the focused pane. */
   | { kind: "find" }
   /** The next match up the scrollback (older), or back down. */

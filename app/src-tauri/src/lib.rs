@@ -397,6 +397,118 @@ async fn layout_act(state: State<'_, Term>, action: Action) -> Result<Acted, Str
     Ok(Acted { pane, tab })
 }
 
+/// Where a layout is opened from: `pane`'s directory, else home.
+fn opened_from(client: &Client, pane: Option<PaneId>) -> std::path::PathBuf {
+    let cwd = pane.and_then(|id| match client.request(|req| ClientMsg::Panes { req }) {
+        Ok(proto::wire::Reply::Panes { panes }) => {
+            panes.into_iter().find(|p| p.id == id).and_then(|p| p.cwd)
+        }
+        _ => None,
+    });
+    cwd.map(std::path::PathBuf::from)
+        .filter(|d| d.is_dir())
+        .or_else(daemon::paths::home_dir)
+        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+}
+
+/// The layouts for the focused pane's directory (View → Open Layout…).
+#[tauri::command]
+async fn layouts_list(
+    state: State<'_, Term>,
+    pane: Option<PaneId>,
+) -> Result<Vec<daemon::layouts::Listed>, String> {
+    Ok(daemon::layouts::list(&opened_from(&state.client, pane)))
+}
+
+/// Open a layout: a built-in one by `name`, a file by `path`. A file that
+/// runs commands from someone else asks first; false when the user says no.
+#[tauri::command]
+async fn layout_open(
+    app: AppHandle,
+    state: State<'_, Term>,
+    name: String,
+    path: Option<String>,
+    pane: Option<PaneId>,
+) -> Result<bool, String> {
+    use daemon::layouts;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let here = opened_from(&state.client, pane);
+    let f = layouts::find(Some(path.as_deref().unwrap_or(&name)), &here)?;
+    let t = layouts::parse(&f, &here).map_err(|p| {
+        p.0.iter()
+            .map(|p| format!("line {}: {}", p.line, p.message))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    if layouts::needs_asking(&f, &t) {
+        let file = f
+            .path
+            .as_ref()
+            .map_or_else(|| f.name.clone(), |p| p.display().to_string());
+        let list: Vec<String> = layouts::commands(&t)
+            .into_iter()
+            .map(|r| format!("• {}", r.run))
+            .collect();
+        let yes = app
+            .dialog()
+            .message(format!(
+                "{file} runs these commands:\n\n{}\n\nOnly open layouts from people you trust.",
+                list.join("\n")
+            ))
+            .title(format!("Open the layout {}?", f.name))
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Open and Run".into(),
+                "Cancel".into(),
+            ))
+            .blocking_show();
+        if !yes {
+            return Ok(false);
+        }
+        if let Some(p) = &f.path {
+            layouts::trust(p, &f.text).map_err(|e| e.to_string())?;
+        }
+    }
+    state
+        .client
+        .act(Action::OpenLayout { template: t })
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Save the window as the user's layout `name` (View → Save Layout…).
+/// Returns where; fails saying it "exists" unless `force`.
+#[tauri::command]
+async fn layout_save(state: State<'_, Term>, name: String, force: bool) -> Result<String, String> {
+    use daemon::layouts;
+    if name.is_empty() || name.starts_with('.') || name.contains(['/', '\\']) {
+        return Err(format!("{name:?} can't be a layout's name"));
+    }
+    let dir = daemon::paths::layouts_dir().ok_or("no home directory")?;
+    let target = dir.join(format!("{name}.toml"));
+    if target.exists() && !force {
+        return Err(format!("{} exists", target.display()));
+    }
+    let layout = state.client.layout().map_err(|e| e.to_string())?;
+    let panes = match state.client.request(|req| ClientMsg::Panes { req }) {
+        Ok(proto::wire::Reply::Panes { panes }) => panes,
+        Ok(other) => return Err(format!("unexpected reply: {other:?}")),
+        Err(e) => return Err(e.to_string()),
+    };
+    let text = layouts::snapshot(
+        &layout,
+        &panes,
+        &layouts::SaveSpec {
+            name: Some(&name),
+            tab: None,
+            relative_to: None,
+        },
+    )?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(&target, text).map_err(|e| e.to_string())?;
+    Ok(target.display().to_string())
+}
+
 /// `KIBANN_LAYOUT`: workspace actions to run at startup, comma separated
 /// (`right`, `down`, `tab`). For trying layouts and capturing screenshots.
 #[tauri::command]
@@ -954,6 +1066,9 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         )?)
         .item(&MenuItemBuilder::with_id(r#"{"kind":"themes"}"#, "Theme…").build(app)?)
         .separator()
+        .item(&MenuItemBuilder::with_id(r#"{"kind":"layouts"}"#, "Open Layout…").build(app)?)
+        .item(&MenuItemBuilder::with_id(r#"{"kind":"saveLayout"}"#, "Save Layout…").build(app)?)
+        .separator()
         .item(&item(
             r#"{"kind":"fontSize","step":1}"#,
             "Bigger",
@@ -1181,6 +1296,9 @@ pub fn run() {
             layout_watch,
             layout_restore,
             layout_act,
+            layouts_list,
+            layout_open,
+            layout_save,
             app_quit,
             open_link,
             dev_layout

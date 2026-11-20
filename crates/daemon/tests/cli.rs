@@ -321,3 +321,162 @@ fn pane_list_shows_the_checkout() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+/// `kibann args...` run in `dir`, with its own config and state folders.
+fn kibann_at(socket: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_kibannd"))
+        .args(args)
+        .current_dir(dir)
+        .env("KIBANN_SOCKET", socket)
+        .env("KIBANN_CONFIG_DIR", home.join("config"))
+        .env("KIBANN_STATE_DIR", home.join("state"))
+        .env_remove("KIBANN_PANE")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn layouts_are_checked_opened_and_saved() {
+    let (socket, d, h) = start("l");
+    let c = Client::connect(&socket, |_| {}).unwrap();
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("kl{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(repo.join("web")).unwrap();
+    std::fs::create_dir_all(repo.join(".kibann")).unwrap();
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    // A bad file: every problem, with its line.
+    std::fs::write(
+        repo.join(".kibann/layout.toml"),
+        "[[tab]]\nsplit = \"right\"\npanes = [{ cwd = \"nope\" }, { comand = \"x\" }]\n",
+    )
+    .unwrap();
+    let out = kibann_at(&socket, &repo, &home, &["layout", "check"]);
+    let e = fails(&out, 1);
+    assert_eq!(e["error"]["code"], "invalid");
+    let msg = e["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("layout.toml:3:"), "{msg}");
+
+    // A good one: what it runs, and that it asks first.
+    let text = "[[tab]]\ntitle = \"dev\"\nsplit = \"right\"\npanes = [\n  { command = \"echo from-layout-$((6*7))\", size = 60 },\n  { cwd = \"web\", focus = true },\n]\n";
+    std::fs::write(repo.join(".kibann/layout.toml"), text).unwrap();
+    let r = ok(kibann_at(
+        &socket,
+        &repo.join("web"),
+        &home,
+        &["layout", "check"],
+    ));
+    assert_eq!(r["name"], "repo");
+    assert_eq!(r["origin"], "project");
+    assert_eq!(r["panes"], 2);
+    assert_eq!(r["asks"], true);
+    assert_eq!(r["runs"][0]["run"], "echo from-layout-$((6*7))");
+
+    // Without a terminal to ask on, it won't run them...
+    let out = kibann_at(&socket, &repo, &home, &["layout", "open"]);
+    assert_eq!(fails(&out, 1)["error"]["code"], "untrusted");
+    assert!(c.layout().unwrap().tabs.is_empty());
+    // ...until told to; then that version is trusted.
+    let r = ok(kibann_at(
+        &socket,
+        &repo,
+        &home,
+        &["layout", "open", "--yes"],
+    ));
+    assert_eq!(r["opened"], "repo");
+    let r = ok(kibann_at(&socket, &repo, &home, &["layout", "check"]));
+    assert_eq!(r["asks"], false);
+    let layout = c.layout().unwrap();
+    assert_eq!(layout.tabs.len(), 1);
+    let tab = &layout.tabs[0];
+    assert_eq!(tab.title.as_deref(), Some("dev"));
+    let panes = tab.tree.panes();
+    assert_eq!(tab.focused, panes[1]);
+    let first = format!("p{}", panes[0]);
+    ok(kibann_at(
+        &socket,
+        &repo,
+        &home,
+        &[
+            "pane",
+            "wait",
+            &first,
+            "--regex",
+            "^from-layout-42$",
+            "--timeout",
+            "5000",
+        ],
+    ));
+
+    // Saved back into the project: relative directories, the title kept.
+    let out = kibann_at(
+        &socket,
+        &repo,
+        &home,
+        &["layout", "save", "--to", ".kibann/layout.toml"],
+    );
+    assert_eq!(fails(&out, 1)["error"]["code"], "exists");
+    let r = ok(kibann_at(
+        &socket,
+        &repo,
+        &home,
+        &["layout", "save", "--to", ".kibann/layout.toml", "--force"],
+    ));
+    assert_eq!(r["name"], "repo");
+    let saved = std::fs::read_to_string(repo.join(".kibann/layout.toml")).unwrap();
+    assert!(saved.contains("title = \"dev\""), "{saved}");
+    assert!(
+        saved.contains("{ cwd = \"web\", size = 40, focus = true }"),
+        "{saved}"
+    );
+    assert!(saved.contains("{ size = 60 }"), "{saved}");
+    // What the user saved opens without asking.
+    let r = ok(kibann_at(&socket, &repo, &home, &["layout", "check"]));
+    assert_eq!(r["asks"], false);
+
+    // Named layouts, and copying a built-in one to edit.
+    let r = ok(kibann_at(
+        &socket,
+        &repo,
+        &home,
+        &["layout", "save", "mine", "--from", "system"],
+    ));
+    let mine = std::path::PathBuf::from(r["saved"].as_str().unwrap());
+    assert_eq!(mine, home.join("config/layouts/mine.toml"));
+    let list = ok(kibann_at(&socket, &repo, &home, &["layout", "list"]));
+    let names: Vec<(&str, &str)> = list["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| (l["name"].as_str().unwrap(), l["origin"].as_str().unwrap()))
+        .collect();
+    assert_eq!(names[0], ("repo", "project"));
+    assert_eq!(names[1], ("mine", "user"));
+    assert!(names.contains(&("system", "builtin")));
+    let out = kibann_at(&socket, &repo, &home, &["layout", "open", "nope"]);
+    assert_eq!(fails(&out, 1)["error"]["code"], "not_found");
+
+    // watch runs the command again and again.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kibannd"))
+        .args(["watch", "0.1", "--", "echo", "tick"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_millis(450));
+    child.kill().unwrap();
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.matches("tick").count() >= 2, "{text:?}");
+    assert!(text.contains("Every 0.1s: echo tick"), "{text:?}");
+
+    std::fs::remove_dir_all(&root).unwrap();
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

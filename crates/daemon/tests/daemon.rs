@@ -980,3 +980,91 @@ fn the_layout_comes_back_after_the_sessions_ended() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+#[test]
+fn a_layout_opens_in_one_go() {
+    use proto::layout::{Run, TabTemplate, Template, TemplateTree};
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, app_rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let first = sh(&c, None);
+    c.watch().unwrap();
+    next_layout(&app_rx);
+    let dir = std::env::temp_dir().canonicalize().unwrap();
+    let cwd = dir.to_string_lossy().into_owned();
+    let template = Template {
+        name: Some("t".into()),
+        tabs: vec![
+            TabTemplate {
+                title: None,
+                tree: TemplateTree::Split {
+                    dir: Dir::Row,
+                    ratio: 0.7,
+                    a: Box::new(TemplateTree::Leaf {
+                        cwd: cwd.clone(),
+                        run: Some(Run::Type {
+                            commands: vec!["echo layout-$((40+2))".into()],
+                            missing: None,
+                        }),
+                    }),
+                    b: Box::new(TemplateTree::Leaf {
+                        cwd: cwd.clone(),
+                        run: Some(Run::Exec {
+                            argv: vec!["/bin/sh".into()],
+                        }),
+                    }),
+                },
+                focused: 1,
+            },
+            TabTemplate {
+                title: Some("two".into()),
+                tree: TemplateTree::Leaf {
+                    cwd: cwd.clone(),
+                    run: Some(Run::Type {
+                        commands: vec!["no-such-prog-kibann".into()],
+                        missing: Some("install it".into()),
+                    }),
+                },
+                focused: 0,
+            },
+        ],
+        active: 1,
+    };
+    let (pane, tab) = c.act(Action::OpenLayout { template }).unwrap();
+    let l = next_layout(&app_rx);
+    assert_eq!(l.tabs.len(), 3);
+    let (one, two) = (&l.tabs[1], &l.tabs[2]);
+    assert_eq!(l.active, Some(two.id));
+    assert_eq!(tab, Some(two.id));
+    assert_eq!(pane, Some(two.focused));
+    assert_eq!(two.title.as_deref(), Some("two"));
+    assert_eq!(one.title, None);
+    let panes = one.tree.panes();
+    assert_eq!(one.focused, panes[1]);
+    assert!(
+        matches!(one.tree, proto::layout::Tree::Split { ratio, .. } if (ratio - 0.7).abs() < 1e-9)
+    );
+    assert!(!panes.contains(&first));
+
+    eventually("the typed command ran", || {
+        read(&c, panes[0], ReadSource::Visible).contains("layout-42")
+    });
+    eventually("the note", || {
+        read(&c, two.focused, ReadSource::Visible)
+            .contains("kibann: no-such-prog-kibann isn't installed: install it")
+    });
+    // The pane list says what runs where: the exec'd shell is the pane's
+    // own shell, so nothing.
+    eventually("the panes' directories", || {
+        match c.request(|req| ClientMsg::Panes { req }).unwrap() {
+            Reply::Panes { panes: list } => list
+                .iter()
+                .filter(|p| panes.contains(&p.id))
+                .all(|p| p.cwd.as_deref() == Some(cwd.as_str())),
+            _ => false,
+        }
+    });
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

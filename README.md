@@ -83,15 +83,59 @@ kibann pane run "$p" "npm test" --wait                       # {"exit_code":0}
 kibann pane read "$p" --source recent --lines 40
 kibann pane wait "$p" --regex '^ready' --timeout 30000
 kibann pane list        # also: tab new, pane send / keys / focus / close / current
+kibann layout open      # tabs and splits from a layout file (see below)
 kibann skill install    # the guide for agents (--claude, --codex, --opencode for one)
 ```
 
-Run `kibann skill install` once, and your agents learn to use it. It writes `~/.claude/skills/kibann`, which Claude Code and OpenCode read, and `~/.agents/skills/kibann` for Codex when Codex is installed.
+Run `kibann skill install` once, and your agents learn to use it. It writes two skills, `kibann` (driving panes) and `kibann-layouts` (building [layout files](#layout-files)), to `~/.claude/skills/`, which Claude Code and OpenCode read, and to `~/.agents/skills/` for Codex when Codex is installed.
 
 - **Environment:** each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH`.
 - **Output:** results are JSON. Errors are JSON on stderr with exit code 1, and a bad command line exits 2.
 - **Help:** `kibann help` lists every command, and [`skills/kibann/SKILL.md`](skills/kibann/SKILL.md) is the guide agents read.
 - **Security:** anything that can open the socket can type into every pane. That's why the socket is private to your user (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux, with the daemon's log beside it).
+
+### Layout files
+
+A layout file sets up tabs and splits in one go, with a directory and a command for each pane. Open one with View → Open Layout…, or with `kibann layout open NAME`. Its tabs open after yours.
+
+```toml
+# ~/.config/kibann/layouts/web.toml, or .kibann/layout.toml in a repo
+[[tab]]
+title = "web"
+split = "right"
+panes = [
+  { command = "claude", size = 60, focus = true },
+  { split = "down", panes = [
+      { cwd = "web", command = "npm run dev" },
+      { command = ["lazygit", "tig", "git log --oneline --graph"] },
+  ] },
+]
+
+[[tab]]
+title = "system"
+command = ["btop", "htop", "top"]
+```
+
+- **Panes:**
+  - **A split** has `split = "right"` (side by side) or `"down"` (stacked), and two or more `panes`.
+  - **`size`** is a percent of the split; panes without one share the rest equally.
+  - **`cwd`** is relative to the pane's parent, and `~` is home.
+  - **`focus = true`** picks the focused pane, or on a tab, the tab shown.
+- **Commands:**
+  - **`command`** is typed into the pane's shell, so when it ends you're back at a prompt.
+  - **A list** runs the first one installed. `missing = "brew install btop"` says what to do when none is.
+  - **A table by system** runs a different command on each: `{ macos = "macmon", linux = "nvtop", default = "top" }`.
+  - **`exec = ["prog", "arg"]`** runs instead of the shell, and the pane closes when it exits.
+- **Where they live:**
+  - **Yours:** `~/.config/kibann/layouts/NAME.toml`.
+  - **A project's:** `.kibann/layout.toml` in a repo. `kibann layout open` with no name opens it, and its relative paths start at the repo, wherever it's cloned.
+  - **Built in:** `system` (CPU, memory, GPU and disks), `ports` (what's listening), `agents`, `agents-4` (agents in a grid) and `review` (an agent beside lazygit). A file of yours with the same name replaces one.
+- **Saving:** View → Save Layout…, or `kibann layout save NAME`, writes the window as a layout, with each pane's directory and the program running in it. `--to .kibann/layout.toml` writes a project's, with relative paths. `kibann layout save mine --from system` copies a built-in one to edit.
+- **Checking:** `kibann layout check FILE` reads a file without opening it. It prints what it would run, or every problem with its line and column.
+- **Safety:** opening a layout runs its commands. A file that isn't yours (a repo's, a download) lists them and asks first, and asks again whenever the file changes. Built-in layouts, your layouts folder and files you saved open straight away. From the command line, `--yes` agrees.
+- **Agents** can build layouts for you: ask yours to "make a layout for this repo". The `kibann-layouts` skill tells it how.
+
+`kibann watch SECS -- CMD...` reruns a command every few seconds, like `watch`, and works on macOS and Windows too. The built-in layouts use it for disks, ports and `git status`.
 
 ### Agent status at a glance
 
@@ -262,7 +306,7 @@ keybind = clear                    # drop every default first
 - **Panes and splits:** `close_surface`, `new_split:right|down`, `goto_split:previous|next|left|right|up|down`, `resize_split:left|right|up|down`, `equalize_splits`, `toggle_split_zoom`.
 - **Font size:** `increase_font_size`, `decrease_font_size`, `reset_font_size`.
 - **Find:** `start_search`, `navigate_search:next|previous`.
-- **Kibann's own:** `toggle_sidebar`, `show_shortcuts`, `open_theme_picker`, `open_settings`.
+- **Kibann's own:** `toggle_sidebar`, `show_shortcuts`, `open_theme_picker`, `open_settings`, `open_layout`, `save_layout`.
 - **Removing a binding:** `unbind`.
 
 Key sequences (`a>b`) and `global:` bindings aren't supported.
