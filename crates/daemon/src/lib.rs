@@ -15,6 +15,7 @@ pub mod pipe;
 pub mod saved;
 pub mod server;
 pub mod status;
+pub mod template;
 pub mod view;
 
 /// Identifies a daemon's executable: its size and modification time. The

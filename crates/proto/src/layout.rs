@@ -163,3 +163,75 @@ impl Layout {
         self.tabs.iter().flat_map(|t| t.tree.panes()).collect()
     }
 }
+
+/// What runs in a pane opened from a layout file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "t", rename_all = "snake_case")]
+#[ts(export, rename = "TemplateRun")]
+pub enum Run {
+    /// Typed into the login shell once it is ready, followed by Enter: the
+    /// first of `commands` whose program is installed. With none installed
+    /// (or none given for this system), `missing` is shown instead.
+    Type {
+        commands: Vec<String>,
+        #[ts(optional)]
+        missing: Option<String>,
+    },
+    /// Run instead of the shell; the pane closes when it exits.
+    Exec { argv: Vec<String> },
+}
+
+/// A pane or split of a layout file, resolved: directories are absolute
+/// and commands are the ones for this system.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+#[ts(export)]
+pub enum TemplateTree {
+    Leaf {
+        cwd: String,
+        /// `None` is a plain shell.
+        #[ts(optional)]
+        run: Option<Run>,
+    },
+    Split {
+        dir: Dir,
+        ratio: f64,
+        a: Box<TemplateTree>,
+        b: Box<TemplateTree>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TabTemplate {
+    #[ts(optional)]
+    pub title: Option<String>,
+    pub tree: TemplateTree,
+    /// The focused pane, as an index in reading order.
+    pub focused: u32,
+}
+
+/// A layout file, ready to open.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Template {
+    #[ts(optional)]
+    pub name: Option<String>,
+    pub tabs: Vec<TabTemplate>,
+    /// The tab shown after opening, as an index into `tabs`.
+    pub active: u32,
+}
+
+impl TemplateTree {
+    /// Leaves in reading order: left before right, top before bottom.
+    pub fn leaves(&self) -> Vec<&TemplateTree> {
+        match self {
+            TemplateTree::Leaf { .. } => vec![self],
+            TemplateTree::Split { a, b, .. } => {
+                let mut v = a.leaves();
+                v.extend(b.leaves());
+                v
+            }
+        }
+    }
+}
