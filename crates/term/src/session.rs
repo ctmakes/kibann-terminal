@@ -635,7 +635,13 @@ fn run(
                     }
                 }
                 Msg::Ack(seq) => p.acked = p.acked.max(seq.min(p.sent)),
-                Msg::RequestFull => p.force_full = true,
+                // The client asks after missing a frame, and drops every
+                // partial frame until a full one: frames in flight will never
+                // be acked, and waiting on them would stall the pane for good.
+                Msg::RequestFull => {
+                    p.force_full = true;
+                    p.acked = p.sent;
+                }
                 Msg::Theme(t) => {
                     let _ = emu.set_theme(&t);
                     p.dirty = true;

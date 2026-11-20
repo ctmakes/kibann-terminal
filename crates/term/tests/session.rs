@@ -186,6 +186,22 @@ fn request_full_and_reattach() {
 }
 
 #[test]
+fn request_full_goes_out_with_frames_unacked() {
+    // A frame lost on the way: the client sees the gap, acks nothing more
+    // and asks for a full frame. Two frames are unacked, which would hold
+    // every frame back, the full one too.
+    let h = harness();
+    let f1 = h.next();
+    h.pty.send(b"one".to_vec()).unwrap();
+    let f2 = h.next();
+    assert_eq!(f2.seq, f1.seq + 1);
+    h.session.request_full();
+    let f3 = h.next();
+    assert!(f3.full);
+    assert_eq!(line0(&f3), "one");
+}
+
+#[test]
 fn input_and_device_responses_reach_the_pty() {
     let h = harness();
     h.next();

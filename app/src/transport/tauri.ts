@@ -15,12 +15,34 @@ export type SessionId = number;
  */
 export class TauriTransport implements Transport {
   private released = false;
+  private onFrame: ((frame: Frame) => void) | null = null;
+  private channel: Channel<unknown> | null = null;
 
   constructor(readonly id: SessionId) {}
 
   async attach(onFrame: (frame: Frame) => void): Promise<void> {
+    this.onFrame = onFrame;
+    await this.open();
+  }
+
+  /**
+   * Frames over a fresh channel, starting with a full one. A channel can
+   * wedge for good: a large message goes by a fetch, and when that fails
+   * (as around sleep) the channel holds every later message, waiting in
+   * order for the lost one.
+   */
+  async reattach(): Promise<void> {
+    if (this.onFrame && !this.released) await this.open();
+  }
+
+  private async open(): Promise<void> {
+    const onFrame = this.onFrame!;
     const channel = new Channel<unknown>();
-    channel.onmessage = (raw) => onFrame(decodeFrame(raw));
+    if (this.channel) this.channel.onmessage = () => {};
+    this.channel = channel;
+    channel.onmessage = (raw) => {
+      if (this.channel === channel) onFrame(decodeFrame(raw));
+    };
     await invoke("term_attach", { id: this.id, channel });
     if (this.released) this.close();
   }

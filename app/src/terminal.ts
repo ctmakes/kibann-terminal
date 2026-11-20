@@ -69,6 +69,9 @@ function sameCursor(a: Cursor, b: Cursor): boolean {
   );
 }
 
+/** How long a pane waits for the full frame it asked for before reattaching. */
+const STALL_TIMEOUT_MS = 2000;
+
 /** One terminal pane: canvases, input, and the frame loop. */
 export class TerminalView {
   readonly root: HTMLDivElement;
@@ -90,6 +93,9 @@ export class TerminalView {
   private pending: Frame[] = [];
   private raf = 0;
   private sentSize = "";
+  /** When the last frame arrived, and the check for a stall under way. */
+  private lastFrameAt = performance.now();
+  private stallTimer = 0;
   private focused = false;
   private fontSize: number;
   private readonly cleanups: Array<() => void> = [];
@@ -195,9 +201,15 @@ export class TerminalView {
     this.links = new LinkLayer(this.gridEl, this.root);
 
     const send = (e: InputEvent) => this.transport.input(e);
+    // Typing into a pane that has shown nothing for a while: check that
+    // frames still come, so a stalled pane recovers when someone uses it.
+    const sendTyped = (e: InputEvent) => {
+      if (performance.now() - this.lastFrameAt > STALL_TIMEOUT_MS) this.checkFrames();
+      send(e);
+    };
     const platform = opts.platform ?? detectPlatform();
-    const kb = new KeyboardInput(this.textarea, { send, activity: () => this.cursor.resetBlink(), copy: copyNow }, platform);
-    const ime = new ImeInput(this.textarea, { send, preedit: (t) => this.cursor.setPreedit(t) });
+    const kb = new KeyboardInput(this.textarea, { send: sendTyped, activity: () => this.cursor.resetBlink(), copy: copyNow }, platform);
+    const ime = new ImeInput(this.textarea, { send: sendTyped, preedit: (t) => this.cursor.setPreedit(t) });
     const mouse = new MouseInput(
       this.overlay,
       () => ({
@@ -217,7 +229,7 @@ export class TerminalView {
       () => ime.dispose(),
       () => mouse.dispose(),
       () => this.scrollbar.dispose(),
-      attachPaste(this.textarea, send),
+      attachPaste(this.textarea, sendTyped),
       attachCopy(this.textarea, () => this.grid.selectionText),
       watchSize(container, (w, h) => this.layout(w, h)),
     );
@@ -251,10 +263,18 @@ export class TerminalView {
   private watchLostPixels(): () => void {
     const onLost = () => console.warn("kibann: canvas lost its contents");
     const onRestored = () => this.repaint();
+    // Back from sleep or from being hidden is also when frames are most
+    // likely to have stopped: check that they still come.
     const onVisible = () => {
-      if (document.visibilityState === "visible") this.repaint();
+      if (document.visibilityState === "visible") {
+        this.repaint();
+        this.checkFrames();
+      }
     };
-    const onFocus = () => this.repaint();
+    const onFocus = () => {
+      this.repaint();
+      this.checkFrames();
+    };
     for (const c of [this.gridCanvas, this.overlay]) {
       c.addEventListener("contextlost", onLost);
       c.addEventListener("contextrestored", onRestored);
@@ -350,7 +370,24 @@ export class TerminalView {
     }
   }
 
+  /**
+   * Ask for a full frame; if none arrives in time, the connection to the
+   * session is stuck (see {@link Transport.reattach}): make a new one.
+   */
+  checkFrames(): void {
+    if (this.stallTimer || !this.transport.reattach) return;
+    const asked = performance.now();
+    this.transport.requestFull();
+    this.stallTimer = window.setTimeout(() => {
+      this.stallTimer = 0;
+      if (this.lastFrameAt >= asked) return;
+      console.warn("kibann: frames stopped coming; reattaching");
+      void this.transport.reattach?.();
+    }, STALL_TIMEOUT_MS);
+  }
+
   enqueue(frame: Frame): void {
+    this.lastFrameAt = performance.now();
     this.pending.push(frame);
     if (!this.raf) this.raf = requestAnimationFrame(() => this.flush());
   }
@@ -431,6 +468,7 @@ export class TerminalView {
   }
 
   dispose(): void {
+    clearTimeout(this.stallTimer);
     if (this.raf) cancelAnimationFrame(this.raf);
     this.cursor.dispose();
     for (const c of this.cleanups) c();

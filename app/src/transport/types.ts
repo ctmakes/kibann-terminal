@@ -9,6 +9,9 @@ export interface Transport {
   /** The frame with this seq has been painted. */
   ack(seq: number): void;
   requestFull(): void;
+  /** Start over on a new connection, from a full frame: frames stopped
+   * coming even when asked for. */
+  reattach?(): Promise<void>;
   /** The program ended on its own (test transports; the daemon closes the
    * pane itself). Set by the owner before `attach`. */
   onExit?: (code: number | null) => void;

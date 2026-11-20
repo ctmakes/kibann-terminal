@@ -234,6 +234,29 @@ test.describe("frames", () => {
     expect(result.tick).toBe("2");
   });
 
+  test("a pane whose frames stopped coming reattaches when typed into", async ({ page }) => {
+    await openFixture(page, "partial", { still: "1" });
+    await page.evaluate(() => {
+      const h = (window as any).__harness;
+      h.transport.stuck = true;
+      // Nothing has come for a while.
+      h.view.lastFrameAt = performance.now() - 10_000;
+    });
+    await page.keyboard.press("a");
+    // The full frame asked for is lost too: after the timeout, a new attach.
+    await expect.poll(() => page.evaluate(() => (window as any).__harness.transport.reattaches), { timeout: 5000 }).toBe(1);
+    const result = await page.evaluate(async () => {
+      const h = (window as any).__harness;
+      const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await raf();
+      h.transport.step();
+      await raf();
+      return { full: h.transport.fullRequests, tick: h.view.grid.cellAt(5, 3).text };
+    });
+    expect(result.full).toBe(1);
+    expect(result.tick).toBe("1");
+  });
+
   test("the backend is not sent more frames while two are unacknowledged", async ({ page }) => {
     await openFixture(page, "partial", { still: "1" });
     const sent = await page.evaluate(() => {

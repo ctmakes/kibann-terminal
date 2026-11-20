@@ -22,6 +22,9 @@ export class ReplayTransport implements Transport {
   fullRequests = 0;
   /** Test hook: skip sending the next frame, as if it were lost. */
   dropNext = false;
+  /** Test hook: every frame is lost until `reattach`, as over a wedged channel. */
+  stuck = false;
+  reattaches = 0;
   onExit?: (code: number | null) => void;
   closed = false;
   /** Sent with the next frame when it changes. */
@@ -132,6 +135,13 @@ export class ReplayTransport implements Transport {
     this.sendFull();
   }
 
+  async reattach(): Promise<void> {
+    this.reattaches++;
+    this.stuck = false;
+    this.acked = this.seq;
+    this.sendFull();
+  }
+
   private sendFull(): void {
     this.send(true);
   }
@@ -147,6 +157,7 @@ export class ReplayTransport implements Transport {
       frame.title = this.title;
       this.sentTitle = this.title;
     }
+    if (this.stuck) return;
     if (this.dropNext && !full) {
       this.dropNext = false;
       return;
