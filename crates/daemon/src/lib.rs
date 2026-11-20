@@ -20,17 +20,11 @@ pub mod status;
 pub mod template;
 pub mod view;
 
-/// Identifies a daemon's executable: its size and modification time. The
-/// app compares it with the executable it would start, so a rebuilt or
-/// upgraded binary is noticed.
-pub fn build_id(path: &std::path::Path) -> std::io::Result<String> {
-    let meta = std::fs::metadata(path)?;
-    let modified = meta
-        .modified()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    Ok(format!("{}-{}", meta.len(), modified.as_nanos()))
-}
+/// Identifies the daemon's code: a fingerprint of the source it's built
+/// from (see `build.rs`). The app compares a running daemon's with its own,
+/// so an update that changes how the terminal behaves is noticed, and one
+/// that doesn't keeps the daemon and its shells.
+pub const BUILD: &str = env!("KIBANN_DAEMON_BUILD");
 
 /// What shells learn about this daemon: its socket, and a `kibann` link to
 /// this executable on `PATH` (in `<socket>.bin/` beside the socket, so a dev
@@ -104,11 +98,7 @@ pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
     // The app always passes `--socket`, so only a socket other than the
     // default one counts as a test's own (which keeps no layout).
     let own_socket = socket != paths::default_socket(dev);
-    // Read at start: the file may be rebuilt while we run.
-    let build = std::env::current_exe()
-        .and_then(|p| build_id(&p))
-        .unwrap_or_else(|_| "unknown".into());
-    let d = server::Daemon::new(build);
+    let d = server::Daemon::new(BUILD);
     d.set_pane_env(pane_env(&socket));
     if let Some(f) = layout_file(own_socket) {
         d.save_layout_to(f, saved::SAVE_DELAY);

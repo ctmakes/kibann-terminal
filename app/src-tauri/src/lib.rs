@@ -160,7 +160,8 @@ fn stop_daemon(client: Client, socket: &std::path::Path) -> std::io::Result<()> 
 /// executable run with `--daemon` (it costs about 1 MB more than a separate
 /// binary, and nothing extra has to be packaged).
 ///
-/// A daemon from another build: a dev build restarts it, so new terminal
+/// A daemon built from other terminal code ([`daemon::BUILD`]; an update
+/// that leaves that code alone keeps it): a dev build restarts it, so new terminal
 /// code takes effect (ending dev sessions). A release build restarts it too
 /// when the protocol matches and every shell is at its prompt, keeping the
 /// layout; with programs running it keeps using it ([`Connected::Older`])
@@ -173,14 +174,14 @@ fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
     let dev = cfg!(debug_assertions);
     let socket = daemon::paths::socket_path(dev);
     let exe = std::env::current_exe()?;
-    let command = vec![exe.clone().into_os_string(), "--daemon".into()];
-    let expected = daemon::build_id(&exe).ok();
+    let command = vec![exe.into_os_string(), "--daemon".into()];
+
     let mut restarted = false;
     loop {
         let client =
             Client::connect_or_start(&socket, &command, on_event(app.clone(), channels.clone()))?;
         let (version, build) = client.hello()?;
-        let same_build = Some(&build) == expected.as_ref();
+        let same_build = build == daemon::BUILD;
         match decide(dev, version == PROTOCOL_VERSION, same_build, restarted) {
             Found::Use => return Ok(Connected::Current(client)),
             Found::Outdated => return Ok(Connected::Outdated),
@@ -199,7 +200,7 @@ fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
                 restarted = true;
             }
             Found::Restart => {
-                eprintln!("kibann: restarting the daemon (build {build}, want {expected:?})");
+                eprintln!("kibann: restarting the daemon (build {build}, want {})", daemon::BUILD);
                 stop_daemon(client, &socket)?;
                 restarted = true;
             }

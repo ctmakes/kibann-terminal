@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.6.0] - Unreleased
+
+- Updates restart the terminal service only when they change how the
+  terminal behaves. Until now every update did, ending your shells, or
+  asking first when something was running in them. The first update to
+  this version still restarts it once.
+
 ## [0.5.2] - 2026-11-21
 
 - A pane no longer freezes after the Mac sleeps. A busy pane, such as

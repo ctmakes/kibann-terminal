@@ -481,7 +481,7 @@ fn stale_sockets_are_replaced_and_live_ones_kept() {
 fn clients_racing_to_start_share_one_daemon() {
     let path = socket();
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_kibannd"));
-    let command = vec![exe.clone().into_os_string()];
+    let command = vec![exe.into_os_string()];
     let clients: Vec<_> = (0..3)
         .map(|_| {
             let (path, command) = (path.clone(), command.clone());
@@ -493,7 +493,7 @@ fn clients_racing_to_start_share_one_daemon() {
         .collect();
     let clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
     let builds: Vec<_> = clients.iter().map(|(c, _)| c.hello().unwrap().1).collect();
-    assert_eq!(builds[0], daemon::build_id(&exe).unwrap());
+    assert_eq!(builds[0], daemon::BUILD);
     assert!(builds.iter().all(|b| *b == builds[0]));
 
     let s = sh(&clients[0].0, None);

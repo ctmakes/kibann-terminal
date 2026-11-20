@@ -305,7 +305,7 @@ fn err(message: impl Into<String>) -> Reply {
 }
 
 impl Daemon {
-    /// `build` identifies this daemon's binary; see [`crate::build_id`].
+    /// `build` identifies this daemon's binary; see [`crate::BUILD`].
     pub fn new(build: impl Into<String>) -> Arc<Self> {
         let build = build.into();
         Arc::new_cyclic(|me: &Weak<Daemon>| {

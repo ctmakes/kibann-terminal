@@ -99,8 +99,9 @@ Terminal → Check for Updates…, or the menu-bar icon's), downloads a newer
 version in the background, and shows "Kibann Terminal 0.2.0 is ready" with
 **Restart to update** (also in the menu-bar icon's menu). The first start
 of the new version offers its notes (Help → What's New). Restarting replaces the app; the daemon from the earlier version keeps
-the shells, but terminal behaviour lives in the daemon, so the new app
-restarts it: on its own when every shell is at its prompt (the layout comes
+the shells, but terminal behaviour lives in the daemon, so when the
+terminal code changed (a fingerprint of its source, `daemon::BUILD`;
+an app-only update keeps the daemon) the new app restarts it: on its own when every shell is at its prompt (the layout comes
 back with fresh shells), otherwise after asking, naming what runs ("Later"
 keeps the old behaviour until the next start). Another protocol always asks.
 
