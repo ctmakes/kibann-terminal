@@ -199,6 +199,9 @@ test.describe("frames", () => {
       expect(await snapshot(), `wiped before ${name}`).not.toBe(painted);
       await page.evaluate(fire);
       expect(await snapshot(), `after ${name}`).toBe(painted);
+      // The signal also asks for a full frame (to check frames still
+      // come): let it paint before the next wipe.
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     }
   });
 
