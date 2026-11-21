@@ -554,8 +554,10 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: SessionId) -> Duration {
         let ch = char::from(b'a' + (i % 26) as u8).to_string();
         let marker = format!("{ch}{ch}");
         let t = Instant::now();
-        type_text(c, s, &ch);
-        type_text(c, s, &ch);
+        // In one input, so it echoes in one go: typed apart, the second
+        // echo can wait for the next frame slot (16 ms) on a busy machine,
+        // which measures the frame pacing, not the socket.
+        type_text(c, s, &marker);
         loop {
             match rx.recv_timeout(Duration::from_secs(2)).expect("echo") {
                 Ev::Frame(id, f) if id == s => {
