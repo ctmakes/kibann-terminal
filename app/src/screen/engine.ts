@@ -6,6 +6,7 @@
 // Sizes a user drags are kept per screen and node id (localStorage).
 
 import type { Screen, ScreenContent, ScreenFloating, ScreenNode } from "../proto";
+import "./screen.css";
 
 /** Where a block's content goes, and whether it can be seen. */
 export interface BlockSlot {
@@ -46,30 +47,6 @@ interface Placed {
 }
 
 const STORE = "kibann.screen";
-/** The grab area across a resizable edge, in CSS px. */
-const GRAB = 8;
-
-let styled = false;
-function installStyle(): void {
-  if (styled) return;
-  styled = true;
-  const s = document.createElement("style");
-  s.textContent = `
-.screen { position: absolute; inset: 0; display: flex; overflow: hidden; }
-.screen-node { position: relative; display: flex; min-width: 0; min-height: 0; box-sizing: border-box; }
-.screen-block { overflow: hidden; }
-.screen-block > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
-.screen-block > .sidebar, .screen-block > .tab-bar { flex: 0 0 auto; }
-.screen-inner { flex: 1 1 auto; display: flex; min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden; }
-.screen-handle { position: absolute; z-index: 6; }
-.screen-handle.row { top: 0; bottom: 0; right: -${GRAB / 2}px; width: ${GRAB}px; cursor: col-resize; }
-.screen-handle.column { left: 0; right: 0; bottom: -${GRAB / 2}px; height: ${GRAB}px; cursor: row-resize; }
-.screen-dragging iframe { pointer-events: none; }
-.screen-floating { position: absolute; z-index: 30; display: flex; overflow: hidden; transition: transform .18s ease; box-sizing: border-box; }
-.screen-frame { border: 0; display: block; width: 100%; height: 100%; background: transparent; color-scheme: normal; }
-`;
-  document.head.append(s);
-}
 
 export class ScreenView {
   readonly el: HTMLDivElement;
@@ -82,7 +59,6 @@ export class ScreenView {
     readonly screen: Screen,
     private readonly opts: ScreenViewOptions,
   ) {
-    installStyle();
     this.el = document.createElement("div");
     this.el.className = "screen";
     this.el.dataset.screen = name;

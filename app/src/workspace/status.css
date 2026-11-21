@@ -1,0 +1,6 @@
+/* The pulse for working dots. Bundled, not a <style> made at run time
+   (the release build's CSP blocks those). */
+@keyframes kibann-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+.agent-dot[data-state="working"] { animation: kibann-pulse 1.6s ease-in-out infinite }
+.kibann-hidden .agent-dot { animation-play-state: paused }
+@media (prefers-reduced-motion: reduce) { .agent-dot { animation: none !important } }

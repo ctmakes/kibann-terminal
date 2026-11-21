@@ -1,0 +1,15 @@
+/* The screen engine's rules. A file Vite bundles, not a <style> made at
+   run time: the release build's CSP carries nonces, so it blocks those. */
+.screen { position: absolute; inset: 0; display: flex; overflow: hidden; }
+.screen-node { position: relative; display: flex; min-width: 0; min-height: 0; box-sizing: border-box; }
+.screen-block { overflow: hidden; }
+.screen-block > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.screen-block > .sidebar, .screen-block > .tab-bar { flex: 0 0 auto; }
+.screen-inner { flex: 1 1 auto; display: flex; min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden; }
+/* The grab area across a resizable edge: 8px. */
+.screen-handle { position: absolute; z-index: 6; }
+.screen-handle.row { top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; }
+.screen-handle.column { left: 0; right: 0; bottom: -4px; height: 8px; cursor: row-resize; }
+.screen-dragging iframe { pointer-events: none; }
+.screen-floating { position: absolute; z-index: 30; display: flex; overflow: hidden; transition: transform .18s ease; box-sizing: border-box; }
+.screen-frame { border: 0; display: block; width: 100%; height: 100%; background: transparent; color-scheme: normal; }

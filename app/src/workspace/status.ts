@@ -3,6 +3,7 @@
 
 import type { AgentState, PaneStatus } from "../proto";
 import type { PaneId } from "./layout";
+import "./status.css";
 
 /** Every pane with an agent, by pane id (JSON object keys are strings). */
 export type StatusMap = Record<string, PaneStatus>;
@@ -62,22 +63,6 @@ export function agentName(agent: string): string {
   if (agent === "claude") return "Claude Code";
   if (agent === "opencode") return "OpenCode";
   return agent ? agent[0].toUpperCase() + agent.slice(1) : "An agent";
-}
-
-const STYLE_ID = "kibann-status-style";
-
-/** The pulse for working dots, once per document. */
-export function installStyle(doc: Document = document): void {
-  if (doc.getElementById(STYLE_ID)) return;
-  const style = doc.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-@keyframes kibann-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
-.agent-dot[data-state="working"] { animation: kibann-pulse 1.6s ease-in-out infinite }
-.kibann-hidden .agent-dot { animation-play-state: paused }
-@media (prefers-reduced-motion: reduce) { .agent-dot { animation: none !important } }
-`;
-  doc.head.append(style);
 }
 
 /** A dot element (hidden until it has a state). */

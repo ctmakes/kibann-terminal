@@ -34,7 +34,6 @@ import {
   arrivals,
   blockedCount,
   dotFor,
-  installStyle,
   makeDot,
   rollUp,
   showDot,
@@ -318,7 +317,6 @@ export class Workspace {
     if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
 
-    installStyle();
     // Pulsing dots don't animate in a hidden window.
     const onVisible = () => this.root.classList.toggle("kibann-hidden", document.hidden);
     document.addEventListener("visibilitychange", onVisible);
