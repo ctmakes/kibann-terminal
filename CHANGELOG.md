@@ -5,6 +5,36 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.7.0] - Unreleased
+
+- Screens: change what the whole window shows and where. Pick one with
+  View → Screen… (each shows as you move through the list; Enter keeps
+  it), or step through them with Cmd+Shift+L and Cmd+Shift+K.
+  Ctrl+Alt+Shift+Esc goes back to Kibann's own window, the `default`
+  screen. Built in:
+  - `board`: every pane as a card with a live picture, its agent and how
+    long it's been at it. Waiting agents come first; click a card to
+    show its pane.
+  - `focus`: one terminal filling the window and a thin status line;
+    your agents slide in from the left edge.
+  - `departures`: your agents on a split-flap departures board.
+- Make your own by asking your agent ("put my agents as cards beside the
+  terminals"). Run `kibann skill install` again to give it the new
+  `kibann-screens` skill. A screen is a folder of JSON; its panels are
+  web pages that see your tabs, agents and git live. They're sandboxed:
+  seeing or typing into your terminals, running programs or using the
+  network each needs your OK first. `kibann screen` lists, checks and
+  copies them. The README has the details.
+- Layout files are now **workspace files**: View → Open Workspace…,
+  `kibann workspace open`, `.kibann/workspace.toml`, and
+  `~/.config/kibann/workspaces/`. Rename a `.kibann/layout.toml` or a
+  file in `~/.config/kibann/layouts/` to match.
+- The window no longer goes empty when the terminal service is from an
+  older version and you open a workspace; Kibann offers to restart the
+  service instead.
+- This update restarts the terminal service once (it asks first when
+  something is running in a pane).
+
 ## [0.6.0] - 2026-11-21
 
 - Layout files: set up tabs and splits in one go, with a folder and a
