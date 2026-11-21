@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.7.1] - Unreleased
+## [0.7.1] - 2026-11-21
 
 - The window shows your terminals again. In 0.7.0 it showed only the tab
   bar, with no sidebar and no panes.
