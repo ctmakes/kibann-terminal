@@ -7,8 +7,20 @@ its notes then go out with that version.
 
 ## [0.6.0] - Unreleased
 
+- Layout files: set up tabs and splits in one go, with a folder and a
+  command for each pane. Open one with View → Open Layout… or
+  `kibann layout open NAME`; save the window as one with View → Save
+  Layout… or `kibann layout save NAME`. A repo can carry its own in
+  `.kibann/layout.toml`. Built in: `system`, `ports`, `agents`,
+  `agents-4` and `review`. A layout that isn't yours shows the commands
+  it would run and asks first. The README has the format.
+- Agents can build layouts for you ("make a layout for this repo"). Run
+  `kibann skill install` again to give them the new `kibann-layouts`
+  skill.
+- `kibann watch SECS -- CMD` reruns a command every few seconds, like
+  `watch`.
 - Updates restart the terminal service only when they change how the
-  terminal behaves. Until now every update did, ending your shells, or
+  terminal behaves. Until now every update did, giving you fresh shells or
   asking first when something was running in them. The first update to
   this version still restarts it once.
 
