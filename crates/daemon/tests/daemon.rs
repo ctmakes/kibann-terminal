@@ -1070,3 +1070,50 @@ fn a_layout_opens_in_one_go() {
     d.shutdown();
     h.join().unwrap().unwrap();
 }
+
+/// A request this daemon doesn't know (from a newer app) gets an error,
+/// and the client stays connected: dropping it would take its panes away.
+#[test]
+fn an_unknown_request_is_answered_not_fatal() {
+    use proto::wire::{ServerMsg, read_msg, write_msg};
+    use std::os::unix::net::UnixStream;
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let mut s = UnixStream::connect(&path).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut r = s.try_clone().unwrap();
+    let next_reply = |r: &mut UnixStream| loop {
+        match read_msg::<_, ServerMsg<serde_json::Value>>(r)
+            .unwrap()
+            .unwrap()
+        {
+            ServerMsg::Reply { req, reply } => return (req, reply),
+            _ => continue,
+        }
+    };
+    write_msg(
+        &mut s,
+        &serde_json::json!({"t": "act", "req": 7, "action": {"t": "from_the_future"}}),
+    )
+    .unwrap();
+    let (req, reply) = next_reply(&mut r);
+    assert_eq!(req, 7);
+    assert!(
+        matches!(&reply, Reply::Error { message } if message.contains("restart it")),
+        "{reply:?}"
+    );
+    // Still connected: the next request is answered.
+    write_msg(
+        &mut s,
+        &ClientMsg::Hello {
+            req: 8,
+            version: PROTOCOL_VERSION,
+        },
+    )
+    .unwrap();
+    let (req, reply) = next_reply(&mut r);
+    assert_eq!(req, 8);
+    assert!(matches!(reply, Reply::Hello { .. }), "{reply:?}");
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}

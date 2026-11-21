@@ -25,7 +25,7 @@ use proto::git::PaneDir;
 use proto::layout::{Action, Dir, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{
-    ClientMsg, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, read_msg, write_msg,
+    ClientMsg, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, write_msg,
 };
 use proto::{Frame, Resize};
 use term::{Event, Foreground, Session, Spawn};
@@ -372,8 +372,29 @@ impl Daemon {
         thread::Builder::new()
             .name("daemon-reader".into())
             .spawn(move || {
-                while let Ok(Some(msg)) = read_msg::<_, ClientMsg>(&mut reader) {
-                    me.handle(conn, &out, msg);
+                while let Ok(Some(body)) = proto::wire::read_raw(&mut reader) {
+                    match serde_json::from_slice::<ClientMsg>(&body) {
+                        Ok(msg) => me.handle(conn, &out, msg),
+                        // A request this daemon doesn't know (a newer app or
+                        // CLI): answer it with an error and carry on, rather
+                        // than dropping the client, which takes its panes.
+                        Err(e) => {
+                            let req = serde_json::from_slice::<serde_json::Value>(&body)
+                                .ok()
+                                .and_then(|v| v.get("req")?.as_u64());
+                            eprintln!("kibannd: a request it can't read: {e}");
+                            if let Some(req) = req.and_then(|r| ReqId::try_from(r).ok()) {
+                                Self::reply(
+                                    &out,
+                                    req,
+                                    err(format!(
+                                        "this terminal service (build {}) can't do that; restart it to use the newer version",
+                                        me.build
+                                    )),
+                                );
+                            }
+                        }
+                    }
                 }
                 me.disconnect(conn);
             })?;

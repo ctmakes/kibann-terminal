@@ -34,6 +34,9 @@ type Channels = Arc<Mutex<HashMap<SessionId, Channel>>>;
 struct Term {
     client: Client,
     channels: Channels,
+    /// The daemon is from an earlier build (see [`connect`]): requests new
+    /// in this one, like opening a layout, would fail there.
+    older: bool,
 }
 
 impl Term {
@@ -200,7 +203,10 @@ fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
                 restarted = true;
             }
             Found::Restart => {
-                eprintln!("kibann: restarting the daemon (build {build}, want {})", daemon::BUILD);
+                eprintln!(
+                    "kibann: restarting the daemon (build {build}, want {})",
+                    daemon::BUILD
+                );
                 stop_daemon(client, &socket)?;
                 restarted = true;
             }
@@ -433,6 +439,20 @@ async fn layout_open(
 ) -> Result<bool, String> {
     use daemon::layouts;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    // The service from an earlier version can't open layouts; offer to
+    // restart it rather than send what it can't read.
+    if state.older {
+        #[cfg(unix)]
+        {
+            let socket = daemon::paths::socket_path(cfg!(debug_assertions));
+            let running = service::running_programs(&socket).unwrap_or_default();
+            offer_update_restart(&app, &running);
+        }
+        return Err(
+            "the terminal service is still the one from before the update; restart it to open layouts"
+                .into(),
+        );
+    }
     let here = opened_from(&state.client, pane);
     let f = layouts::find(Some(path.as_deref().unwrap_or(&name)), &here)?;
     let t = layouts::parse(&f, &here).map_err(|p| {
@@ -1189,24 +1209,28 @@ pub fn run() {
             // it, as before.
             let local = || Client::in_process(on_event(handle.clone(), channels.clone()));
             #[cfg(unix)]
-            let client = match connect(handle, &channels) {
-                Ok(Connected::Current(client)) => client,
+            let (client, older) = match connect(handle, &channels) {
+                Ok(Connected::Current(client)) => (client, false),
                 Ok(Connected::Older(client, running)) => {
                     offer_update_restart(handle, &running);
-                    client
+                    (client, true)
                 }
                 Ok(Connected::Outdated) => {
                     offer_restart(handle);
-                    local()?
+                    (local()?, false)
                 }
                 Err(e) => {
                     eprintln!("kibann: no daemon ({e}); running sessions in the app");
-                    local()?
+                    (local()?, false)
                 }
             };
             #[cfg(not(unix))]
-            let client = local()?;
-            app.manage(Term { client, channels });
+            let (client, older) = (local()?, false);
+            app.manage(Term {
+                client,
+                channels,
+                older,
+            });
 
             #[cfg(target_os = "macos")]
             if let Some(w) = app.get_webview_window("main") {
