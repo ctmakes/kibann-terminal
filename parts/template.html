@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A part: a page Kibann shows in a screen's block. `kibann` is already
+  defined (kibann.js loads first); `kibann screen api` prints its types.
+  The window's colors are CSS variables: var(--k-bg), var(--k-text),
+  var(--k-blocked)... Use them, so the part follows the user's theme.
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--k-panel); color: var(--k-text);
+    font: 12px var(--k-font), sans-serif;
+    padding: 10px 12px; box-sizing: border-box; overflow: auto;
+    user-select: none; -webkit-user-select: none;
+  }
+  .pane { padding: 4px 6px; border-radius: 5px; cursor: default; }
+  .pane:hover { background: var(--k-tab); }
+  .pane.focused { color: var(--k-bright); }
+  .blocked { color: var(--k-blocked); }
+  .working { color: var(--k-working); }
+  .done { color: var(--k-done); }
+</style>
+</head>
+<body>
+  <div id="list"></div>
+<script>
+  const list = document.getElementById("list");
+  // Called now and whenever the window changes: tabs, panes, agents, git.
+  kibann.on("state", (s) => {
+    list.replaceChildren(
+      ...s.panes.map((p) => {
+        const row = document.createElement("div");
+        row.className = `pane ${p.id === s.focused ? "focused" : ""}`;
+        // Titles come from programs: set them as text, never as HTML.
+        row.append(p.agent ?? p.title);
+        if (p.state) {
+          const st = document.createElement("span");
+          st.className = p.state;
+          st.textContent = ` ${p.state}`;
+          row.append(st);
+        }
+        row.title = p.cwd;
+        // Clicking shows that pane.
+        row.addEventListener("click", () => kibann.run("pane.focus", { pane: p.id }));
+        return row;
+      }),
+    );
+  });
+</script>
+</body>
+</html>

@@ -719,7 +719,7 @@ impl Daemon {
                 st.broadcast(None);
                 Ok((None, Some(tab)))
             }
-            Action::OpenLayout { template } => self.open_layout(template),
+            Action::OpenWorkspace { template } => self.open_workspace(template),
             Action::Zoom { tab, pane } => {
                 let mut st = self.lock();
                 if !st.model.zoom(tab, pane) {
@@ -731,10 +731,10 @@ impl Daemon {
         }
     }
 
-    /// Open a layout file's tabs after the others: every pane started,
+    /// Open a workspace file's tabs after the others: every pane started,
     /// then the tabs added in one go (one redraw, nothing half built). A
     /// pane that can't start is left out. Returns the shown tab and pane.
-    fn open_layout(
+    fn open_workspace(
         &self,
         template: proto::layout::Template,
     ) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
@@ -869,7 +869,7 @@ impl Daemon {
             .map(|t| t.tree.leaves().len())
             .sum::<usize>();
         if failed.len() == opened {
-            return Err(err("none of the layout's panes could start"));
+            return Err(err("none of the workspace's panes could start"));
         }
         for (session, typed, note) in sessions {
             if let Some(n) = note {

@@ -19,15 +19,25 @@ use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
 use crate::client::{Client, unexpected};
-use crate::layouts::{self, Found};
+use crate::workspaces::{self, Found};
 
 /// The agent guide, installed by `kibann skill install`.
 pub const SKILL: &str = include_str!("../../../skills/kibann/SKILL.md");
-/// The guide to layout files, installed beside it.
-pub const SKILL_LAYOUTS: &str = include_str!("../../../skills/kibann-layouts/SKILL.md");
+/// The guide to workspace files, installed beside it.
+pub const SKILL_WORKSPACES: &str = include_str!("../../../skills/kibann-workspaces/SKILL.md");
+
+/// The guide to screens and parts.
+pub const SKILL_SCREENS: &str = include_str!("../../../skills/kibann-screens/SKILL.md");
 
 /// Every skill `kibann skill install` writes, by folder name.
-const SKILLS: &[(&str, &str)] = &[("kibann", SKILL), ("kibann-layouts", SKILL_LAYOUTS)];
+const SKILLS: &[(&str, &str)] = &[
+    ("kibann", SKILL),
+    ("kibann-workspaces", SKILL_WORKSPACES),
+    ("kibann-screens", SKILL_SCREENS),
+];
+
+/// A new part's page (`kibann screen part NAME`).
+const PART_PAGE: &str = include_str!("../../../parts/template.html");
 
 const USAGE: &str = "\
 usage: kibann <command>
@@ -57,18 +67,31 @@ usage: kibann <command>
                                     full-screen viewer that follows changes
   pane focus P                      focus P and show its tab
   pane close P                      end P's shell
-  layout list                       the layouts: the project's, yours, built-in
-  layout check [NAME|FILE]          read a layout without opening it: what it
+  workspace list                    the workspaces: the project's, yours, built-in
+  workspace check [NAME|FILE]       read a workspace without opening it: what it
                                     runs, or every problem in it
-  layout open [NAME|FILE] [--yes]   open a layout's tabs (no NAME: the project's
-                                    .kibann/layout.toml); --yes runs a file's
-                                    commands without asking
-  layout save NAME [--tab T] [--to FILE] [--relative] [--force]
-                                    write the window (or tab T) as a layout,
-                                    to your layouts folder or FILE
-  layout save NAME --from LAYOUT    copy a layout (a built-in one) to edit
+  workspace open [NAME|FILE] [--yes]
+                                    open a workspace's tabs (no NAME: the
+                                    project's .kibann/workspace.toml); --yes runs
+                                    a file's commands without asking
+  workspace save NAME [--tab T] [--to FILE] [--relative] [--force]
+                                    write the window (or tab T) as a workspace,
+                                    to your workspaces folder or FILE
+  workspace save NAME --from WS     copy a workspace (a built-in one) to edit
+  screen list                       the screens: yours, then built-in
+  screen check [NAME]               read a screen and its parts without showing
+                                    it: what they may do, or every problem
+  screen use NAME                   show NAME in the window (the config's screen)
+  screen new NAME [--from SCREEN] [--force]
+                                    a screen of yours to edit: a copy of SCREEN
+                                    (default: the default one)
+  screen parts                      every part a screen can show
+  screen part NAME [--from PART] [--force]
+                                    a part of yours to edit: a copy of PART, or
+                                    a page to start from
+  screen api                        kibann.d.ts: what a part's page can use
   watch SECS -- CMD...              run CMD every SECS seconds, like watch
-  skill show [layouts]              the guide for agents (or the layouts one)
+  skill show [workspaces|screens]   the guide for agents (or another)
   skill install [--claude|--codex|--opencode]
                                     install both: ~/.claude/skills/ (Claude
                                     Code, OpenCode), and ~/.agents/skills/
@@ -81,7 +104,9 @@ Without P where one is optional, the calling pane is used.";
 pub fn is_command(first: Option<&OsString>) -> bool {
     matches!(
         first.and_then(|a| a.to_str()),
-        Some("pane" | "tab" | "layout" | "watch" | "skill" | "help" | "--help" | "-h")
+        Some(
+            "pane" | "tab" | "workspace" | "screen" | "watch" | "skill" | "help" | "--help" | "-h"
+        )
     )
 }
 
@@ -315,26 +340,75 @@ fn dispatch(args: &[String]) -> Out {
         (Some("skill"), Some("show")) => {
             match a.pos.first().map(String::as_str) {
                 None => print!("{SKILL}"),
-                Some("layouts") => print!("{SKILL_LAYOUTS}"),
-                Some(o) => return Err(usage(format!("no skill {o}; there's layouts"))),
+                Some("workspaces") => print!("{SKILL_WORKSPACES}"),
+                Some("screens") => print!("{SKILL_SCREENS}"),
+                Some(o) => {
+                    return Err(usage(format!(
+                        "no skill {o}; there's workspaces and screens"
+                    )));
+                }
             }
             Ok(None)
         }
-        (Some("layout"), Some("list")) => {
+        (Some("workspace"), Some("list")) => {
             a.only(&[])?;
-            Ok(Some(json!({"layouts": layouts::list(&here()?)})))
+            Ok(Some(json!({"workspaces": workspaces::list(&here()?)})))
         }
-        (Some("layout"), Some("check")) => {
+        (Some("workspace"), Some("check")) => {
             a.only(&[])?;
-            layout_check(&a)
+            workspace_check(&a)
         }
-        (Some("layout"), Some("open")) => {
+        (Some("workspace"), Some("open")) => {
             a.only(&["--yes"])?;
-            layout_open(&a)
+            workspace_open(&a)
         }
-        (Some("layout"), Some("save")) => {
+        (Some("workspace"), Some("save")) => {
             a.only(&["--tab", "--to", "--relative", "--force", "--from"])?;
-            layout_save(&a)
+            workspace_save(&a)
+        }
+        (Some("screen"), Some("list")) => {
+            a.only(&[])?;
+            Ok(Some(json!({"screens": crate::screens::list()})))
+        }
+        (Some("screen"), Some("check")) => {
+            a.only(&[])?;
+            screen_check(&a)
+        }
+        (Some("screen"), Some("use")) => {
+            a.only(&[])?;
+            screen_use(&a)
+        }
+        (Some("screen"), Some("new")) => {
+            a.only(&["--from", "--force"])?;
+            let name = one_name(&a, "screen")?;
+            let from = a.get("--from").unwrap_or(proto::config::DEFAULT_SCREEN);
+            let dir = crate::screens::copy(from, name, a.has("--force"))
+                .map_err(|e| error("invalid", e))?;
+            Ok(Some(
+                json!({"screen": name, "path": dir.join("screen.json")}),
+            ))
+        }
+        (Some("screen"), Some("parts")) => {
+            a.only(&[])?;
+            let parts: Vec<Value> = crate::screens::list_parts()
+                .into_iter()
+                .map(|(name, about, builtin)| json!({"name": name, "about": about, "builtin": builtin}))
+                .collect();
+            Ok(Some(json!({"parts": parts})))
+        }
+        (Some("screen"), Some("part")) => {
+            a.only(&["--from", "--force"])?;
+            screen_part(&a)
+        }
+        (Some("screen"), Some("api")) => {
+            a.only(&[])?;
+            print!(
+                "{}",
+                String::from_utf8_lossy(
+                    crate::screens::builtin_file("parts/kibann.d.ts").unwrap_or_default()
+                )
+            );
+            Ok(None)
         }
         (Some("skill"), Some("install")) => {
             a.only(&["--claude", "--codex", "--opencode"])?;
@@ -959,21 +1033,132 @@ fn skill_install(a: &Args) -> Out {
     Ok(Some(json!({"installed": installed})))
 }
 
+fn one_name<'a>(a: &'a Args, what: &str) -> Result<&'a str, Fail> {
+    match a.pos.as_slice() {
+        [n] => Ok(n),
+        [] => Err(usage(format!("give the {what} a name"))),
+        _ => Err(usage(format!("give one {what} name"))),
+    }
+}
+
+fn screen_check(a: &Args) -> Out {
+    let name = match a.pos.as_slice() {
+        [] => current_screen(),
+        [n] => n.clone(),
+        _ => return Err(usage("give one screen name")),
+    };
+    let (screen, origin) = crate::screens::read(&name).map_err(|e| error("invalid", e))?;
+    let parts: Vec<Value> = crate::screens::parts_of(&screen)
+        .into_iter()
+        .filter_map(|p| {
+            let (m, o) = crate::screens::part(&p).ok()?;
+            let path = match &o {
+                crate::screens::Origin::User(d) => Some(d.clone()),
+                crate::screens::Origin::Builtin => None,
+            };
+            Some(json!({
+                "name": p,
+                "about": m.about,
+                "builtin": path.is_none(),
+                "path": path,
+                "permissions": m.permissions,
+                "asks": crate::screens::needs_asking(&o, &m).unwrap_or_default(),
+            }))
+        })
+        .collect();
+    let path = match origin {
+        crate::screens::Origin::User(d) => Some(d.join("screen.json")),
+        crate::screens::Origin::Builtin => None,
+    };
+    Ok(Some(json!({
+        "name": name,
+        "about": screen.about,
+        "builtin": path.is_none(),
+        "path": path,
+        "parts": parts,
+    })))
+}
+
+/// The config file's `screen`, or the default.
+fn current_screen() -> String {
+    crate::paths::config_dir()
+        .and_then(|d| std::fs::read_to_string(d.join("config")).ok())
+        .map(|t| proto::config::Settings::parse(&t).0.screen)
+        .unwrap_or_else(|| proto::config::DEFAULT_SCREEN.to_owned())
+}
+
+fn screen_use(a: &Args) -> Out {
+    let name = one_name(a, "screen")?;
+    crate::screens::read(name).map_err(|e| error("invalid", e))?;
+    let file = crate::paths::config_dir()
+        .ok_or_else(|| error("no_home", "no home directory for the config file"))?
+        .join("config");
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let values: Vec<String> = if name == proto::config::DEFAULT_SCREEN {
+        Vec::new()
+    } else {
+        vec![name.to_owned()]
+    };
+    if let Some(d) = file.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(
+        &file,
+        proto::config::set_config_values(&text, "screen", &values),
+    )?;
+    Ok(Some(json!({"screen": name, "config": file})))
+}
+
+fn screen_part(a: &Args) -> Out {
+    let name = one_name(a, "part")?;
+    let dir = match a.get("--from") {
+        Some(from) => crate::screens::copy_part(from, name, a.has("--force"))
+            .map_err(|e| error("invalid", e))?,
+        None => {
+            if !proto::config::valid_name(name)
+                || crate::screens::NATIVE_PARTS.iter().any(|(n, _)| *n == name)
+            {
+                return Err(error("invalid", format!("{name:?} can't be a part's name")));
+            }
+            let dir = crate::paths::parts_dir()
+                .ok_or_else(|| error("no_home", "no home directory for the parts folder"))?
+                .join(name);
+            if dir.join("part.json").exists() && !a.has("--force") {
+                return Err(error(
+                    "exists",
+                    format!(
+                        "{} exists (--force replaces it)",
+                        dir.join("part.json").display()
+                    ),
+                ));
+            }
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(
+                dir.join("part.json"),
+                "{\n  \"about\": \"What this part shows\",\n  \"permissions\": {}\n}\n",
+            )?;
+            std::fs::write(dir.join("index.html"), PART_PAGE)?;
+            dir
+        }
+    };
+    Ok(Some(json!({"part": name, "path": dir})))
+}
+
 fn here() -> Result<PathBuf, Fail> {
     std::env::current_dir().map_err(|e| error("no_cwd", format!("no current directory: {e}")))
 }
 
-/// Find and read the layout named on the command line.
-fn layout_found(
+/// Find and read the workspace named on the command line.
+fn workspace_found(
     a: &Args,
     here: &std::path::Path,
 ) -> Result<(Found, proto::layout::Template), Fail> {
     if a.pos.len() > 1 {
-        return Err(usage("give one layout: a name or a file"));
+        return Err(usage("give one workspace: a name or a file"));
     }
-    let f = layouts::find(a.pos.first().map(String::as_str), here)
+    let f = workspaces::find(a.pos.first().map(String::as_str), here)
         .map_err(|m| error("not_found", m))?;
-    let t = layouts::parse(&f, here).map_err(|p| {
+    let t = workspaces::parse(&f, here).map_err(|p| {
         let file = f
             .path
             .as_ref()
@@ -984,9 +1169,9 @@ fn layout_found(
     Ok((f, t))
 }
 
-fn layout_check(a: &Args) -> Out {
+fn workspace_check(a: &Args) -> Out {
     let here = here()?;
-    let (f, t) = layout_found(a, &here)?;
+    let (f, t) = workspace_found(a, &here)?;
     let panes: usize = t.tabs.iter().map(|t| t.tree.leaves().len()).sum();
     Ok(Some(json!({
         "name": t.name,
@@ -994,26 +1179,26 @@ fn layout_check(a: &Args) -> Out {
         "path": f.path,
         "tabs": t.tabs.len(),
         "panes": panes,
-        "runs": layouts::commands(&t),
-        "asks": layouts::needs_asking(&f, &t),
-        "layout": t,
+        "runs": workspaces::commands(&t),
+        "asks": workspaces::needs_asking(&f, &t),
+        "workspace": t,
     })))
 }
 
-fn layout_open(a: &Args) -> Out {
+fn workspace_open(a: &Args) -> Out {
     let here = here()?;
-    let (f, t) = layout_found(a, &here)?;
-    if layouts::needs_asking(&f, &t) {
+    let (f, t) = workspace_found(a, &here)?;
+    if workspaces::needs_asking(&f, &t) {
         if !a.has("--yes") {
             ask_to_run(&f, &t)?;
         }
         if let Some(p) = &f.path {
-            layouts::trust(p, &f.text)?;
+            workspaces::trust(p, &f.text)?;
         }
     }
     let name = t.name.clone();
     let (p, tab) = connect()?
-        .act(Action::OpenLayout { template: t })
+        .act(Action::OpenWorkspace { template: t })
         .map_err(|e| error("open", e.to_string()))?;
     Ok(Some(
         json!({"opened": name, "tab": tab.map(tab_id), "pane": made(p, tab)}),
@@ -1029,14 +1214,14 @@ fn ask_to_run(f: &Found, t: &proto::layout::Template) -> Result<(), Fail> {
         .as_ref()
         .map_or_else(|| f.name.clone(), |p| p.display().to_string());
     let mut list = String::new();
-    for r in layouts::commands(t) {
+    for r in workspaces::commands(t) {
         list.push_str(&format!("  {}  (in {})\n", r.run, r.cwd));
     }
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Err(error(
             "untrusted",
             format!(
-                "{file} runs commands you haven't agreed to:\n{list}Run kibann layout open again with --yes once the user agrees."
+                "{file} runs commands you haven't agreed to:\n{list}Run kibann workspace open again with --yes once the user agrees."
             ),
         ));
     }
@@ -1051,7 +1236,7 @@ fn ask_to_run(f: &Found, t: &proto::layout::Template) -> Result<(), Fail> {
     }
 }
 
-fn layout_save(a: &Args) -> Out {
+fn workspace_save(a: &Args) -> Out {
     let here = here()?;
     let home = crate::paths::home_dir();
     let to = a.get("--to").map(|t| {
@@ -1059,7 +1244,7 @@ fn layout_save(a: &Args) -> Out {
     });
     let name = match (a.pos.first(), &to) {
         (Some(n), _) => n.clone(),
-        (None, Some(t)) if t.ends_with(layouts::PROJECT_FILE) => t
+        (None, Some(t)) if t.ends_with(workspaces::PROJECT_FILE) => t
             .parent()
             .and_then(std::path::Path::parent)
             .and_then(|d| d.file_name())
@@ -1067,18 +1252,18 @@ fn layout_save(a: &Args) -> Out {
         (None, Some(t)) => t
             .file_stem()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-        (None, None) => return Err(usage("give the layout a name (or --to FILE)")),
+        (None, None) => return Err(usage("give the workspace a name (or --to FILE)")),
     };
     if a.pos.len() > 1 {
         return Err(usage("give one name"));
     }
     if to.is_none() && (name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.')) {
-        return Err(usage(format!("{name:?} can't be a layout's name")));
+        return Err(usage(format!("{name:?} can't be a workspace's name")));
     }
     let target = match to {
         Some(t) => t,
-        None => crate::paths::layouts_dir()
-            .ok_or_else(|| error("no_home", "no home directory for the layouts folder"))?
+        None => crate::paths::workspaces_dir()
+            .ok_or_else(|| error("no_home", "no home directory for the workspaces folder"))?
             .join(format!("{name}.toml")),
     };
     if target.exists() && !a.has("--force") {
@@ -1089,7 +1274,7 @@ fn layout_save(a: &Args) -> Out {
     }
     let text = match a.get("--from") {
         Some(from) => {
-            layouts::find(Some(from), &here)
+            workspaces::find(Some(from), &here)
                 .map_err(|m| error("not_found", m))?
                 .text
         }
@@ -1119,10 +1304,10 @@ fn layout_save(a: &Args) -> Out {
             } else {
                 in_project
             };
-            layouts::snapshot(
+            workspaces::snapshot(
                 &layout,
                 &panes,
-                &layouts::SaveSpec {
+                &workspaces::SaveSpec {
                     name: Some(&name),
                     tab,
                     relative_to: relative_to.as_deref(),
@@ -1136,7 +1321,7 @@ fn layout_save(a: &Args) -> Out {
     }
     std::fs::write(&target, &text)?;
     // Saved by the user: opening it again needn't ask.
-    layouts::trust(&target, &text)?;
+    workspaces::trust(&target, &text)?;
     Ok(Some(json!({"saved": target, "name": name})))
 }
 
@@ -1157,7 +1342,7 @@ fn watch(args: &[String]) -> Out {
     let Some((prog, rest)) = cmd.split_first() else {
         return Err(usage("watch SECS -- CMD...: which command?"));
     };
-    let shown = layouts::shell_line(cmd);
+    let shown = workspaces::shell_line(cmd);
     loop {
         let mut screen = format!("\x1b[H\x1b[2mEvery {secs}s: {shown}\x1b[0m\x1b[K\n\x1b[K\n");
         match std::process::Command::new(prog)

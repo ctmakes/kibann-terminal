@@ -8,6 +8,7 @@
 mod fonts;
 mod open;
 #[cfg(unix)]
+mod screens;
 mod service;
 mod theme;
 #[cfg(target_os = "macos")]
@@ -418,28 +419,28 @@ fn opened_from(client: &Client, pane: Option<PaneId>) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("/"))
 }
 
-/// The layouts for the focused pane's directory (View → Open Layout…).
+/// The workspaces for the focused pane's directory (View → Open Workspace…).
 #[tauri::command]
-async fn layouts_list(
+async fn workspaces_list(
     state: State<'_, Term>,
     pane: Option<PaneId>,
-) -> Result<Vec<daemon::layouts::Listed>, String> {
-    Ok(daemon::layouts::list(&opened_from(&state.client, pane)))
+) -> Result<Vec<daemon::workspaces::Listed>, String> {
+    Ok(daemon::workspaces::list(&opened_from(&state.client, pane)))
 }
 
-/// Open a layout: a built-in one by `name`, a file by `path`. A file that
+/// Open a workspace: a built-in one by `name`, a file by `path`. A file that
 /// runs commands from someone else asks first; false when the user says no.
 #[tauri::command]
-async fn layout_open(
+async fn workspace_open(
     app: AppHandle,
     state: State<'_, Term>,
     name: String,
     path: Option<String>,
     pane: Option<PaneId>,
 ) -> Result<bool, String> {
-    use daemon::layouts;
+    use daemon::workspaces;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    // The service from an earlier version can't open layouts; offer to
+    // The service from an earlier version can't open workspaces; offer to
     // restart it rather than send what it can't read.
     if state.older {
         #[cfg(unix)]
@@ -449,34 +450,34 @@ async fn layout_open(
             offer_update_restart(&app, &running);
         }
         return Err(
-            "the terminal service is still the one from before the update; restart it to open layouts"
+            "the terminal service is still the one from before the update; restart it to open workspaces"
                 .into(),
         );
     }
     let here = opened_from(&state.client, pane);
-    let f = layouts::find(Some(path.as_deref().unwrap_or(&name)), &here)?;
-    let t = layouts::parse(&f, &here).map_err(|p| {
+    let f = workspaces::find(Some(path.as_deref().unwrap_or(&name)), &here)?;
+    let t = workspaces::parse(&f, &here).map_err(|p| {
         p.0.iter()
             .map(|p| format!("line {}: {}", p.line, p.message))
             .collect::<Vec<_>>()
             .join("; ")
     })?;
-    if layouts::needs_asking(&f, &t) {
+    if workspaces::needs_asking(&f, &t) {
         let file = f
             .path
             .as_ref()
             .map_or_else(|| f.name.clone(), |p| p.display().to_string());
-        let list: Vec<String> = layouts::commands(&t)
+        let list: Vec<String> = workspaces::commands(&t)
             .into_iter()
             .map(|r| format!("• {}", r.run))
             .collect();
         let yes = app
             .dialog()
             .message(format!(
-                "{file} runs these commands:\n\n{}\n\nOnly open layouts from people you trust.",
+                "{file} runs these commands:\n\n{}\n\nOnly open workspaces from people you trust.",
                 list.join("\n")
             ))
-            .title(format!("Open the layout {}?", f.name))
+            .title(format!("Open the workspace {}?", f.name))
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
                 "Open and Run".into(),
@@ -487,25 +488,29 @@ async fn layout_open(
             return Ok(false);
         }
         if let Some(p) = &f.path {
-            layouts::trust(p, &f.text).map_err(|e| e.to_string())?;
+            workspaces::trust(p, &f.text).map_err(|e| e.to_string())?;
         }
     }
     state
         .client
-        .act(Action::OpenLayout { template: t })
+        .act(Action::OpenWorkspace { template: t })
         .map_err(|e| e.to_string())?;
     Ok(true)
 }
 
-/// Save the window as the user's layout `name` (View → Save Layout…).
+/// Save the window as the user's workspace `name` (View → Save Workspace…).
 /// Returns where; fails saying it "exists" unless `force`.
 #[tauri::command]
-async fn layout_save(state: State<'_, Term>, name: String, force: bool) -> Result<String, String> {
-    use daemon::layouts;
+async fn workspace_save(
+    state: State<'_, Term>,
+    name: String,
+    force: bool,
+) -> Result<String, String> {
+    use daemon::workspaces;
     if name.is_empty() || name.starts_with('.') || name.contains(['/', '\\']) {
-        return Err(format!("{name:?} can't be a layout's name"));
+        return Err(format!("{name:?} can't be a workspace's name"));
     }
-    let dir = daemon::paths::layouts_dir().ok_or("no home directory")?;
+    let dir = daemon::paths::workspaces_dir().ok_or("no home directory")?;
     let target = dir.join(format!("{name}.toml"));
     if target.exists() && !force {
         return Err(format!("{} exists", target.display()));
@@ -516,10 +521,10 @@ async fn layout_save(state: State<'_, Term>, name: String, force: bool) -> Resul
         Ok(other) => return Err(format!("unexpected reply: {other:?}")),
         Err(e) => return Err(e.to_string()),
     };
-    let text = layouts::snapshot(
+    let text = workspaces::snapshot(
         &layout,
         &panes,
-        &layouts::SaveSpec {
+        &workspaces::SaveSpec {
             name: Some(&name),
             tab: None,
             relative_to: None,
@@ -701,7 +706,7 @@ fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<boo
 }
 
 /// Read the config file again (it changed, or at start).
-fn reload_choice(app: &AppHandle) {
+pub(crate) fn reload_choice(app: &AppHandle) {
     let (choice, errors) = theme::read_choice();
     let (settings, more) = theme::read_settings();
     let problems: Vec<String> = errors.into_iter().chain(more).collect();
@@ -900,6 +905,7 @@ fn watch_config(app: AppHandle) {
         .name("config-watch".into())
         .spawn(move || {
             let mut last = theme::stamp();
+            let mut screens_last = daemon::screens::stamp();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 let now = theme::stamp();
@@ -907,6 +913,7 @@ fn watch_config(app: AppHandle) {
                     last = now;
                     reload_choice(&app);
                 }
+                screens::poll(&app, &mut screens_last);
             }
         });
 }
@@ -1087,8 +1094,23 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         )?)
         .item(&MenuItemBuilder::with_id(r#"{"kind":"themes"}"#, "Theme…").build(app)?)
         .separator()
-        .item(&MenuItemBuilder::with_id(r#"{"kind":"layouts"}"#, "Open Layout…").build(app)?)
-        .item(&MenuItemBuilder::with_id(r#"{"kind":"saveLayout"}"#, "Save Layout…").build(app)?)
+        .item(&MenuItemBuilder::with_id(r#"{"kind":"workspaces"}"#, "Open Workspace…").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id(r#"{"kind":"saveWorkspace"}"#, "Save Workspace…")
+                .build(app)?,
+        )
+        .separator()
+        .item(&MenuItemBuilder::with_id(r#"{"kind":"screens"}"#, "Screen…").build(app)?)
+        .item(&item(
+            r#"{"kind":"screenCycle","step":1}"#,
+            "Next Screen",
+            "Shift+Cmd+L",
+        )?)
+        .item(&item(
+            r#"{"kind":"screenCycle","step":-1}"#,
+            "Previous Screen",
+            "Shift+Cmd+K",
+        )?)
         .separator()
         .item(&item(
             r#"{"kind":"fontSize","step":1}"#,
@@ -1202,6 +1224,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .register_asynchronous_uri_scheme_protocol(screens::SCHEME, |_ctx, request, responder| {
+            std::thread::spawn(move || responder.respond(screens::respond(&request)));
+        })
         .setup(|app| {
             let channels = Channels::default();
             let handle = app.handle();
@@ -1251,6 +1276,7 @@ pub fn run() {
             }));
             app.manage(Mutex::new(proto::config::Settings::default()));
             app.manage(Problems::default());
+            app.manage(screens::Screens::default());
             reload_choice(handle);
             watch_config(handle.clone());
             on_notification_click(handle);
@@ -1321,9 +1347,14 @@ pub fn run() {
             layout_watch,
             layout_restore,
             layout_act,
-            layouts_list,
-            layout_open,
-            layout_save,
+            workspaces_list,
+            workspace_open,
+            workspace_save,
+            screens::screen_current,
+            screens::screen_list,
+            screens::screen_load,
+            screens::screen_choose,
+            screens::part_exec,
             app_quit,
             open_link,
             dev_layout

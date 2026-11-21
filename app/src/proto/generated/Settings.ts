@@ -34,4 +34,8 @@ menu_bar_icon: boolean,
 /**
  * Hovering a pane's row in the sidebar shows the pane beside it.
  */
-sidebar_preview: boolean, };
+sidebar_preview: boolean, 
+/**
+ * The screen the window shows (`screens/NAME/`).
+ */
+screen: string, };

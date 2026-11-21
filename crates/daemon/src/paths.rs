@@ -80,7 +80,7 @@ pub fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Where the config file, the user's themes and layouts live:
+/// Where the config file, the user's themes, workspaces, screens and parts live:
 /// `KIBANN_CONFIG_DIR` if set, else `$XDG_CONFIG_HOME/kibann`, else
 /// `~/.config/kibann`.
 pub fn config_dir() -> Option<PathBuf> {
@@ -93,17 +93,25 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(home_dir()?.join(".config").join("kibann"))
 }
 
-/// The layouts the user keeps: `<config>/layouts/NAME.toml`.
-pub fn layouts_dir() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("layouts"))
+/// The user's screens: `<config>/screens/NAME/screen.json`.
+pub fn screens_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("screens"))
 }
 
-/// The layout files the user said may run their commands (see
-/// [`crate::layouts`]), next to the saved layout.
-pub fn trusted_layouts_file() -> Option<PathBuf> {
-    layout_file(false)?
-        .parent()
-        .map(|d| d.join("trusted-layouts.json"))
+/// The user's parts: `<config>/parts/NAME/part.json` and its page.
+pub fn parts_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("parts"))
+}
+
+/// The workspaces the user keeps: `<config>/workspaces/NAME.toml`.
+pub fn workspaces_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("workspaces"))
+}
+
+/// The files (workspaces, parts) the user said may run their commands (see
+/// [`crate::workspaces`]), next to the saved layout.
+pub fn trusted_file() -> Option<PathBuf> {
+    layout_file(false)?.parent().map(|d| d.join("trusted.json"))
 }
 
 /// Make the socket's directory, readable by the user only, and check that

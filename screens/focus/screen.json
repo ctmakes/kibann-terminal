@@ -1,0 +1,21 @@
+{
+  "about": "One terminal filling the window and a thin status line; your agents slide in from the left edge",
+  "root": {
+    "type": "column",
+    "children": [
+      { "type": "block", "content": { "pane": "focused" } },
+      { "type": "block", "size": { "px": 24 }, "content": { "part": "status" } }
+    ]
+  },
+  "floating": [
+    {
+      "id": "agents",
+      "edge": "left",
+      "align": "center",
+      "depth": 300,
+      "length": 480,
+      "peek": 6,
+      "content": { "part": "agents" }
+    }
+  ]
+}

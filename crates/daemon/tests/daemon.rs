@@ -1033,7 +1033,7 @@ fn a_layout_opens_in_one_go() {
         ],
         active: 1,
     };
-    let (pane, tab) = c.act(Action::OpenLayout { template }).unwrap();
+    let (pane, tab) = c.act(Action::OpenWorkspace { template }).unwrap();
     let l = next_layout(&app_rx);
     assert_eq!(l.tabs.len(), 3);
     let (one, two) = (&l.tabs[1], &l.tabs[2]);

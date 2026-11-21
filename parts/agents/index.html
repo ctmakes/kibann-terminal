@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--k-panel); color: var(--k-text);
+    font: 12px var(--k-font, system-ui), sans-serif;
+    display: flex; flex-direction: column; user-select: none; -webkit-user-select: none;
+    border: 1px solid var(--k-divider); border-left: 0; border-radius: 0 10px 10px 0;
+  }
+  h1 { margin: 0; padding: 12px 14px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--k-muted); }
+  ul { list-style: none; margin: 0; padding: 4px 6px 10px; overflow: auto; flex: 1; }
+  li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: default; min-width: 0; }
+  li:hover { background: var(--k-tab); }
+  li.focused { background: var(--k-current); color: var(--k-current-text, var(--k-bright)); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--k-divider); }
+  .working { background: var(--k-working); } .blocked { background: var(--k-blocked); } .done { background: var(--k-done); } .idle { background: var(--k-muted); }
+  .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .t { color: var(--k-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .w { color: var(--k-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .n { color: var(--k-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <h1>Panes</h1>
+  <ul id="list"></ul>
+<script>
+  const RANK = { blocked: 0, done: 1, working: 2, idle: 3 };
+  const list = document.getElementById("list");
+  kibann.on("state", (s) => {
+    const tabNo = new Map(s.tabs.map((t, i) => [t.id, i + 1]));
+    const order = [...s.panes].sort((a, b) => (RANK[a.state] ?? 4) - (RANK[b.state] ?? 4));
+    list.replaceChildren(
+      ...order.map((p) => {
+        const li = document.createElement("li");
+        li.className = p.id === s.focused ? "focused" : "";
+        const dot = document.createElement("span");
+        dot.className = `dot ${p.state ?? ""}`;
+        const text = document.createElement("span");
+        text.className = "text";
+        const t = document.createElement("span");
+        t.className = "t";
+        t.textContent = p.agent ? `${p.agent} · ${p.title}` : p.title || "shell";
+        const w = document.createElement("span");
+        w.className = "w";
+        w.textContent = p.repo ? `${p.repo}${p.branch ? " · " + p.branch : ""}${p.changed ? "  ●" + p.changed : ""}` : p.cwd;
+        text.append(t, w);
+        const n = document.createElement("span");
+        n.className = "n";
+        n.textContent = tabNo.get(p.tab) ?? "";
+        li.append(dot, text, n);
+        li.addEventListener("click", () => kibann.run("pane.focus", { pane: p.id }));
+        return li;
+      }),
+    );
+  });
+</script>
+</body>
+</html>

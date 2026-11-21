@@ -144,7 +144,7 @@ export class FakeBackend implements LayoutBackend {
       case "zoom":
         if (m.zoom(a.tab, a.pane ?? null)) acted = { pane: a.pane ?? null, tab: a.tab };
         break;
-      case "open_layout": {
+      case "open_workspace": {
         const t = a.template;
         t.tabs.forEach((tab, i) => {
           const build = (n: TemplateTree): Layout["tabs"][number]["tree"] =>

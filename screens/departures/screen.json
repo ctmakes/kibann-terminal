@@ -1,0 +1,20 @@
+{
+  "about": "Your agents on a split-flap departures board above the terminals",
+  "chrome": { "background": "#050505" },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "block",
+        "id": "board",
+        "size": { "px": 300 },
+        "min": 150,
+        "max": 900,
+        "resizable": true,
+        "content": { "part": "departures" }
+      },
+      { "type": "block", "size": "auto", "content": { "part": "tabs" } },
+      { "type": "block", "content": { "tab": "active" } }
+    ]
+  }
+}

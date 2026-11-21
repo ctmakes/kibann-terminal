@@ -3,7 +3,7 @@ import type { Dir } from "./Dir";
 import type { TemplateRun } from "./TemplateRun";
 
 /**
- * A pane or split of a layout file, resolved: directories are absolute
+ * A pane or split of a workspace file, resolved: directories are absolute
  * and commands are the ones for this system.
  */
 export type TemplateTree = { "kind": "leaf", cwd: string, 

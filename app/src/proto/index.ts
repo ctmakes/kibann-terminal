@@ -32,6 +32,16 @@ export type { GitOp } from "./generated/GitOp";
 export type { PaneDir } from "./generated/PaneDir";
 export type { Theme } from "./generated/Theme";
 export type { Settings } from "./generated/Settings";
+export type { Screen } from "./generated/Screen";
+export type { ScreenNode } from "./generated/ScreenNode";
+export type { ScreenContent } from "./generated/ScreenContent";
+export type { ScreenFloating } from "./generated/ScreenFloating";
+export type { ScreenSize } from "./generated/ScreenSize";
+export type { ScreenEntry } from "./generated/ScreenEntry";
+export type { ScreenNow } from "./generated/ScreenNow";
+export type { PartNow } from "./generated/PartNow";
+export type { PartManifest } from "./generated/PartManifest";
+export type { Permissions } from "./generated/Permissions";
 
 export const Flag = {
   BOLD: 1 << 0,

@@ -26,10 +26,16 @@ export type Action =
   | { kind: "settings" }
   /** The theme picker (no key; View → Theme…). */
   | { kind: "themes" }
-  /** The layout picker (no key; View → Open Layout…). */
-  | { kind: "layouts" }
-  /** Save the window as a layout (no key; View → Save Layout…). */
-  | { kind: "saveLayout" }
+  /** The workspace picker (no key; View → Open Workspace…). */
+  | { kind: "workspaces" }
+  /** Save the window as a workspace (no key; View → Save Workspace…). */
+  | { kind: "saveWorkspace" }
+  /** The screen picker (View → Screen…). */
+  | { kind: "screens" }
+  /** The next or previous screen. */
+  | { kind: "screenCycle"; step: 1 | -1 }
+  /** Back to the default screen, for one that hides everything. */
+  | { kind: "screenReset" }
   /** The find bar on the focused pane. */
   | { kind: "find" }
   /** The next match up the scrollback (older), or back down. */
@@ -82,6 +88,8 @@ function table(p: Platform): Binding[] {
     add("m", "KeyF", { kind: "find" });
     add("m", "KeyG", { kind: "findStep", older: true });
     add("ms", "KeyG", { kind: "findStep", older: false });
+    add("ms", "KeyL", { kind: "screenCycle", step: 1 });
+    add("ms", "KeyK", { kind: "screenCycle", step: -1 });
   } else {
     add("cs", "KeyT", { kind: "newTab" });
     add("cs", "KeyW", { kind: "close" });
@@ -110,7 +118,10 @@ function table(p: Platform): Binding[] {
     add("cs", "KeyF", { kind: "find" });
     add("", "F3", { kind: "findStep", older: true });
     add("s", "F3", { kind: "findStep", older: false });
+    add("cs", "KeyL", { kind: "screenCycle", step: 1 });
+    add("cs", "KeyK", { kind: "screenCycle", step: -1 });
   }
+  add("acs", "Escape", { kind: "screenReset" });
   add("c", "Tab", { kind: "tabCycle", step: 1 });
   add("cs", "Tab", { kind: "tabCycle", step: -1 });
   return b;

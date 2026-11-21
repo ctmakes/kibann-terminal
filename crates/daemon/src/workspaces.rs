@@ -1,7 +1,7 @@
-//! Layout files around [`crate::template`]: where they're found (the
+//! Workspace files around [`crate::template`]: where they're found (the
 //! built-in ones, the user's, a project's), which may run their commands
 //! without asking, and making one from the panes on screen. Shared by the
-//! `kibann layout` commands and the app.
+//! `kibann workspace` commands and the app.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io;
@@ -14,33 +14,36 @@ use sha2::{Digest, Sha256};
 
 use crate::template::{self, Problems, SaveOptions, SavePane, SaveTab, Source};
 
-/// The layouts Kibann comes with, by name.
+/// The workspaces Kibann comes with, by name.
 pub const BUILTINS: &[(&str, &str)] = &[
-    ("system", include_str!("../../../layouts/system.toml")),
-    ("ports", include_str!("../../../layouts/ports.toml")),
-    ("agents", include_str!("../../../layouts/agents.toml")),
-    ("agents-4", include_str!("../../../layouts/agents-4.toml")),
-    ("review", include_str!("../../../layouts/review.toml")),
+    ("system", include_str!("../../../workspaces/system.toml")),
+    ("ports", include_str!("../../../workspaces/ports.toml")),
+    ("agents", include_str!("../../../workspaces/agents.toml")),
+    (
+        "agents-4",
+        include_str!("../../../workspaces/agents-4.toml"),
+    ),
+    ("review", include_str!("../../../workspaces/review.toml")),
 ];
 
-/// A project's layout, inside the project.
-pub const PROJECT_FILE: &str = ".kibann/layout.toml";
+/// A project's workspace, inside the project.
+pub const PROJECT_FILE: &str = ".kibann/workspace.toml";
 
-/// Where a layout came from.
+/// Where a workspace came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Origin {
     /// Comes with Kibann.
     Builtin,
-    /// In the user's layouts folder.
+    /// In the user's workspaces folder.
     User,
-    /// A project's `.kibann/layout.toml`.
+    /// A project's `.kibann/workspace.toml`.
     Project,
     /// Any other file, named by its path.
     File,
 }
 
-/// A layout file, read.
+/// A workspace file, read.
 #[derive(Debug, Clone)]
 pub struct Found {
     pub name: String,
@@ -54,14 +57,14 @@ fn builtin(name: &str) -> Option<&'static str> {
     BUILTINS.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
 }
 
-/// Whether `arg` names a file rather than a layout.
+/// Whether `arg` names a file rather than a workspace.
 fn is_path(arg: &str) -> bool {
     arg.contains('/') || arg.contains('\\') || arg.ends_with(".toml")
 }
 
-/// The project's layout for `cwd`: `.kibann/layout.toml` there or in a
+/// The project's workspace for `cwd`: `.kibann/workspace.toml` there or in a
 /// directory above, up to the repository's root (or home, outside one).
-pub fn project_layout(cwd: &Path) -> Option<PathBuf> {
+pub fn project_workspace(cwd: &Path) -> Option<PathBuf> {
     let home = crate::paths::home_dir();
     for dir in cwd.ancestors() {
         let f = dir.join(PROJECT_FILE);
@@ -75,7 +78,7 @@ pub fn project_layout(cwd: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The layout `arg` names, read: a path, a name (the user's layouts first,
+/// The workspace `arg` names, read: a path, a name (the user's workspaces first,
 /// then the built-in ones), or with no `arg` the project's.
 pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
     let read = |path: PathBuf, name: String, origin: Origin| {
@@ -90,9 +93,9 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
     };
     match arg {
         None => {
-            let path = project_layout(cwd).ok_or_else(|| {
+            let path = project_workspace(cwd).ok_or_else(|| {
                 format!(
-                    "no {PROJECT_FILE} in {} or above it; name a layout instead (kibann layout list)",
+                    "no {PROJECT_FILE} in {} or above it; name a workspace instead (kibann workspace list)",
                     cwd.display()
                 )
             })?;
@@ -104,7 +107,7 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
                 .unwrap_or_else(|| cwd.join(a));
             let origin = if path.ends_with(PROJECT_FILE) {
                 Origin::Project
-            } else if crate::paths::layouts_dir().is_some_and(|d| path.parent() == Some(&*d)) {
+            } else if crate::paths::workspaces_dir().is_some_and(|d| path.parent() == Some(&*d)) {
                 Origin::User
             } else {
                 Origin::File
@@ -117,7 +120,7 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
             read(path, name, origin)
         }
         Some(name) => {
-            if let Some(dir) = crate::paths::layouts_dir() {
+            if let Some(dir) = crate::paths::workspaces_dir() {
                 let path = dir.join(format!("{name}.toml"));
                 if path.is_file() {
                     return read(path, name.to_owned(), Origin::User);
@@ -131,7 +134,7 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
                     text: text.to_owned(),
                 }),
                 None => Err(format!(
-                    "no layout named {name} (kibann layout list shows them)"
+                    "no workspace named {name} (kibann workspace list shows them)"
                 )),
             }
         }
@@ -144,7 +147,7 @@ fn stem(p: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// A project's layout is named after the project's directory.
+/// A project's workspace is named after the project's directory.
 fn project_name(path: &Path) -> String {
     path.parent()
         .and_then(Path::parent)
@@ -153,7 +156,7 @@ fn project_name(path: &Path) -> String {
         .unwrap_or_else(|| "project".into())
 }
 
-/// Read `f`'s layout as opened from `cwd`.
+/// Read `f`'s workspace as opened from `cwd`.
 pub fn parse(f: &Found, cwd: &Path) -> Result<Template, Problems> {
     let home = crate::paths::home_dir();
     let mut t = template::parse(&Source {
@@ -168,7 +171,7 @@ pub fn parse(f: &Found, cwd: &Path) -> Result<Template, Problems> {
     Ok(t)
 }
 
-/// A layout `kibann layout list` shows.
+/// A workspace `kibann workspace list` shows.
 #[derive(Debug, Clone, Serialize)]
 pub struct Listed {
     pub name: String,
@@ -197,11 +200,11 @@ fn about(text: &str) -> Option<String> {
     (!first.is_empty()).then(|| first.trim_end_matches(':').to_owned())
 }
 
-/// Every layout there is for `cwd`: the project's first, then the user's,
+/// Every workspace there is for `cwd`: the project's first, then the user's,
 /// then the built-in ones the user's don't replace.
 pub fn list(cwd: &Path) -> Vec<Listed> {
     let mut out = Vec::new();
-    if let Some(p) = project_layout(cwd) {
+    if let Some(p) = project_workspace(cwd) {
         let text = std::fs::read_to_string(&p).unwrap_or_default();
         out.push(Listed {
             name: project_name(&p),
@@ -211,7 +214,7 @@ pub fn list(cwd: &Path) -> Vec<Listed> {
         });
     }
     let mut mine = Vec::new();
-    if let Some(dir) = crate::paths::layouts_dir()
+    if let Some(dir) = crate::paths::workspaces_dir()
         && let Ok(rd) = std::fs::read_dir(dir)
     {
         for e in rd.flatten() {
@@ -244,14 +247,14 @@ pub fn list(cwd: &Path) -> Vec<Listed> {
 
 // ---- Trust ----
 
-/// What one pane of a layout runs, for asking before running it.
+/// What one pane of a workspace runs, for asking before running it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Runs {
     pub cwd: String,
     pub run: String,
 }
 
-/// Every command a layout would run, in order.
+/// Every command a workspace would run, in order.
 pub fn commands(t: &Template) -> Vec<Runs> {
     let mut out = Vec::new();
     for tab in &t.tabs {
@@ -278,26 +281,31 @@ pub fn commands(t: &Template) -> Vec<Runs> {
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Trusted {
+pub(crate) struct Trusted {
     /// File path to the SHA-256 of the contents the user agreed to.
-    files: BTreeMap<String, String>,
+    #[serde(default)]
+    pub(crate) files: BTreeMap<String, String>,
+    /// A part's folder to the SHA-256 of the permissions the user allowed
+    /// it (see `crate::screens`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) parts: BTreeMap<String, String>,
 }
 
-fn digest(text: &str) -> String {
+pub(crate) fn digest(text: &str) -> String {
     Sha256::digest(text.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
 }
 
-fn key(path: &Path) -> String {
+pub(crate) fn key(path: &Path) -> String {
     path.canonicalize()
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .into_owned()
 }
 
-fn load_trusted(file: &Path) -> Trusted {
+pub(crate) fn load_trusted(file: &Path) -> Trusted {
     std::fs::read_to_string(file)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -305,10 +313,10 @@ fn load_trusted(file: &Path) -> Trusted {
 }
 
 /// Whether opening `f` must ask first: it runs commands, and isn't the
-/// user's own (built-in, in their layouts folder, or agreed to before in
+/// user's own (built-in, in their workspaces folder, or agreed to before in
 /// exactly this version).
 pub fn needs_asking(f: &Found, t: &Template) -> bool {
-    needs_asking_in(f, t, crate::paths::trusted_layouts_file().as_deref())
+    needs_asking_in(f, t, crate::paths::trusted_file().as_deref())
 }
 
 fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
@@ -323,15 +331,22 @@ fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
 
 /// Remember that `path`, as it is now (`text`), may run its commands.
 pub fn trust(path: &Path, text: &str) -> io::Result<()> {
-    match crate::paths::trusted_layouts_file() {
+    match crate::paths::trusted_file() {
         Some(store) => trust_in(&store, path, text),
         None => Ok(()),
     }
 }
 
 fn trust_in(store: &Path, path: &Path, text: &str) -> io::Result<()> {
+    update_trusted(store, |t| {
+        t.files.insert(key(path), digest(text));
+    })
+}
+
+/// Change what's kept in `store`.
+pub(crate) fn update_trusted(store: &Path, change: impl FnOnce(&mut Trusted)) -> io::Result<()> {
     let mut t = load_trusted(store);
-    t.files.insert(key(path), digest(text));
+    change(&mut t);
     if let Some(d) = store.parent() {
         std::fs::create_dir_all(d)?;
     }
@@ -345,7 +360,7 @@ fn trust_in(store: &Path, path: &Path, text: &str) -> io::Result<()> {
 
 // ---- Saving ----
 
-/// Programs not worth starting again when a layout is opened: pagers and
+/// Programs not worth starting again when a workspace is opened: pagers and
 /// viewers, Kibann's own, and shells (a shell in a shell is just a shell).
 const NOT_SAVED: &[&str] = &[
     "less",
@@ -428,7 +443,7 @@ pub struct SaveSpec<'a> {
     pub relative_to: Option<&'a Path>,
 }
 
-/// The layout on screen as a layout file.
+/// The tabs on screen as a workspace file.
 pub fn snapshot(
     layout: &Layout,
     panes: &[PaneInfo],
@@ -487,7 +502,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_builtin_layouts_open() {
+    fn the_builtin_workspaces_open() {
         let here = std::env::temp_dir().canonicalize().unwrap();
         for (name, text) in BUILTINS {
             let f = Found {
@@ -521,15 +536,15 @@ mod tests {
         out
     }
 
-    /// Every example in the docs is a layout that opens (but for the
+    /// Every example in the docs is a workspace that opens (but for the
     /// folders it names, which aren't here).
     #[test]
-    fn the_docs_examples_are_layouts() {
+    fn the_docs_examples_are_workspaces() {
         let here = std::env::temp_dir().canonicalize().unwrap();
         let docs = [
             (
                 "SKILL.md",
-                include_str!("../../../skills/kibann-layouts/SKILL.md"),
+                include_str!("../../../skills/kibann-workspaces/SKILL.md"),
             ),
             ("README.md", include_str!("../../../README.md")),
         ];
@@ -568,18 +583,18 @@ mod tests {
     }
 
     #[test]
-    fn a_projects_layout_is_found_above_but_not_past_the_repo() {
+    fn a_projects_workspace_is_found_above_but_not_past_the_repo() {
         let root = std::env::temp_dir()
             .canonicalize()
             .unwrap()
-            .join(format!("kibann-layouts-{}", std::process::id()));
+            .join(format!("kibann-workspaces-{}", std::process::id()));
         let repo = root.join("repo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         std::fs::create_dir_all(repo.join("src/deep")).unwrap();
         std::fs::create_dir_all(root.join(".kibann")).unwrap();
         std::fs::write(root.join(PROJECT_FILE), "[[tab]]\n").unwrap();
         // Above the repo: not this project's.
-        assert_eq!(project_layout(&repo.join("src/deep")), None);
+        assert_eq!(project_workspace(&repo.join("src/deep")), None);
         std::fs::create_dir_all(repo.join(".kibann")).unwrap();
         std::fs::write(repo.join(PROJECT_FILE), "[[tab]]\ncommand = \"make\"\n").unwrap();
         let f = find(None, &repo.join("src/deep")).unwrap();
@@ -601,7 +616,7 @@ mod tests {
         };
         let t2 = parse(&changed, &repo).unwrap();
         assert!(needs_asking_in(&changed, &t2, Some(&store)));
-        // A layout with no commands never asks.
+        // A workspace with no commands never asks.
         let quiet = Found {
             text: "[[tab]]\n".into(),
             ..f

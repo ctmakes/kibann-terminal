@@ -53,7 +53,7 @@ pub struct Tab {
     pub focused: PaneId,
     /// The pane shown alone, filling the tab.
     pub zoomed: Option<PaneId>,
-    /// A name given to the tab (by a layout file); the tab bar shows it in
+    /// A name given to the tab (by a workspace file); the tab bar shows it in
     /// place of the focused pane's title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -122,8 +122,8 @@ pub enum Action {
         #[ts(optional)]
         pane: Option<PaneId>,
     },
-    /// Open a layout file's tabs after the others, and show its active one.
-    OpenLayout {
+    /// Open a workspace file's tabs after the others, and show its active one.
+    OpenWorkspace {
         template: Template,
     },
 }
@@ -173,7 +173,7 @@ impl Layout {
     }
 }
 
-/// What runs in a pane opened from a layout file.
+/// What runs in a pane opened from a workspace file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "t", rename_all = "snake_case")]
 #[ts(export, rename = "TemplateRun")]
@@ -190,7 +190,7 @@ pub enum Run {
     Exec { argv: Vec<String> },
 }
 
-/// A pane or split of a layout file, resolved: directories are absolute
+/// A pane or split of a workspace file, resolved: directories are absolute
 /// and commands are the ones for this system.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -220,7 +220,7 @@ pub struct TabTemplate {
     pub focused: u32,
 }
 
-/// A layout file, ready to open.
+/// A workspace file, ready to open.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Template {

@@ -9,7 +9,7 @@
 // hidden, so their terminals keep their state and frames.
 
 import { detectPlatform, type Platform } from "../input/keyboard";
-import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, setFontFamilies } from "../metrics";
+import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack, setFontFamilies } from "../metrics";
 import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
@@ -17,13 +17,17 @@ import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
-import { LayoutPicker, type LayoutApi } from "./layouts";
+import { WorkspacePicker, type WorkspaceApi } from "./workspaces";
 import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
 import { FindBar } from "./find";
-import { applyChrome, KIBANN_DARK, type ThemeApi } from "./theme";
-import type { Theme } from "../proto";
+import { applyChrome, chromeFor, isDark, KIBANN_DARK, type ThemeApi } from "./theme";
+import type { ScreenNow, Theme } from "../proto";
+import { ScreenView, type BlockSlot } from "../screen/engine";
+import { PartHost, type PartState, type PartTheme, type AgentStateName } from "../screen/parts";
+import { ScreenPicker, type ScreenApi } from "../screen/picker";
+import { DEFAULT_SCREEN } from "../screen/default";
 import { Sidebar } from "./sidebar";
 import {
   agentName,
@@ -83,7 +87,7 @@ export interface Pane {
 
 export interface Tab {
   id: number;
-  /** Its name, from a layout file; else the focused pane's title shows. */
+  /** Its name, from a workspace file; else the focused pane's title shows. */
   title: string | null;
   tree: Tree;
   focused: PaneId;
@@ -115,8 +119,11 @@ export interface WorkspaceOptions {
   onDiff?(pane: Pane): void;
   /** Themes to pick from (View → Theme…); without it there's no picker. */
   themes?: ThemeApi;
-  /** Layout files to open and save (View → Open Layout…). */
-  layouts?: LayoutApi;
+  /** Workspace files to open and save (View → Open Workspace…). */
+  workspaces?: WorkspaceApi;
+  /** Screens to show and pick from (View → Screen…); without it the
+   * window is the default screen. */
+  screens?: ScreenApi;
   /** Say once, on the first launch, where the shortcuts are. */
   firstRunHint?: boolean;
   /** An agent in a pane the user isn't looking at started waiting for them
@@ -138,7 +145,25 @@ export class Workspace {
   /** Settings, when the app gives it what it needs. */
   readonly settings: SettingsModal | null;
   private readonly picker: ThemePicker | null;
-  private readonly layoutPicker: LayoutPicker | null;
+  private readonly workspacePicker: WorkspacePicker | null;
+  private readonly screenPicker: ScreenPicker | null;
+  /** Where the screen goes. */
+  private readonly frame: HTMLDivElement;
+  /** Keeps the terminals while a screen doesn't show them. */
+  private readonly holder: HTMLDivElement;
+  private screenView: ScreenView | null = null;
+  private parts: PartHost;
+  /** The screen kept (not one being tried in the picker). */
+  private screenNow: ScreenNow = DEFAULT_SCREEN;
+  /** The screen's variables set on the root (`chrome.colors`). */
+  private chromeVars: string[] = [];
+  /** The terminals block shows only the focused pane. */
+  private solo = false;
+  /** When each pane's agent state last changed, as seen here. */
+  private readonly since = new Map<PaneId, { state: string; at: number }>();
+  private theme: Theme = KIBANN_DARK;
+  /** Part errors already shown, so a part failing every second says it once. */
+  private readonly partErrors = new Set<string>();
   /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
   private readonly help: HTMLDivElement;
   private readonly notices: HTMLDivElement;
@@ -185,10 +210,13 @@ export class Workspace {
       userSelect: "none",
       webkitUserSelect: "none",
     });
-    // The sidebar on the left; the tab bar and the panes to its right.
-    const main = document.createElement("div");
-    main.className = "workspace-main";
-    Object.assign(main.style, { flex: "1 1 auto", minWidth: "0", display: "flex", flexDirection: "column" });
+    // The screen decides where the sidebar, the tab bar and the panes go.
+    this.frame = document.createElement("div");
+    this.frame.className = "workspace-screen";
+    Object.assign(this.frame.style, { position: "absolute", inset: "0" });
+    this.holder = document.createElement("div");
+    this.holder.className = "workspace-holder";
+    this.holder.style.display = "none";
     this.sidebar = new Sidebar({
       onPick: (id) => this.show(id),
       onDiff: (id) => {
@@ -210,14 +238,15 @@ export class Workspace {
     this.bar.className = "tab-bar";
     Object.assign(this.bar.style, {
       display: "none",
-      flex: "0 0 30px",
+      flex: "1 1 auto",
+      height: "30px",
       background: COLORS.bar,
       gap: "1px",
       font: "12px -apple-system, system-ui, sans-serif",
     });
     this.stage = document.createElement("div");
     this.stage.className = "stage";
-    Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden" });
+    Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden", minWidth: "0", minHeight: "0" });
     this.help = document.createElement("div");
     this.help.className = "tab-help";
     this.help.textContent = "?";
@@ -252,8 +281,7 @@ export class Workspace {
       pointerEvents: "none",
       font: "12px -apple-system, system-ui, sans-serif",
     });
-    this.stage.append(this.notices);
-    main.append(this.bar, this.stage);
+
     this.shortcuts = new ShortcutSheet(this.platform);
     this.picker = opts.themes
       ? new ThemePicker(opts.themes, () => this.focusedPane?.view?.focus())
@@ -266,16 +294,27 @@ export class Workspace {
           onClose: () => this.focusedPane?.view?.focus(),
         })
       : null;
-    this.root.append(this.sidebar.el, main, this.shortcuts.el);
+    this.root.append(this.frame, this.holder, this.notices, this.shortcuts.el);
     if (this.settings) this.root.append(this.settings.el);
     if (this.picker) this.root.append(this.picker.el);
-    this.layoutPicker = opts.layouts
-      ? new LayoutPicker(opts.layouts, {
+    this.workspacePicker = opts.workspaces
+      ? new WorkspacePicker(opts.workspaces, {
           onClose: () => this.focusedPane?.view?.focus(),
           notice: (text) => this.notice(text),
         })
       : null;
-    if (this.layoutPicker) this.root.append(this.layoutPicker.el);
+    if (this.workspacePicker) this.root.append(this.workspacePicker.el);
+    this.screenPicker = opts.screens
+      ? new ScreenPicker(opts.screens, {
+          current: () => this.screenView?.name ?? this.screenNow.name,
+          preview: (now) => this.showScreen(now ?? this.screenNow),
+          onClose: () => this.focusedPane?.view?.focus(),
+          notice: (text) => this.notice(text),
+        })
+      : null;
+    if (this.screenPicker) this.root.append(this.screenPicker.el);
+    this.parts = this.makeParts();
+    this.showScreen(this.screenNow);
     if (opts.firstRunHint) this.firstRunHint(sheetKey());
     container.append(this.root);
 
@@ -329,10 +368,26 @@ export class Workspace {
       this.settings?.toggle();
       return;
     }
-    if (action.kind === "layouts" || action.kind === "saveLayout") {
+    if (action.kind === "workspaces" || action.kind === "saveWorkspace") {
       this.shortcuts.hide();
       this.settings?.hide();
-      void this.layoutPicker?.open(action.kind === "layouts" ? "open" : "save", on?.id ?? null);
+      void this.workspacePicker?.open(action.kind === "workspaces" ? "open" : "save", on?.id ?? null);
+      return;
+    }
+    if (action.kind === "screens") {
+      this.shortcuts.hide();
+      this.settings?.hide();
+      void this.screenPicker?.open();
+      return;
+    }
+    if (action.kind === "screenCycle") {
+      void this.screenPicker?.cycle(action.step);
+      return;
+    }
+    if (action.kind === "screenReset") {
+      this.notice("Back to the default screen (View → Screen… to pick another).");
+      if (this.opts.screens) void this.opts.screens.choose("default").catch((e) => this.notice(String(e)));
+      else this.showScreen(DEFAULT_SCREEN);
       return;
     }
     if (action.kind === "themes") {
@@ -476,7 +531,7 @@ export class Workspace {
 
   private onKeyDown(e: KeyboardEvent): void {
     // The theme picker's search field takes the keys while it's open.
-    if (this.picker?.visible || this.layoutPicker?.visible) return;
+    if (this.picker?.visible || this.workspacePicker?.visible || this.screenPicker?.visible) return;
     const action = actionFor(e, this.platform);
     // Settings takes the keys while open (its fields): Esc closes it, and
     // so does its own shortcut. Nothing reaches the panes.
@@ -583,6 +638,12 @@ export class Workspace {
   setStatus(map: StatusMap): void {
     const prev = this.status;
     this.status = map;
+    const now = Date.now();
+    for (const [id, st] of Object.entries(map)) {
+      const was = this.since.get(Number(id));
+      if (!was || was.state !== st.state) this.since.set(Number(id), { state: st.state, at: now });
+    }
+    for (const id of this.since.keys()) if (!map[String(id)]) this.since.delete(id);
     if (this.statusSeen && this.notifyOn && this.opts.onNotify) {
       const focused = this.opts.windowFocused?.() ?? document.hasFocus();
       const looking = focused ? (this.focusedPane?.id ?? null) : null;
@@ -712,6 +773,7 @@ export class Workspace {
 
   private updateBar(): void {
     this.renderSidebar();
+    this.parts.changed();
     this.bar.style.display = this.tabs.length > 1 ? "flex" : "none";
     this.bar.append(this.help); // after the tabs, wherever they moved
     this.tabs.forEach((t, i) => {
@@ -729,7 +791,9 @@ export class Workspace {
 
   /** Color the window around the terminals for `theme`. */
   setTheme(theme: Theme): void {
+    this.theme = theme;
     applyChrome(theme);
+    this.parts.themeChanged();
   }
 
   /** Show `text` in the corner for a while. */
@@ -790,6 +854,289 @@ export class Workspace {
   private emitTitle(): void {
     const p = this.focusedPane;
     this.opts.onTitle?.(p?.title || "Kibann Terminal");
+  }
+
+  // ---- screens ----
+
+  /** Show `now` and keep it: the config's screen (or a fix to it). */
+  useScreen(now: ScreenNow): void {
+    this.screenNow = now;
+    if (!this.screenPicker?.visible) this.showScreen(now);
+    if (now.problem) this.notice(`Screen: ${now.problem}`, 12000);
+  }
+
+  /** The screen showing now. */
+  get screenName(): string {
+    return this.screenView?.name ?? this.screenNow.name;
+  }
+
+  /** Put `now` in the window (kept or being tried). */
+  private showScreen(now: ScreenNow): void {
+    this.parts.dispose();
+    this.parts = this.makeParts();
+    this.screenView?.dispose();
+    for (const el of [this.sidebar.el, this.bar, this.stage]) el.remove();
+    for (const k of this.chromeVars) this.root.style.removeProperty(k);
+    this.chromeVars = [];
+    const chrome = now.screen.chrome;
+    for (const [k, v] of Object.entries(chrome.colors)) {
+      this.root.style.setProperty(`--k-${k}`, v);
+      this.chromeVars.push(`--k-${k}`);
+    }
+    if (chrome.font) {
+      this.root.style.setProperty("--k-font", chrome.font);
+      this.chromeVars.push("--k-font");
+    }
+    let terminals = false;
+    this.solo = false;
+    this.screenView = new ScreenView(now.name, now.screen, {
+      fill: (slot) => {
+        const c = slot.content;
+        if (c.tab !== undefined || c.pane !== undefined) {
+          terminals = true;
+          this.solo = c.pane !== undefined;
+          slot.el.append(this.stage);
+        } else if (c.part === "sidebar") {
+          this.sidebar.el.style.flex = "0 0 auto";
+          slot.el.append(this.sidebar.el);
+        } else if (c.part === "tabs") {
+          slot.el.append(this.bar);
+        } else if (c.part) {
+          const part = now.parts[c.part];
+          if (part) this.parts.mount(c.part, part, c.props, slot);
+          else this.slotProblem(slot, `no part ${c.part}`);
+        }
+      },
+      onShown: (slot) => this.parts.shown(slot),
+    });
+    this.root.dataset.screen = now.name;
+    this.frame.replaceChildren(this.screenView.el);
+    if (!terminals) this.holder.append(this.stage);
+    if (this.active) this.layout(this.active);
+    this.updateBar();
+  }
+
+  private slotProblem(slot: BlockSlot, text: string): void {
+    const d = document.createElement("div");
+    d.textContent = text;
+    Object.assign(d.style, { padding: "12px", color: "var(--k-muted)", font: "12px -apple-system, system-ui, sans-serif" });
+    slot.el.append(d);
+  }
+
+  private makeParts(): PartHost {
+    return new PartHost({
+      state: () => this.partState(),
+      theme: () => this.partTheme(),
+      run: (part, action, args) => this.partRun(part, action, args),
+      exec: (part, program, args, cwd, timeout) => {
+        if (!this.opts.screens) return Promise.reject(new Error("can't run programs here"));
+        return this.opts.screens.exec(part, program, args, cwd, timeout);
+      },
+      thumbnail: (pane, width, height) => this.thumbnail(pane, width, height),
+      key: (k) => {
+        const action = actionFor({ ...k, repeat: false, isComposing: false, keyCode: 0 }, this.platform);
+        if (action) this.runOnce(action, "key");
+      },
+      release: () => this.focusedPane?.view?.focus(),
+      error: (part, message) => {
+        const key = `${part}:${message}`;
+        if (this.partErrors.has(key)) return;
+        this.partErrors.add(key);
+        console.warn(`kibann: part ${part}: ${message}`);
+        this.notice(`Part ${part}: ${message}`);
+      },
+    });
+  }
+
+  /** The window as parts see it. */
+  private partState(): PartState {
+    const tabs = this.tabs.map((t) => ({
+      id: t.id,
+      title: t.title || this.panes.get(t.focused)?.title || "shell",
+      active: t === this.active,
+      panes: panes(t.tree),
+      focused: t.focused,
+      state: rollUp(this.status, panes(t.tree)) as AgentStateName | null,
+    }));
+    const hex = (c: number | undefined, or: string) => (c === undefined ? or : `#${c.toString(16).padStart(6, "0")}`);
+    const all = this.tabs.flatMap((t) =>
+      panes(t.tree).flatMap((id) => {
+        const p = this.panes.get(id);
+        if (!p) return [];
+        const place = this.git[String(id)];
+        const g = place?.git ?? null;
+        const st = this.status[String(id)];
+        const onScreen =
+          t === this.active && (t.zoomed === null ? !this.solo || t.focused === id : t.zoomed === id);
+        return [
+          {
+            id,
+            tab: t.id,
+            title: p.title || "shell",
+            focused: t.focused === id,
+            shown: onScreen,
+            cwd: place?.shown ?? "",
+            repo: g?.repo ?? null,
+            branch: g?.branch ?? g?.detached ?? null,
+            changed: g?.changed ?? 0,
+            ahead: g?.ahead ?? 0,
+            behind: g?.behind ?? 0,
+            agent: st ? agentName(st.agent) : null,
+            state: (st?.state ?? null) as AgentStateName | null,
+            since: st ? (this.since.get(id)?.at ?? null) : null,
+            bg: hex(p.view?.grid.defaultBg, "#000000"),
+            fg: hex(p.view?.grid.defaultFg, "#ffffff"),
+          },
+        ];
+      }),
+    );
+    return {
+      tabs,
+      panes: all,
+      focused: this.active?.focused ?? null,
+      screen: this.screenName,
+      blocked: blockedCount(this.status),
+      windowFocused: this.opts.windowFocused?.() ?? document.hasFocus(),
+    };
+  }
+
+  private partTheme(): PartTheme {
+    const colors: Record<string, string> = {};
+    for (const [k, v] of Object.entries(chromeFor(this.theme))) colors[k.replace(/^--k-/, "")] = v;
+    for (const [k, v] of Object.entries(this.screenView?.screen.chrome.colors ?? {})) colors[k] = v;
+    return {
+      colors,
+      font: this.screenView?.screen.chrome.font ?? "-apple-system, system-ui, sans-serif",
+      mono: fontStack(),
+      dark: isDark(this.theme),
+    };
+  }
+
+  private async partRun(part: string, action: string, a: Record<string, unknown>): Promise<unknown> {
+    const num = (k: string): number => {
+      const v = a[k];
+      if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${action}: ${k} must be a pane or tab id`);
+      return v;
+    };
+    const pane = (k = "pane"): Pane => {
+      const p = this.panes.get(num(k));
+      if (!p) throw new Error(`${action}: no pane ${String(a[k])}`);
+      return p;
+    };
+    const str = (k: string): string => {
+      if (typeof a[k] !== "string") throw new Error(`${action}: ${k} must be text`);
+      return a[k] as string;
+    };
+    switch (action) {
+      case "pane.focus":
+        this.show(pane().id);
+        return null;
+      case "tab.activate": {
+        const t = this.tabs.find((x) => x.id === num("tab"));
+        if (!t) throw new Error(`tab.activate: no tab ${String(a.tab)}`);
+        this.activate(t);
+        return null;
+      }
+      case "tab.new":
+        this.send({ t: "new_tab", near: a.near === undefined ? this.focusedPane?.id : pane("near").id, focus: true });
+        return null;
+      case "pane.split": {
+        const p = a.pane === undefined ? this.focusedPane : pane();
+        if (!p) throw new Error("pane.split: no pane");
+        const dir = a.direction === "down" ? "column" : a.direction === "right" ? "row" : null;
+        if (!dir) throw new Error(`pane.split: direction is "right" or "down"`);
+        this.send({ t: "split", pane: p.id, dir, focus: true });
+        return null;
+      }
+      case "pane.close":
+        this.send({ t: "close", pane: pane().id });
+        return null;
+      case "pane.zoom": {
+        const p = a.pane === undefined ? this.focusedPane : pane();
+        if (p) this.run({ kind: "zoom" }, p);
+        return null;
+      }
+      case "pane.type": {
+        const p = pane();
+        const text = str("text") + (a.enter ? "\r" : "");
+        p.transport.input({ kind: "text", data: text });
+        return null;
+      }
+      case "workspace.open": {
+        const name = str("name");
+        const api = this.opts.workspaces;
+        if (!api) throw new Error("workspaces can't be opened here");
+        const all = await api.list(this.focusedPane?.id ?? null);
+        const w = all.find((x) => x.name === name);
+        if (!w) throw new Error(`no workspace named ${name}`);
+        return api.open(w, this.focusedPane?.id ?? null);
+      }
+      case "diff":
+        this.opts.onDiff?.(pane());
+        return null;
+      case "screen.switch": {
+        const name = str("name");
+        if (!this.opts.screens) throw new Error("screens can't be switched here");
+        await this.opts.screens.choose(name);
+        return null;
+      }
+      case "node.show":
+      case "node.hide":
+      case "node.toggle": {
+        const id = str("id");
+        const how = action.slice(5) as "show" | "hide" | "toggle";
+        if (!this.screenView?.set(id, how)) throw new Error(`${action}: no node ${id} on this screen`);
+        if (this.active) this.layout(this.active);
+        return null;
+      }
+      case "notify":
+        this.notice(`${part}: ${str("text").slice(0, 200)}`);
+        return null;
+      case "settings":
+      case "themes":
+      case "shortcuts":
+      case "workspaces":
+      case "screens":
+        this.run({ kind: action });
+        return null;
+      default:
+        throw new Error(`no action ${action}`);
+    }
+  }
+
+  /** A picture of pane `id`, `width` CSS px wide. */
+  private thumbCanvas: HTMLCanvasElement | null = null;
+  /** Pane `id` scaled to `width` CSS px. With `height`, the box is that
+   * tall and shows the rows around the cursor, as the sidebar's preview
+   * does; a pane shorter than the box sits at its top. */
+  private async thumbnail(id: number, width: number, height?: number): Promise<ImageBitmap | null> {
+    const p = this.panes.get(id);
+    const view = p?.view;
+    const src = view?.gridCanvas;
+    if (!view || !src || src.width === 0 || src.height === 0) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.min(1600, Math.round(width * dpr)));
+    // Fill the width, but no smaller than half size, so a wide pane stays
+    // readable (its left side shows).
+    const scale = Math.max(w / src.width, 0.5);
+    const sw = Math.min(src.width, w / scale);
+    const full = Math.max(1, Math.round(src.height * scale));
+    const h = height ? Math.max(1, Math.min(1600, Math.round(height * dpr))) : full;
+    // Source rows to show: all of them, or a window around the cursor.
+    const sh = Math.min(src.height, h / scale);
+    const g = view.grid;
+    const cursor = g.rows > 0 ? ((g.cursor.y + 1) / g.rows) * src.height : src.height;
+    const sy = Math.max(0, Math.min(src.height - sh, cursor - sh * 0.7));
+    const c = (this.thumbCanvas ??= document.createElement("canvas"));
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = `#${g.defaultBg.toString(16).padStart(6, "0")}`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * scale, sh * scale);
+    return createImageBitmap(c);
   }
 
   // ---- panes ----
@@ -914,6 +1261,7 @@ export class Workspace {
 
   private updateActive(tab: Tab): void {
     for (const id of panes(tab.tree)) this.setPaneActive(id, id === tab.focused);
+    if (this.solo && tab === this.active) this.layout(tab);
     if (tab === this.active) {
       this.updateBar();
       this.emitTitle();
@@ -930,7 +1278,7 @@ export class Workspace {
   layout(tab: Tab): void {
     this.place(tab);
     for (const d of tab.el.querySelectorAll(".divider")) d.remove();
-    if (tab.zoomed !== null) return;
+    if (tab.zoomed !== null || this.solo) return;
     for (const d of dividers(tab.tree, this.box())) {
       const el = document.createElement("div");
       el.className = "divider";
@@ -978,7 +1326,12 @@ export class Workspace {
   /** Position the panes only. */
   private place(tab: Tab): void {
     const box = this.box();
-    const all = tab.zoomed !== null ? new Map([[tab.zoomed, box]]) : rects(tab.tree, box);
+    const all =
+      tab.zoomed !== null
+        ? new Map([[tab.zoomed, box]])
+        : this.solo
+          ? new Map([[tab.focused, box]])
+          : rects(tab.tree, box);
     for (const id of panes(tab.tree)) {
       const p = this.panes.get(id);
       if (!p) continue;
@@ -1004,6 +1357,8 @@ export class Workspace {
       p.transport.close?.();
     }
     for (const c of this.cleanups) c();
+    this.parts.dispose();
+    this.screenView?.dispose();
     this.sidebar.dispose();
     this.root.remove();
   }

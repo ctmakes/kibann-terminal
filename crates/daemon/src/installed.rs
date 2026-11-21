@@ -81,11 +81,41 @@ pub fn check(names: &[&str]) -> HashSet<String> {
     found
 }
 
-/// Whether `name` is an executable in one of `path`'s directories.
-fn on_path(name: &str, path: Option<&std::ffi::OsStr>) -> bool {
-    let Some(path) = path else {
-        return false;
-    };
+/// Where `name` is: on this process's PATH, else on the login shell's.
+pub fn locate(name: &str) -> Option<std::path::PathBuf> {
+    if !plain(name) {
+        return None;
+    }
+    let own = std::env::var_os("PATH");
+    find_on(name, own.as_deref()).or_else(|| find_on(name, user_path().as_deref()))
+}
+
+/// The PATH the user's login shell sets up (asked once), or this
+/// process's when it can't be asked. For running a program as their
+/// shell would.
+pub fn user_path() -> Option<std::ffi::OsString> {
+    static PATH: OnceLock<Option<std::ffi::OsString>> = OnceLock::new();
+    PATH.get_or_init(|| shell_path().or_else(|| std::env::var_os("PATH")))
+        .clone()
+}
+
+#[cfg(unix)]
+fn shell_path() -> Option<std::ffi::OsString> {
+    const MARK: &str = "__kibann_path__";
+    let text = run_shell(&format!("printf '%s\\n' {MARK}; printf '%s\\n' \"$PATH\""))?;
+    let after = &text[text.find(MARK)? + MARK.len()..];
+    let line = after.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(line.into())
+}
+
+#[cfg(not(unix))]
+fn shell_path() -> Option<std::ffi::OsString> {
+    None
+}
+
+/// The first executable `name` in `path`'s directories.
+fn find_on(name: &str, path: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    let path = path?;
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
             .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
@@ -96,12 +126,16 @@ fn on_path(name: &str, path: Option<&std::ffi::OsStr>) -> bool {
     } else {
         vec![String::new()]
     };
-    std::env::split_paths(path).any(|dir| {
-        exts.iter().any(|e| {
-            let p = dir.join(format!("{name}{e}"));
-            is_executable(&p)
-        })
+    std::env::split_paths(path).find_map(|dir| {
+        exts.iter()
+            .map(|e| dir.join(format!("{name}{e}")))
+            .find(|p| is_executable(p))
     })
+}
+
+/// Whether `name` is an executable in one of `path`'s directories.
+fn on_path(name: &str, path: Option<&std::ffi::OsStr>) -> bool {
+    find_on(name, path).is_some()
 }
 
 #[cfg(unix)]
@@ -127,9 +161,6 @@ fn plain(name: &str) -> bool {
 /// couldn't be asked (or took too long).
 #[cfg(unix)]
 fn ask_shell(names: &[&str]) -> Option<HashSet<String>> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-
     let names: Vec<&str> = names.iter().copied().filter(|n| plain(n)).collect();
     if names.is_empty() {
         return Some(HashSet::new());
@@ -141,6 +172,25 @@ fn ask_shell(names: &[&str]) -> Option<HashSet<String>> {
             "; command -v {n} >/dev/null 2>&1 && printf '%s\\n' {n}"
         ));
     }
+    let text = run_shell(&script)?;
+    let after = &text[text.find(MARK)? + MARK.len()..];
+    Some(
+        after
+            .lines()
+            .map(str::trim)
+            .filter(|l| names.contains(l))
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+/// Run `script` in the user's login shell; its output, unless it couldn't
+/// run or took too long.
+#[cfg(unix)]
+fn run_shell(script: &str) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -148,7 +198,7 @@ fn ask_shell(names: &[&str]) -> Option<HashSet<String>> {
     // Interactive and login, so both .zprofile and .zshrc (where PATH is
     // often set) are read.
     let mut child = Command::new(&shell)
-        .args(["-l", "-i", "-c", &script])
+        .args(["-l", "-i", "-c", script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -164,16 +214,7 @@ fn ask_shell(names: &[&str]) -> Option<HashSet<String>> {
     let text = rx.recv_timeout(SHELL_WAIT);
     let _ = child.kill();
     let _ = child.wait();
-    let text = text.ok()?;
-    let after = &text[text.find(MARK)? + MARK.len()..];
-    Some(
-        after
-            .lines()
-            .map(str::trim)
-            .filter(|l| names.contains(l))
-            .map(str::to_owned)
-            .collect(),
-    )
+    text.ok()
 }
 
 #[cfg(not(unix))]

@@ -1,6 +1,6 @@
-//! Layout files: tabs and splits, with a directory and a command per pane,
-//! written by hand (or by `kibann layout save`) and opened with `kibann
-//! layout open`. TOML, because splits nest. See `plans/layouts.md`.
+//! Workspace files: tabs and splits, with a directory and a command per pane,
+//! written by hand (or by `kibann workspace save`) and opened with `kibann
+//! workspace open`. TOML, because splits nest. See `plans/layouts.md`.
 //!
 //! [`parse`] turns a file into a [`Template`] (directories made absolute and
 //! checked, commands picked for this system, splits of N panes turned into
@@ -21,7 +21,7 @@ pub const MAX_PANES: usize = 32;
 const MIN_SIZE: f64 = 5.0;
 const MAX_SIZE: f64 = 95.0;
 
-/// Something wrong with a layout file, at a line and column (both from 1).
+/// Something wrong with a workspace file, at a line and column (both from 1).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Problem {
     pub line: usize,
@@ -53,7 +53,7 @@ impl fmt::Display for Problems {
 
 impl std::error::Error for Problems {}
 
-/// A layout file's text and where it's being opened.
+/// A workspace file's text and where it's being opened.
 pub struct Source<'a> {
     pub text: &'a str,
     /// The file, if it is one (a built-in layout isn't). Relative paths in
@@ -475,7 +475,7 @@ fn default_root(file_dir: Option<&Path>, opened_from: &Path) -> PathBuf {
     }
 }
 
-/// Read a layout file: every problem in it, or the layout to open.
+/// Read a workspace file: every problem in it, or the workspace to open.
 pub fn parse(src: &Source<'_>) -> Result<Template, Problems> {
     let doc: Doc = match toml::from_str(src.text) {
         Ok(d) => d,
@@ -582,13 +582,13 @@ pub struct SaveOptions<'a> {
     /// Index of the tab shown.
     pub active: usize,
     /// Write directories under this one relative to it (for a project's
-    /// `.kibann/layout.toml`).
+    /// `.kibann/workspace.toml`).
     pub relative_to: Option<&'a Path>,
     /// Write directories under home as `~/...`.
     pub home: Option<&'a Path>,
 }
 
-/// A layout file for `tabs`, which [`parse`] reads back as the same tabs.
+/// A workspace file for `tabs`, which [`parse`] reads back as the same tabs.
 pub fn write(
     tabs: &[SaveTab<'_>],
     panes: &HashMap<PaneId, SavePane>,
@@ -773,7 +773,7 @@ fn percents(shares: &[f64]) -> Option<Vec<i64>> {
     Some(v)
 }
 
-/// A directory as a layout file writes it.
+/// A directory as a workspace file writes it.
 fn show_path(p: &Path, relative_to: Option<&Path>, home: Option<&Path>) -> String {
     let slashes = |p: &Path| {
         p.components()
@@ -1009,7 +1009,7 @@ panes = [{ cwd = "src" }, { cwd = "./test/../test" }, { cwd = "~" }]
     #[test]
     fn a_projects_file_opens_in_the_project() {
         let s = Scratch::new(&[".kibann", "elsewhere"]);
-        let file = s.0.join(".kibann/layout.toml");
+        let file = s.0.join(".kibann/workspace.toml");
         let t = parse(&Source {
             text: "[[tab]]\n",
             file: Some(&file),
@@ -1018,13 +1018,13 @@ panes = [{ cwd = "src" }, { cwd = "./test/../test" }, { cwd = "~" }]
         })
         .unwrap();
         assert_eq!(cwd_of(&t.tabs[0].tree), s.0.to_string_lossy());
-        assert_eq!(t.name.as_deref(), Some("layout"));
+        assert_eq!(t.name.as_deref(), Some("workspace"));
     }
 
     #[test]
     fn root_is_relative_to_the_file() {
-        let s = Scratch::new(&["layouts", "proj", "here"]);
-        let file = s.0.join("layouts/x.toml");
+        let s = Scratch::new(&["workspaces", "proj", "here"]);
+        let file = s.0.join("workspaces/x.toml");
         let t = parse(&Source {
             text: "root = \"../proj\"\n[[tab]]\n",
             file: Some(&file),

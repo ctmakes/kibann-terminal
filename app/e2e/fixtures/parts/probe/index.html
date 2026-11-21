@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;font:11px monospace;color:var(--k-text);background:var(--k-panel)">
+<pre id="result">waiting</pre>
+<button id="toggle">toggle extra</button>
+<button id="type">type</button>
+<input id="field" placeholder="a field">
+<script>
+  const out = {};
+  const settle = (p) => p.then(() => "ok", (e) => "denied: " + e.message);
+  (async () => {
+    await kibann.ready;
+    out.props = kibann.props;
+    out.panes = kibann.state.panes.length;
+    out.bg = getComputedStyle(document.documentElement).getPropertyValue("--k-bg").trim();
+    try { localStorage.setItem("x", "1"); out.storage = "open"; } catch { out.storage = "blocked"; }
+    try { out.parent = parent.document ? "open" : "none"; } catch { out.parent = "blocked"; }
+    out.git = await settle(kibann.exec("git", ["status"]));
+    out.ls = await settle(kibann.exec("ls", []));
+    out.thumb = await kibann.thumbnail(kibann.state.focused, 100).then((b) => (b && b.width > 0 ? "ok" : "none"), (e) => "denied: " + e.message);
+    out.nope = await settle(kibann.run("no.such"));
+    await kibann.store.set("count", 41);
+    out.store = await kibann.store.get("count");
+    document.getElementById("result").textContent = JSON.stringify(out);
+  })();
+  document.getElementById("toggle").addEventListener("click", () => kibann.run("node.toggle", { id: "extra" }));
+  document.getElementById("type").addEventListener("click", async () => {
+    const r = await settle(kibann.run("pane.type", { pane: kibann.state.focused, text: "hi", enter: true }));
+    document.getElementById("type").textContent = r;
+  });
+</script>
+</body></html>

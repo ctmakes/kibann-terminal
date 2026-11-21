@@ -337,7 +337,7 @@ fn kibann_at(socket: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn layouts_are_checked_opened_and_saved() {
+fn workspaces_are_checked_opened_and_saved() {
     let (socket, d, h) = start("l");
     let c = Client::connect(&socket, |_| {}).unwrap();
     let root = std::env::temp_dir()
@@ -354,33 +354,33 @@ fn layouts_are_checked_opened_and_saved() {
 
     // A bad file: every problem, with its line.
     std::fs::write(
-        repo.join(".kibann/layout.toml"),
+        repo.join(".kibann/workspace.toml"),
         "[[tab]]\nsplit = \"right\"\npanes = [{ cwd = \"nope\" }, { comand = \"x\" }]\n",
     )
     .unwrap();
-    let out = kibann_at(&socket, &repo, &home, &["layout", "check"]);
+    let out = kibann_at(&socket, &repo, &home, &["workspace", "check"]);
     let e = fails(&out, 1);
     assert_eq!(e["error"]["code"], "invalid");
     let msg = e["error"]["message"].as_str().unwrap();
-    assert!(msg.contains("layout.toml:3:"), "{msg}");
+    assert!(msg.contains("workspace.toml:3:"), "{msg}");
 
     // A good one: what it runs, and that it asks first.
-    let text = "[[tab]]\ntitle = \"dev\"\nsplit = \"right\"\npanes = [\n  { command = \"echo from-layout-$((6*7))\", size = 60 },\n  { cwd = \"web\", focus = true },\n]\n";
-    std::fs::write(repo.join(".kibann/layout.toml"), text).unwrap();
+    let text = "[[tab]]\ntitle = \"dev\"\nsplit = \"right\"\npanes = [\n  { command = \"echo from-workspace-$((6*7))\", size = 60 },\n  { cwd = \"web\", focus = true },\n]\n";
+    std::fs::write(repo.join(".kibann/workspace.toml"), text).unwrap();
     let r = ok(kibann_at(
         &socket,
         &repo.join("web"),
         &home,
-        &["layout", "check"],
+        &["workspace", "check"],
     ));
     assert_eq!(r["name"], "repo");
     assert_eq!(r["origin"], "project");
     assert_eq!(r["panes"], 2);
     assert_eq!(r["asks"], true);
-    assert_eq!(r["runs"][0]["run"], "echo from-layout-$((6*7))");
+    assert_eq!(r["runs"][0]["run"], "echo from-workspace-$((6*7))");
 
     // Without a terminal to ask on, it won't run them...
-    let out = kibann_at(&socket, &repo, &home, &["layout", "open"]);
+    let out = kibann_at(&socket, &repo, &home, &["workspace", "open"]);
     assert_eq!(fails(&out, 1)["error"]["code"], "untrusted");
     assert!(c.layout().unwrap().tabs.is_empty());
     // ...until told to; then that version is trusted.
@@ -388,10 +388,10 @@ fn layouts_are_checked_opened_and_saved() {
         &socket,
         &repo,
         &home,
-        &["layout", "open", "--yes"],
+        &["workspace", "open", "--yes"],
     ));
     assert_eq!(r["opened"], "repo");
-    let r = ok(kibann_at(&socket, &repo, &home, &["layout", "check"]));
+    let r = ok(kibann_at(&socket, &repo, &home, &["workspace", "check"]));
     assert_eq!(r["asks"], false);
     let layout = c.layout().unwrap();
     assert_eq!(layout.tabs.len(), 1);
@@ -409,7 +409,7 @@ fn layouts_are_checked_opened_and_saved() {
             "wait",
             &first,
             "--regex",
-            "^from-layout-42$",
+            "^from-workspace-42$",
             "--timeout",
             "5000",
         ],
@@ -420,17 +420,23 @@ fn layouts_are_checked_opened_and_saved() {
         &socket,
         &repo,
         &home,
-        &["layout", "save", "--to", ".kibann/layout.toml"],
+        &["workspace", "save", "--to", ".kibann/workspace.toml"],
     );
     assert_eq!(fails(&out, 1)["error"]["code"], "exists");
     let r = ok(kibann_at(
         &socket,
         &repo,
         &home,
-        &["layout", "save", "--to", ".kibann/layout.toml", "--force"],
+        &[
+            "workspace",
+            "save",
+            "--to",
+            ".kibann/workspace.toml",
+            "--force",
+        ],
     ));
     assert_eq!(r["name"], "repo");
-    let saved = std::fs::read_to_string(repo.join(".kibann/layout.toml")).unwrap();
+    let saved = std::fs::read_to_string(repo.join(".kibann/workspace.toml")).unwrap();
     assert!(saved.contains("title = \"dev\""), "{saved}");
     assert!(
         saved.contains("{ cwd = \"web\", size = 40, focus = true }"),
@@ -438,20 +444,20 @@ fn layouts_are_checked_opened_and_saved() {
     );
     assert!(saved.contains("{ size = 60 }"), "{saved}");
     // What the user saved opens without asking.
-    let r = ok(kibann_at(&socket, &repo, &home, &["layout", "check"]));
+    let r = ok(kibann_at(&socket, &repo, &home, &["workspace", "check"]));
     assert_eq!(r["asks"], false);
 
-    // Named layouts, and copying a built-in one to edit.
+    // Named workspaces, and copying a built-in one to edit.
     let r = ok(kibann_at(
         &socket,
         &repo,
         &home,
-        &["layout", "save", "mine", "--from", "system"],
+        &["workspace", "save", "mine", "--from", "system"],
     ));
     let mine = std::path::PathBuf::from(r["saved"].as_str().unwrap());
-    assert_eq!(mine, home.join("config/layouts/mine.toml"));
-    let list = ok(kibann_at(&socket, &repo, &home, &["layout", "list"]));
-    let names: Vec<(&str, &str)> = list["layouts"]
+    assert_eq!(mine, home.join("config/workspaces/mine.toml"));
+    let list = ok(kibann_at(&socket, &repo, &home, &["workspace", "list"]));
+    let names: Vec<(&str, &str)> = list["workspaces"]
         .as_array()
         .unwrap()
         .iter()
@@ -460,7 +466,7 @@ fn layouts_are_checked_opened_and_saved() {
     assert_eq!(names[0], ("repo", "project"));
     assert_eq!(names[1], ("mine", "user"));
     assert!(names.contains(&("system", "builtin")));
-    let out = kibann_at(&socket, &repo, &home, &["layout", "open", "nope"]);
+    let out = kibann_at(&socket, &repo, &home, &["workspace", "open", "nope"]);
     assert_eq!(fails(&out, 1)["error"]["code"], "not_found");
 
     // watch runs the command again and again.
@@ -479,4 +485,105 @@ fn layouts_are_checked_opened_and_saved() {
     std::fs::remove_dir_all(&root).unwrap();
     d.shutdown();
     h.join().unwrap().unwrap();
+}
+
+#[test]
+fn screens_are_listed_copied_checked_and_used() {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("ks{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    // No daemon is needed: screens are files.
+    let socket = root.join("none.sock");
+    let run = |args: &[&str]| kibann_at(&socket, &root, &home, args);
+
+    let list = ok(run(&["screen", "list"]));
+    let names: Vec<&str> = list["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    for n in ["default", "board", "focus", "departures"] {
+        assert!(names.contains(&n), "{names:?}");
+    }
+
+    // A copy to edit, checked, then shown.
+    let r = ok(run(&["screen", "new", "mine", "--from", "board"]));
+    let file = PathBuf::from(r["path"].as_str().unwrap());
+    assert_eq!(file, home.join("config/screens/mine/screen.json"));
+    let out = run(&["screen", "new", "mine"]);
+    assert!(
+        fails(&out, 1)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exists")
+    );
+    let r = ok(run(&["screen", "check", "mine"]));
+    assert_eq!(r["builtin"], false);
+    assert_eq!(r["parts"][0]["name"], "board");
+    assert_eq!(r["parts"][0]["permissions"]["read"], true);
+    // Built in: nothing to ask.
+    assert_eq!(r["parts"][0]["asks"], serde_json::json!([]));
+    ok(run(&["screen", "use", "mine"]));
+    let config = std::fs::read_to_string(home.join("config/config")).unwrap();
+    assert_eq!(config, "screen = mine\n");
+    // Back to the default takes the line out.
+    ok(run(&["screen", "use", "default"]));
+    assert_eq!(
+        std::fs::read_to_string(home.join("config/config")).unwrap(),
+        ""
+    );
+
+    // A part of the user's, with permissions it must be allowed.
+    let r = ok(run(&["screen", "part", "prs"]));
+    let dir = PathBuf::from(r["path"].as_str().unwrap());
+    assert!(dir.join("index.html").is_file());
+    std::fs::write(
+        dir.join("part.json"),
+        r#"{"about": "PRs", "permissions": {"exec": ["gh"], "net": ["api.github.com"]}}"#,
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file)
+        .unwrap()
+        .replace("\"part\": \"board\"", "\"part\": \"prs\"");
+    std::fs::write(&file, text).unwrap();
+    let r = ok(run(&["screen", "check", "mine"]));
+    assert_eq!(r["parts"][0]["name"], "prs");
+    assert_eq!(
+        r["parts"][0]["asks"],
+        serde_json::json!(["run gh", "connect to api.github.com"])
+    );
+
+    // Mistakes say where.
+    std::fs::write(
+        &file,
+        "{\n  \"root\": {\"type\": \"block\", \"colour\": 1}\n}\n",
+    )
+    .unwrap();
+    let out = run(&["screen", "check", "mine"]);
+    let msg = fails(&out, 1)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(msg.contains("screen.json:2:"), "{msg}");
+    assert!(msg.contains("unknown field `colour`"), "{msg}");
+    let out = run(&["screen", "use", "nope"]);
+    assert!(
+        fails(&out, 1)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no screen named nope")
+    );
+
+    // The guide and the types.
+    let out = run(&["skill", "show", "screens"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("name: kibann-screens"));
+    let out = run(&["screen", "api"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("interface Kibann"));
+
+    std::fs::remove_dir_all(&root).unwrap();
 }

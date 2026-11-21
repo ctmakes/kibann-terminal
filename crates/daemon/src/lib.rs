@@ -10,15 +10,16 @@ pub mod cli;
 pub mod client;
 pub mod installed;
 pub mod layout;
-pub mod layouts;
 pub mod outbox;
 pub mod paths;
 pub mod pipe;
 pub mod saved;
+pub mod screens;
 pub mod server;
 pub mod status;
 pub mod template;
 pub mod view;
+pub mod workspaces;
 
 /// Identifies the daemon's code: a fingerprint of the source it's built
 /// from (see `build.rs`). The app compares a running daemon's with its own,

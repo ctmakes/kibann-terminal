@@ -1,0 +1,1 @@
+{ "about": "Tries everything a part can ask for", "permissions": { "read": true, "type": true, "exec": ["git"] } }

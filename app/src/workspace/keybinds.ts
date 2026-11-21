@@ -152,12 +152,20 @@ export function parseAction(a: string): Action | "unbind" | string {
       return { kind: "shortcuts" };
     case "open_theme_picker":
       return { kind: "themes" };
-    case "open_layout":
-      return { kind: "layouts" };
-    case "save_layout":
-      return { kind: "saveLayout" };
+    case "open_workspace":
+      return { kind: "workspaces" };
+    case "save_workspace":
+      return { kind: "saveWorkspace" };
     case "open_settings":
       return { kind: "settings" };
+    case "open_screen_picker":
+      return { kind: "screens" };
+    case "next_screen":
+      return { kind: "screenCycle", step: 1 };
+    case "previous_screen":
+      return { kind: "screenCycle", step: -1 };
+    case "reset_screen":
+      return { kind: "screenReset" };
     default:
       return `unknown action "${a}"`;
   }

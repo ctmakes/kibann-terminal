@@ -10,7 +10,9 @@ import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
 import type { ConfigInfo, SettingsApi, UpdateStatus } from "./workspace/settings";
 import type { ThemeApi, ThemeEntry } from "./workspace/theme";
-import type { LayoutApi, LayoutEntry } from "./workspace/layouts";
+import type { WorkspaceApi, WorkspaceEntry } from "./workspace/workspaces";
+import type { ScreenApi } from "./screen/picker";
+import type { ScreenEntry, ScreenNow } from "./proto";
 import { Workspace, type Pane } from "./workspace/workspace";
 
 const el = document.getElementById("term")!;
@@ -77,17 +79,26 @@ async function start(): Promise<void> {
     changelog: () => invoke<[string, string]>("changelog"),
     openUrl: (url) => void invoke("open_link", { target: url }),
   };
-  // Layout files: read, checked and written by the app's backend.
-  const layouts: LayoutApi = {
-    list: (pane) => invoke<LayoutEntry[]>("layouts_list", { pane }),
-    open: (entry, pane) => invoke<boolean>("layout_open", { name: entry.name, path: entry.path ?? null, pane }),
-    save: (name, force) => invoke<string>("layout_save", { name, force }),
+  // Workspace files: read, checked and written by the app's backend.
+  const workspaces: WorkspaceApi = {
+    list: (pane) => invoke<WorkspaceEntry[]>("workspaces_list", { pane }),
+    open: (entry, pane) => invoke<boolean>("workspace_open", { name: entry.name, path: entry.path ?? null, pane }),
+    save: (name, force) => invoke<string>("workspace_save", { name, force }),
+  };
+  // Screens: what the window shows where (screens/, parts/).
+  const screens: ScreenApi = {
+    current: () => invoke<ScreenNow>("screen_current"),
+    list: () => invoke<ScreenEntry[]>("screen_list"),
+    load: (name) => invoke<ScreenNow>("screen_load", { name }),
+    choose: (name) => invoke("screen_choose", { name }),
+    exec: (part, program, args, cwd, timeout) => invoke("part_exec", { part, program, args, cwd, timeout }),
   };
   const ws = new Workspace(el, {
     settings: settingsApi,
     backend,
     themes,
-    layouts,
+    workspaces,
+    screens,
     firstRunHint: true,
     transport: (pane) => new TauriTransport(pane),
     onTitle: (title) => void win.setTitle(title),
@@ -111,6 +122,9 @@ async function start(): Promise<void> {
     ws.setTheme(e.payload.theme);
   });
   await listen<string>("notice", (e) => ws.notice(e.payload));
+  // The config's screen, and again whenever it or its files change.
+  await listen<ScreenNow>("screen", (e) => ws.useScreen(e.payload));
+  void screens.current().then((now) => ws.useScreen(now));
   // A new version is downloaded: offer to restart into it (shells keep
   // running in the daemon).
   await listen<{ version: string }>("update-ready", (e) =>

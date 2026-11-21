@@ -1,11 +1,11 @@
-// Layout files (View → Open Layout… / Save Layout…): a searchable list of
-// the project's, the user's and the built-in layouts, and a name field to
+// Workspace files (View → Open Workspace… / Save Workspace…): a searchable list of
+// the project's, the user's and the built-in workspaces, and a name field to
 // save the window as one. The files themselves are read and written by the
-// app's backend (`daemon::layouts`); see README "Layout files".
+// app's backend (`daemon::workspaces`); see README "Workspace files".
 
 import type { PaneId } from "./layout";
 
-export interface LayoutEntry {
+export interface WorkspaceEntry {
   name: string;
   origin: "project" | "user" | "builtin" | "file";
   path?: string;
@@ -13,42 +13,42 @@ export interface LayoutEntry {
   about?: string;
 }
 
-export interface LayoutApi {
-  /** The layouts for the directory `pane` is in. */
-  list(pane: PaneId | null): Promise<LayoutEntry[]>;
+export interface WorkspaceApi {
+  /** The workspaces for the directory `pane` is in. */
+  list(pane: PaneId | null): Promise<WorkspaceEntry[]>;
   /** Open it (after asking, if it runs commands from someone else).
    * False when the user said no. */
-  open(entry: LayoutEntry, pane: PaneId | null): Promise<boolean>;
-  /** Save the window as `name` in the user's layouts; the file's path.
+  open(entry: WorkspaceEntry, pane: PaneId | null): Promise<boolean>;
+  /** Save the window as `name` in the user's workspaces; the file's path.
    * Fails with a message containing "exists" unless `force`. */
   save(name: string, force: boolean): Promise<string>;
 }
 
 const ROW_H = 30;
 
-const ORIGIN: Record<LayoutEntry["origin"], string> = {
+const ORIGIN: Record<WorkspaceEntry["origin"], string> = {
   project: "this project",
   user: "yours",
   builtin: "built in",
   file: "file",
 };
 
-export class LayoutPicker {
+export class WorkspacePicker {
   readonly el: HTMLDivElement;
   visible = false;
   private mode: "open" | "save" = "open";
   private readonly input: HTMLInputElement;
   private readonly list: HTMLDivElement;
   private readonly hint: HTMLDivElement;
-  private all: LayoutEntry[] = [];
-  private shown: LayoutEntry[] = [];
+  private all: WorkspaceEntry[] = [];
+  private shown: WorkspaceEntry[] = [];
   private at = 0;
   private pane: PaneId | null = null;
   /** In save mode: the name already asked to replace. */
   private replacing: string | null = null;
 
   constructor(
-    private readonly api: LayoutApi,
+    private readonly api: WorkspaceApi,
     private readonly opts: {
       /** Called after it closes, to put focus back in the terminal. */
       onClose(): void;
@@ -56,7 +56,7 @@ export class LayoutPicker {
     },
   ) {
     this.el = document.createElement("div");
-    this.el.className = "layout-picker";
+    this.el.className = "workspace-picker";
     Object.assign(this.el.style, {
       position: "absolute",
       inset: "0",
@@ -85,7 +85,7 @@ export class LayoutPicker {
       overflow: "hidden",
     });
     this.input = document.createElement("input");
-    this.input.className = "layout-picker-input";
+    this.input.className = "workspace-picker-input";
     this.input.spellcheck = false;
     Object.assign(this.input.style, {
       display: "block",
@@ -105,7 +105,7 @@ export class LayoutPicker {
     });
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.list = document.createElement("div");
-    this.list.className = "layout-picker-list";
+    this.list.className = "workspace-picker-list";
     Object.assign(this.list.style, { maxHeight: `${ROW_H * 10}px`, overflowY: "auto", padding: "4px 0" });
     this.hint = document.createElement("div");
     Object.assign(this.hint.style, {
@@ -118,7 +118,7 @@ export class LayoutPicker {
     this.el.append(panel);
   }
 
-  /** Open to pick a layout to open, or to name the window to save. */
+  /** Open to pick a workspace to open, or to name the window to save. */
   async open(mode: "open" | "save", pane: PaneId | null): Promise<void> {
     if (this.visible) {
       if (this.mode === mode) return;
@@ -130,7 +130,7 @@ export class LayoutPicker {
     this.replacing = null;
     this.el.style.display = "flex";
     this.input.value = "";
-    this.input.placeholder = mode === "open" ? "Search layouts" : "Name the layout (saved to your layouts)";
+    this.input.placeholder = mode === "open" ? "Search workspaces" : "Name the workspace (saved to your workspaces)";
     this.input.focus();
     this.setHint();
     this.all = [];
@@ -138,7 +138,7 @@ export class LayoutPicker {
     try {
       this.all = await this.api.list(pane);
     } catch (e) {
-      this.opts.notice(`Couldn't list the layouts: ${e}`);
+      this.opts.notice(`Couldn't list the workspaces: ${e}`);
     }
     if (this.visible) this.filter();
   }
@@ -169,7 +169,7 @@ export class LayoutPicker {
   private render(): void {
     const rows = this.shown.map((l, i) => {
       const row = document.createElement("div");
-      row.className = "layout-picker-row";
+      row.className = "workspace-picker-row";
       row.dataset.name = l.name;
       const on = this.mode === "open" && i === this.at;
       Object.assign(row.style, {
@@ -212,7 +212,7 @@ export class LayoutPicker {
     });
     if (rows.length === 0 && this.mode === "open") {
       const none = document.createElement("div");
-      none.textContent = this.all.length ? "No layout matches." : "";
+      none.textContent = this.all.length ? "No workspace matches." : "";
       Object.assign(none.style, { padding: "6px 12px", color: "var(--k-muted)" });
       rows.push(none);
     }
@@ -242,7 +242,7 @@ export class LayoutPicker {
     try {
       const path = await this.api.save(name, this.replacing === name);
       this.close();
-      this.opts.notice(`Saved the layout as ${name} (${path})`);
+      this.opts.notice(`Saved the workspace as ${name} (${path})`);
     } catch (e) {
       const msg = String(e);
       if (msg.includes("exists") && this.replacing !== name) {
@@ -251,7 +251,7 @@ export class LayoutPicker {
         return;
       }
       this.close();
-      this.opts.notice(`Couldn't save the layout: ${msg}`);
+      this.opts.notice(`Couldn't save the workspace: ${msg}`);
     }
   }
 

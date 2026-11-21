@@ -1,0 +1,16 @@
+{
+  "about": "Kibann's window: the sidebar, the tabs and the terminals",
+  "root": {
+    "type": "row",
+    "children": [
+      { "type": "block", "size": "auto", "content": { "part": "sidebar" } },
+      {
+        "type": "column",
+        "children": [
+          { "type": "block", "size": "auto", "content": { "part": "tabs" } },
+          { "type": "block", "content": { "tab": "active" } }
+        ]
+      }
+    ]
+  }
+}

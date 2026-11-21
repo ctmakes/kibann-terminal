@@ -10,4 +10,4 @@ export type LayoutAction = { "t": "new_tab", near?: number, cwd?: string,
 /**
  * A program instead of the login shell.
  */
-argv?: Array<string>, focus: boolean, } | { "t": "split", pane: number, dir: Dir, cwd?: string, argv?: Array<string>, focus: boolean, } | { "t": "close", pane: number, } | { "t": "focus", pane: number, } | { "t": "activate", tab: number, } | { "t": "set_ratio", tab: number, path: Array<Step>, ratio: number, } | { "t": "equalize", tab: number, } | { "t": "zoom", tab: number, pane?: number, } | { "t": "open_layout", template: Template, };
+argv?: Array<string>, focus: boolean, } | { "t": "split", pane: number, dir: Dir, cwd?: string, argv?: Array<string>, focus: boolean, } | { "t": "close", pane: number, } | { "t": "focus", pane: number, } | { "t": "activate", tab: number, } | { "t": "set_ratio", tab: number, path: Array<Step>, ratio: number, } | { "t": "equalize", tab: number, } | { "t": "zoom", tab: number, pane?: number, } | { "t": "open_workspace", template: Template, };

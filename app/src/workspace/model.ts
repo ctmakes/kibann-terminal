@@ -31,7 +31,7 @@ export class Model {
     return id;
   }
 
-  /** A new tab holding `tree`, after the others (a layout file's). */
+  /** A new tab holding `tree`, after the others (a workspace file's). */
   addTab(tree: LayoutTab["tree"], focused: PaneId, title: string | null, show: boolean): TabId {
     const id = ++this.nextTab;
     const tab: LayoutTab = { id, tree, focused, zoomed: null };

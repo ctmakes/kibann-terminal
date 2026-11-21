@@ -83,23 +83,24 @@ kibann pane run "$p" "npm test" --wait                       # {"exit_code":0}
 kibann pane read "$p" --source recent --lines 40
 kibann pane wait "$p" --regex '^ready' --timeout 30000
 kibann pane list        # also: tab new, pane send / keys / focus / close / current
-kibann layout open      # tabs and splits from a layout file (see below)
+kibann workspace open   # tabs and splits from a workspace file (see below)
+kibann screen use board # what the window shows (see Screens)
 kibann skill install    # the guide for agents (--claude, --codex, --opencode for one)
 ```
 
-Run `kibann skill install` once, and your agents learn to use it. It writes two skills, `kibann` (driving panes) and `kibann-layouts` (building [layout files](#layout-files)), to `~/.claude/skills/`, which Claude Code and OpenCode read, and to `~/.agents/skills/` for Codex when Codex is installed.
+Run `kibann skill install` once, and your agents learn to use it. It writes three skills, `kibann` (driving panes), `kibann-workspaces` (building [workspace files](#workspace-files)) and `kibann-screens` (building [screens](#screens)), to `~/.claude/skills/`, which Claude Code and OpenCode read, and to `~/.agents/skills/` for Codex when Codex is installed.
 
 - **Environment:** each shell gets `KIBANN_PANE` (its pane, like `p3`), `KIBANN_SOCKET` and `KIBANN_BIN`, and `kibann` is on its `PATH`.
 - **Output:** results are JSON. Errors are JSON on stderr with exit code 1, and a bad command line exits 2.
 - **Help:** `kibann help` lists every command, and [`skills/kibann/SKILL.md`](skills/kibann/SKILL.md) is the guide agents read.
 - **Security:** anything that can open the socket can type into every pane. That's why the socket is private to your user (`$TMPDIR/kibann/daemon.sock` on macOS, `$XDG_RUNTIME_DIR/kibann/` on Linux, with the daemon's log beside it).
 
-### Layout files
+### Workspace files
 
-A layout file sets up tabs and splits in one go, with a directory and a command for each pane. Open one with View → Open Layout…, or with `kibann layout open NAME`. Its tabs open after yours.
+A workspace file sets up tabs and splits in one go, with a directory and a command for each pane. Open one with View → Open Workspace…, or with `kibann workspace open NAME`. Its tabs open after yours.
 
 ```toml
-# ~/.config/kibann/layouts/web.toml, or .kibann/layout.toml in a repo
+# ~/.config/kibann/workspaces/web.toml, or .kibann/workspace.toml in a repo
 [[tab]]
 title = "web"
 split = "right"
@@ -127,15 +128,30 @@ command = ["btop", "htop", "top"]
   - **A table by system** runs a different command on each: `{ macos = "macmon", linux = "nvtop", default = "top" }`.
   - **`exec = ["prog", "arg"]`** runs instead of the shell, and the pane closes when it exits.
 - **Where they live:**
-  - **Yours:** `~/.config/kibann/layouts/NAME.toml`.
-  - **A project's:** `.kibann/layout.toml` in a repo. `kibann layout open` with no name opens it, and its relative paths start at the repo, wherever it's cloned.
+  - **Yours:** `~/.config/kibann/workspaces/NAME.toml`.
+  - **A project's:** `.kibann/workspace.toml` in a repo. `kibann workspace open` with no name opens it, and its relative paths start at the repo, wherever it's cloned.
   - **Built in:** `system` (CPU, memory, GPU and disks), `ports` (what's listening), `agents`, `agents-4` (agents in a grid) and `review` (an agent beside lazygit). A file of yours with the same name replaces one.
-- **Saving:** View → Save Layout…, or `kibann layout save NAME`, writes the window as a layout, with each pane's directory and the program running in it. `--to .kibann/layout.toml` writes a project's, with relative paths. `kibann layout save mine --from system` copies a built-in one to edit.
-- **Checking:** `kibann layout check FILE` reads a file without opening it. It prints what it would run, or every problem with its line and column.
-- **Safety:** opening a layout runs its commands. A file that isn't yours (a repo's, a download) lists them and asks first, and asks again whenever the file changes. Built-in layouts, your layouts folder and files you saved open straight away. From the command line, `--yes` agrees.
-- **Agents** can build layouts for you: ask yours to "make a layout for this repo". The `kibann-layouts` skill tells it how.
+- **Saving:** View → Save Workspace…, or `kibann workspace save NAME`, writes the window as a workspace, with each pane's directory and the program running in it. `--to .kibann/workspace.toml` writes a project's, with relative paths. `kibann workspace save mine --from system` copies a built-in one to edit.
+- **Checking:** `kibann workspace check FILE` reads a file without opening it. It prints what it would run, or every problem with its line and column.
+- **Safety:** opening a workspace runs its commands. A file that isn't yours (a repo's, a download) lists them and asks first, and asks again whenever the file changes. Built-in workspaces, your workspaces folder and files you saved open straight away. From the command line, `--yes` agrees.
+- **Agents** can build workspaces for you: ask yours to "make a workspace for this repo". The `kibann-workspaces` skill tells it how.
 
-`kibann watch SECS -- CMD...` reruns a command every few seconds, like `watch`, and works on macOS and Windows too. The built-in layouts use it for disks, ports and `git status`.
+`kibann watch SECS -- CMD...` reruns a command every few seconds, like `watch`, and works on macOS and Windows too. The built-in workspaces use it for disks, ports and `git status`.
+
+### Screens
+
+A screen is the whole window: where the terminals go and what's around them. Kibann's own window is the `default` screen. Pick another with View → Screen… (each one shows as you move through the list; Enter keeps it), or step through them with Cmd+Shift+L and Cmd+Shift+K. Ctrl+Alt+Shift+Esc goes back to the default.
+
+- **Built in:**
+  - **`default`:** the sidebar, the tabs and the terminals.
+  - **`board`:** every pane as a card with a live picture of it, its agent and how long it's been working or waiting, its repository, branch and changes. Waiting agents come first. Click a card to show its pane beside the cards.
+  - **`focus`:** one terminal filling the window and a thin status line. Your agents slide in from the left edge.
+  - **`departures`:** your agents on a split-flap departures board above the terminals. Boarding, landed, and "see agent" when one waits for you.
+- **Your own:** ask your agent ("make me a screen with my PRs beside the terminals"). The `kibann-screens` skill tells it how. A screen is a folder in `~/.config/kibann/screens/` with a `screen.json`: rows, columns and stacks of blocks, which show the terminals, Kibann's sidebar or tab bar, or a part. Edits show as soon as they're saved, and a mistake keeps the last good one on screen with a notice naming its line.
+- **Parts** are web pages (HTML, CSS, JavaScript) in `~/.config/kibann/parts/`. They get the window's tabs, panes, agents and git live, follow the theme's colors, and can focus panes, open tabs and switch screens.
+- **Safety:** a part runs sandboxed. It can't reach the app, your files or the network. To see your terminals, type into them, run programs (by name) or connect to hosts (by name), its `part.json` has to ask, and Kibann asks you first, and again whenever the list changes. Parts that come with Kibann ask nothing.
+- **Commands:** `kibann screen list`, `screen check NAME`, `screen use NAME`, `screen new NAME --from board` (a copy to edit), `screen part NAME` (a page to start from), `screen parts` and `screen api` (what a part's page can use).
+- **Sharing:** screens and parts are folders, so a git repo of them shares them. Tell your agent "add this screen: URL"; it reads every file, says what each part asks for, and copies them in.
 
 ### Agent status at a glance
 
@@ -259,6 +275,7 @@ agent-notifications = true   # notify when an agent waits or finishes
 restore-layout = true        # bring tabs and splits back after a reboot
 menu-bar-icon = true         # macOS: keep running in the menu bar when the window closes
 sidebar-preview = true       # hovering a pane in the sidebar shows it
+screen = board               # what the window shows (see Screens)
 ```
 
 ### Themes
@@ -306,7 +323,8 @@ keybind = clear                    # drop every default first
 - **Panes and splits:** `close_surface`, `new_split:right|down`, `goto_split:previous|next|left|right|up|down`, `resize_split:left|right|up|down`, `equalize_splits`, `toggle_split_zoom`.
 - **Font size:** `increase_font_size`, `decrease_font_size`, `reset_font_size`.
 - **Find:** `start_search`, `navigate_search:next|previous`.
-- **Kibann's own:** `toggle_sidebar`, `show_shortcuts`, `open_theme_picker`, `open_settings`, `open_layout`, `save_layout`.
+- **Kibann's own:** `toggle_sidebar`, `show_shortcuts`, `open_theme_picker`, `open_settings`, `open_workspace`, `save_workspace`.
+- **Screens:** `open_screen_picker`, `next_screen`, `previous_screen`, `reset_screen`.
 - **Removing a binding:** `unbind`.
 
 Key sequences (`a>b`) and `global:` bindings aren't supported.

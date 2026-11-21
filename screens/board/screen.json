@@ -1,0 +1,27 @@
+{
+  "about": "Every pane as a card with a live picture, waiting agents first, beside the terminals",
+  "chrome": { "background": "var(--k-sidebar)" },
+  "root": {
+    "type": "row",
+    "style": { "gap": "6px", "padding": "6px" },
+    "children": [
+      {
+        "type": "block",
+        "id": "board",
+        "size": { "px": 460 },
+        "min": 240,
+        "max": 1200,
+        "resizable": true,
+        "content": { "part": "board" }
+      },
+      {
+        "type": "column",
+        "style": { "border-radius": "8px", "border": "1px solid var(--k-edge)" },
+        "children": [
+          { "type": "block", "size": "auto", "content": { "part": "tabs" } },
+          { "type": "block", "content": { "tab": "active" } }
+        ]
+      }
+    ]
+  }
+}

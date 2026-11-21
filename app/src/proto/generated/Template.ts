@@ -2,7 +2,7 @@
 import type { TabTemplate } from "./TabTemplate";
 
 /**
- * A layout file, ready to open.
+ * A workspace file, ready to open.
  */
 export type Template = { name?: string, tabs: Array<TabTemplate>, 
 /**

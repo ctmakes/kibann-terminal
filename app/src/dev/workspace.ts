@@ -12,10 +12,12 @@ import { ReplayTransport } from "../transport/replay";
 import { FakeBackend } from "../workspace/backend";
 import { Workspace } from "../workspace/workspace";
 import { KIBANN_DARK, type ThemeApi } from "../workspace/theme";
-import type { LayoutApi } from "../workspace/layouts";
+import type { WorkspaceApi } from "../workspace/workspaces";
 import type { Settings, Theme } from "../proto";
 import type { ConfigInfo, SettingsApi, UpdateStatus } from "../workspace/settings";
-import { Screen } from "./screen";
+import { Screen as FakeScreen } from "./screen";
+import type { ScreenApi } from "../screen/picker";
+import type { Screen, ScreenNode, ScreenNow } from "../proto";
 
 const params = Object.fromEntries(new URLSearchParams(location.search));
 const root = document.getElementById("ws")!;
@@ -35,7 +37,7 @@ function transport(n: number): ReplayTransport {
   const from = backend.origin.get(n) ?? 0;
   const t = new ReplayTransport({
     build: (cols, rows) => {
-      const s = new Screen(cols, rows);
+      const s = new FakeScreen(cols, rows);
       s.write(0, 0, `pane ${n}${from ? ` from ${from}` : ""}`);
       s.write(0, 1, `${cols}x${rows}`);
       if (params.links) {
@@ -103,6 +105,7 @@ const DEFAULTS: Settings = {
   restore_layout: true,
   menu_bar_icon: true,
   sidebar_preview: true,
+  screen: "default",
 };
 let current: Settings = { ...DEFAULTS };
 const saved: Array<[string, string[]]> = [];
@@ -155,20 +158,20 @@ const settingsApi: SettingsApi = {
   openUrl: (url) => void opened.push(url),
 };
 
-// Layouts, as the app would list them; opening one sends the daemon's
+// Workspaces, as the app would list them; opening one sends the daemon's
 // action with a made-up template, and saving records the name.
-const layoutCalls: string[] = [];
-const layoutsApi: LayoutApi = {
+const workspaceCalls: string[] = [];
+const workspacesApi: WorkspaceApi = {
   list: async () => [
-    { name: "myapp", origin: "project", path: "/src/myapp/.kibann/layout.toml", about: "The app and its API." },
+    { name: "myapp", origin: "project", path: "/src/myapp/.kibann/workspace.toml", about: "The app and its API." },
     { name: "system", origin: "builtin", about: "What the machine is doing." },
     { name: "agents", origin: "builtin", about: "Two agents side by side." },
   ],
   open: async (entry) => {
-    layoutCalls.push(`open ${entry.name}`);
+    workspaceCalls.push(`open ${entry.name}`);
     const leaf = { kind: "leaf" as const, cwd: "/src/myapp" };
     await backend.act({
-      t: "open_layout",
+      t: "open_workspace",
       template: {
         name: entry.name,
         tabs: [
@@ -184,16 +187,76 @@ const layoutsApi: LayoutApi = {
     return true;
   },
   save: async (name, force) => {
-    layoutCalls.push(`save ${name}${force ? " force" : ""}`);
-    if (name === "system" && !force) throw new Error("/x/layouts/system.toml exists");
-    return `/x/layouts/${name}.toml`;
+    workspaceCalls.push(`save ${name}${force ? " force" : ""}`);
+    if (name === "system" && !force) throw new Error("/x/workspaces/system.toml exists");
+    return `/x/workspaces/${name}.toml`;
+  },
+};
+
+// Screens: the repo's (and the e2e tests' fixtures), served by the Vite
+// plugin in vite.config.ts as the app's kpart:// serves them. `screen=NAME`
+// starts with one; `deny=1` gives parts none of their permissions.
+let screenName = params.screen ?? "default";
+/** Programs parts ran, as "part: program args". */
+const execs: string[] = [];
+/** serde's defaults, which the app's backend fills in. */
+function node(n: any): ScreenNode {
+  return {
+    ...n,
+    resizable: n.resizable ?? false,
+    hidden: n.hidden ?? false,
+    style: n.style ?? {},
+    children: (n.children ?? []).map(node),
+  };
+}
+async function loadScreen(name: string): Promise<ScreenNow> {
+  const r = await fetch(`/kscreens/${name}`);
+  if (!r.ok) throw new Error(`no screen named ${name}`);
+  const raw = await r.json();
+  const screen: Screen = {
+    about: raw.about,
+    chrome: { colors: {}, ...(raw.chrome ?? {}) },
+    root: node(raw.root),
+    floating: (raw.floating ?? []).map((f: any) => ({ align: "center", peek: 0, open: false, style: {}, ...f })),
+  };
+  const names = new Set<string>();
+  const walk = (n: ScreenNode) => {
+    if (n.content?.part) names.add(n.content.part);
+    n.children.forEach(walk);
+  };
+  walk(screen.root);
+  for (const f of screen.floating) if (f.content.part) names.add(f.content.part);
+  names.delete("sidebar");
+  names.delete("tabs");
+  const parts: ScreenNow["parts"] = {};
+  for (const p of names) {
+    const m = await (await fetch(`/kpart/${p}/part.json`)).json();
+    const permissions = { read: false, type: false, exec: [], net: [], ...(m.permissions ?? {}) };
+    const manifest = { about: m.about, focusable: m.focusable ?? false, permissions };
+    const granted = params.deny ? { read: false, type: false, exec: [], net: [] } : permissions;
+    parts[p] = { url: `/kpart/${p}/index.html`, manifest, granted };
+  }
+  return { name, screen, parts, problem: "" };
+}
+const screensApi: ScreenApi = {
+  current: () => loadScreen(screenName),
+  list: async () => (await fetch("/kscreens/")).json(),
+  load: loadScreen,
+  choose: async (name) => {
+    screenName = name;
+    ws.useScreen(await loadScreen(name));
+  },
+  exec: async (part, program, args) => {
+    execs.push(`${part}: ${[program, ...args].join(" ")}`);
+    return { code: 0, stdout: `${program} ran\n`, stderr: "" };
   },
 };
 
 const ws = new Workspace(root, {
   settings: settingsApi,
   themes,
-  layouts: layoutsApi,
+  workspaces: workspacesApi,
+  screens: screensApi,
   firstRunHint: params.hint === "1",
   backend,
   transport,
@@ -222,9 +285,12 @@ const diffs: number[] = [];
 // `saved`: a layout from `__ws.snapshot()`, as if the daemon kept it.
 if (params.saved) ws.apply(backend.layout);
 else void backend.act({ t: "new_tab", focus: true });
+if (screenName !== "default") void screensApi.current().then((now) => ws.useScreen(now));
 
 const api = {
   ws,
+  execs,
+  screensApi,
   transports,
   inputs,
   opened,
@@ -240,8 +306,8 @@ const api = {
   diffs,
   previews,
   notes,
-  /** What the layout picker asked the app for. */
-  layoutCalls,
+  /** What the workspace picker asked the app for. */
+  workspaceCalls,
   /** A notice with a button (as "update ready"); `clicked` counts uses. */
   clicked: 0,
   noticeWithButton(text: string, label: string) {

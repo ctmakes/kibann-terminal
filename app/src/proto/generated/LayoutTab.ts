@@ -7,7 +7,7 @@ export type LayoutTab = { id: number, tree: Tree, focused: number,
  */
 zoomed: number | null, 
 /**
- * A name given to the tab (by a layout file); the tab bar shows it in
+ * A name given to the tab (by a workspace file); the tab bar shows it in
  * place of the focused pane's title.
  */
 title?: string, };

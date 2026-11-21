@@ -1,12 +1,12 @@
 ---
-name: kibann-layouts
-description: Build, save and open Kibann terminal layout files (tabs and splits with a directory and a command per pane). Use when $KIBANN_PANE is set and the user asks to set up a workspace or layout ("make a layout for this repo", "set up Claude on the left and the dev server on the right", "save this setup"), or to change or open one.
+name: kibann-workspaces
+description: Build, save and open Kibann terminal workspace files (tabs and splits with a directory and a command per pane). Use when $KIBANN_PANE is set and the user asks to set up a workspace or workspace ("make a workspace for this repo", "set up Claude on the left and the dev server on the right", "save this setup"), or to change or open one.
 ---
 
-# Kibann layout files
+# Kibann workspace files
 
-A layout file describes tabs and splits, with a directory and a command
-for each pane. `kibann layout open` opens it next to the user's tabs.
+A workspace file describes tabs and splits, with a directory and a command
+for each pane. `kibann workspace open` opens it next to the user's tabs.
 You're in Kibann when `$KIBANN_PANE` is set.
 
 ## Rules
@@ -15,21 +15,21 @@ You're in Kibann when `$KIBANN_PANE` is set.
   scripts, `Makefile`, `justfile`, `Cargo.toml`, `Procfile`,
   `docker-compose.yml`, the README). Don't guess `npm run dev`.
 - **Where to write it:**
-  - `.kibann/layout.toml` in the repo when it's for the project. Others
+  - `.kibann/workspace.toml` in the repo when it's for the project. Others
     may get it, so keep it free of anything personal.
-  - `~/.config/kibann/layouts/NAME.toml` when it's the user's own.
-  - Ask when it's unclear. Never overwrite an existing layout without
+  - `~/.config/kibann/workspaces/NAME.toml` when it's the user's own.
+  - Ask when it's unclear. Never overwrite an existing workspace without
     asking.
 - **Keep it small.** Two to four panes a tab, and few tabs. Ask before
   going past six panes.
-- **Check after every edit:** `kibann layout check FILE`. Fix what it
+- **Check after every edit:** `kibann workspace check FILE`. Fix what it
   reports; each problem names its line and column.
 - **Open only when the user asks.** Opening runs the commands. Before
-  `--yes`, show the user the commands `layout check` lists under `runs`
+  `--yes`, show the user the commands `workspace check` lists under `runs`
   and get their go-ahead. A file in a repo isn't trusted until they agree.
-- **No secrets or tokens** in commands, since a project layout gets
-  committed. In a shared layout, use commands that work in any shell.
-- **"Save this setup"** means `kibann layout save NAME`, not writing the
+- **No secrets or tokens** in commands, since a project workspace gets
+  committed. In a shared workspace, use commands that work in any shell.
+- **"Save this setup"** means `kibann workspace save NAME`, not writing the
   file by hand. Tidy what it writes afterwards if asked (titles,
   relative paths).
 
@@ -69,13 +69,13 @@ command = ["lazygit", "tig", "git log --oneline --graph"]
   - `size`: percent of the split, 5 to 95. Panes without one share the
     rest equally.
   - `focus = true`: the pane focused in its tab.
-- **Paths:** in `.kibann/layout.toml`, relative paths start at the
+- **Paths:** in `.kibann/workspace.toml`, relative paths start at the
   project's root, wherever it's cloned. In other files they start where
-  the layout is opened. `root = "path"` at the top sets the start
+  the workspace is opened. `root = "path"` at the top sets the start
   explicitly, relative to the file.
 - **Limits:** 16 tabs and 32 panes. Unknown keys are errors.
 
-A project layout for a web app with an API:
+A project workspace for a web app with an API:
 
 ```toml
 [[tab]]
@@ -97,21 +97,21 @@ panes = [
 ## Commands
 
 ```sh
-kibann layout list                 # {"layouts":[{"name","origin","path","about"}]}
+kibann workspace list                 # {"workspaces":[{"name","origin","path","about"}]}
                                    # origin: project, user, builtin
-kibann layout check [NAME|FILE]    # {"name","panes","runs":[{"cwd","run"}],"asks",...}
+kibann workspace check [NAME|FILE]    # {"name","panes","runs":[{"cwd","run"}],"asks",...}
                                    # or error "invalid" with every problem
-kibann layout open [NAME|FILE] [--yes]
-                                   # no NAME: the project's .kibann/layout.toml
-kibann layout save NAME [--tab t2] [--force]
-                                   # the window (or one tab) to the user's layouts
-kibann layout save --to .kibann/layout.toml [--force]
+kibann workspace open [NAME|FILE] [--yes]
+                                   # no NAME: the project's .kibann/workspace.toml
+kibann workspace save NAME [--tab t2] [--force]
+                                   # the window (or one tab) to the user's workspaces
+kibann workspace save --to .kibann/workspace.toml [--force]
                                    # the project's; directories relative to it
-kibann layout save NAME --from system
-                                   # copy a built-in layout to edit
+kibann workspace save NAME --from system
+                                   # copy a built-in workspace to edit
 ```
 
 `open` fails with code `untrusted` when the file runs commands the user
 hasn't agreed to; show them the `runs` list and pass `--yes` once they
-say so. Built-in layouts: `system` (CPU, GPU, disks), `ports` (what's
+say so. Built-in workspaces: `system` (CPU, GPU, disks), `ports` (what's
 listening), `agents`, `agents-4` and `review`.

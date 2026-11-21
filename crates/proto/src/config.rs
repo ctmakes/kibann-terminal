@@ -9,6 +9,7 @@
 //! keybind = super+shift+d=new_split:down   # repeated; see app/src/workspace/keybinds.ts
 //! restore-layout = false
 //! sidebar-preview = false
+//! screen = board
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,22 @@ pub struct Settings {
     pub menu_bar_icon: bool,
     /// Hovering a pane's row in the sidebar shows the pane beside it.
     pub sidebar_preview: bool,
+    /// The screen the window shows (`screens/NAME/`).
+    pub screen: String,
+}
+
+/// The screen shown when the config names none.
+pub const DEFAULT_SCREEN: &str = "default";
+
+/// Whether `name` can name a screen or a part: lowercase letters, digits
+/// and dashes, starting with a letter or digit.
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 48
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 impl Default for Settings {
@@ -53,6 +70,7 @@ impl Default for Settings {
             restore_layout: true,
             menu_bar_icon: true,
             sidebar_preview: true,
+            screen: DEFAULT_SCREEN.to_owned(),
         }
     }
 }
@@ -114,6 +132,8 @@ impl Settings {
                     "false" => s.sidebar_preview = false,
                     _ => errors.push(bad("sidebar-preview (true or false)")),
                 },
+                "screen" if valid_name(v) => s.screen = v.to_owned(),
+                "screen" => errors.push(bad("screen (a name: lowercase letters, digits, dashes)")),
                 _ => {}
             }
         }
@@ -128,6 +148,7 @@ pub const SETTABLE: &[&str] = &[
     "menu-bar-icon",
     "restore-layout",
     "sidebar-preview",
+    "screen",
     "font-family",
     "font-size",
 ];

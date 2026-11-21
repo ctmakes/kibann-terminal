@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--k-bar); color: var(--k-label);
+    font: 11.5px var(--k-mono, ui-monospace), monospace;
+    display: flex; align-items: stretch; user-select: none; -webkit-user-select: none;
+    border-top: 1px solid var(--k-edge);
+  }
+  .seg { display: flex; align-items: center; gap: 6px; padding: 0 10px; white-space: nowrap; min-width: 0; }
+  .seg + .seg { border-left: 1px solid var(--k-edge); }
+  .grow { flex: 1; overflow: hidden; }
+  .title { color: var(--k-strong); overflow: hidden; text-overflow: ellipsis; }
+  .branch { color: var(--k-text); }
+  .changed { color: var(--k-changed); }
+  .tab { color: var(--k-muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .blocked { background: var(--k-blocked); } .working { background: var(--k-working); } .done { background: var(--k-done); }
+  .waiting { color: var(--k-blocked); cursor: pointer; font-weight: 600; }
+  .waiting:hover { text-decoration: underline; }
+  .muted { color: var(--k-muted); }
+</style>
+</head>
+<body>
+  <div class="seg tab" id="tab"></div>
+  <div class="seg grow"><span class="title" id="title"></span></div>
+  <div class="seg" id="git"></div>
+  <div class="seg" id="agents"></div>
+  <div class="seg muted" id="clock"></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let state = null;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  function render(s) {
+    state = s;
+    const tabIndex = s.tabs.findIndex((t) => t.active);
+    const tab = s.tabs[tabIndex];
+    const p = s.panes.find((x) => x.id === s.focused);
+    $("tab").textContent = tab ? `${tabIndex + 1}/${s.tabs.length} · ${tab.panes.indexOf(s.focused) + 1}/${tab.panes.length}` : "";
+    $("title").textContent = p ? (p.agent ? `${p.agent} · ${p.title}` : p.title || "shell") : "";
+    $("git").innerHTML = p
+      ? p.repo
+        ? `<span>${esc(p.repo)}</span><span class="branch">${esc(p.branch ?? "")}</span>${p.changed ? `<span class="changed">●${p.changed}</span>` : ""}${p.ahead ? `<span class="muted">↑${p.ahead}</span>` : ""}${p.behind ? `<span class="muted">↓${p.behind}</span>` : ""}`
+        : `<span class="muted">${esc(p.cwd)}</span>`
+      : "";
+    const n = { blocked: 0, working: 0, done: 0 };
+    for (const x of s.panes) if (x.state in n) n[x.state]++;
+    const parts = [];
+    if (n.blocked) parts.push(`<span class="waiting" id="wait"><span class="dot blocked"></span> ${n.blocked} waiting</span>`);
+    if (n.working) parts.push(`<span><span class="dot working"></span> ${n.working}</span>`);
+    if (n.done) parts.push(`<span><span class="dot done"></span> ${n.done}</span>`);
+    $("agents").innerHTML = parts.join("") || `<span class="muted">no agents busy</span>`;
+    $("agents").style.gap = "10px";
+    $("wait")?.addEventListener("click", () => {
+      const w = s.panes.find((x) => x.state === "blocked");
+      if (w) kibann.run("pane.focus", { pane: w.id });
+    });
+  }
+
+  function tick() {
+    const d = new Date();
+    $("clock").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  kibann.on("state", render);
+  tick();
+  setInterval(tick, 5000);
+</script>
+</body>
+</html>

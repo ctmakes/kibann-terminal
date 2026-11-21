@@ -1,0 +1,11 @@
+{
+  "about": "The e2e tests' screen: a probe part, a list, the terminals",
+  "root": {
+    "type": "column",
+    "children": [
+      { "type": "block", "id": "probe", "size": { "px": 90 }, "content": { "part": "probe", "props": { "hello": "world" } } },
+      { "type": "block", "id": "extra", "size": { "px": 60 }, "content": { "part": "agents" } },
+      { "type": "block", "content": { "tab": "active" } }
+    ]
+  }
+}

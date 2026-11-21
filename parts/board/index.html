@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --gap: 8px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--k-sidebar); color: var(--k-text);
+    font: 12px var(--k-font, system-ui), sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  header {
+    flex: none; display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px 8px; color: var(--k-label);
+  }
+  header h1 { margin: 0; font-size: 13px; font-weight: 600; color: var(--k-title); letter-spacing: .02em; }
+  .counts { display: flex; gap: 10px; flex: 1; }
+  .count { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+  .count[data-n="0"] { opacity: .45; }
+  button.new {
+    border: 1px solid var(--k-divider); background: var(--k-panel); color: var(--k-strong);
+    border-radius: 6px; padding: 3px 9px; font: inherit; cursor: default;
+  }
+  button.new:hover { background: var(--k-tab); }
+  main {
+    flex: 1; overflow: auto; padding: 2px 12px 12px;
+    display: grid; gap: var(--gap); align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  }
+  .card {
+    position: relative; border-radius: 9px; overflow: hidden;
+    background: var(--k-panel); border: 1px solid var(--k-edge);
+    display: flex; flex-direction: column; cursor: default;
+    transition: border-color .15s, transform .15s, box-shadow .15s;
+  }
+  .card:hover { border-color: var(--k-divider); transform: translateY(-1px); box-shadow: 0 6px 18px var(--k-shadow, #0006); }
+  .card.focused { border-color: var(--k-bright); }
+  .card.blocked { border-color: var(--k-blocked); box-shadow: 0 0 0 1px var(--k-blocked) inset; }
+  .card.blocked .bar { background: color-mix(in srgb, var(--k-blocked) 18%, var(--k-panel)); }
+  .pic { position: relative; aspect-ratio: 16 / 9; background: var(--pane-bg, #000); overflow: hidden; }
+  .pic canvas { position: absolute; inset: 8px 10px; width: calc(100% - 20px); height: calc(100% - 16px); }
+  .shown {
+    font-size: 10px; padding: 0 5px; border-radius: 4px; flex: none; display: none;
+    color: var(--k-muted); border: 1px solid var(--k-divider);
+  }
+  .card.on .shown { display: block; }
+  .bar { padding: 7px 9px 8px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .title { color: var(--k-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .where { color: var(--k-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .changed { color: var(--k-changed); font-variant-numeric: tabular-nums; }
+  .state { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--k-divider); }
+  .working { --c: var(--k-working); } .blocked { --c: var(--k-blocked); } .done { --c: var(--k-done); } .idle { --c: var(--k-muted); }
+  .dot.working, .dot.blocked, .dot.done, .dot.idle { background: var(--c); }
+  .state.working, .state.blocked, .state.done { color: var(--c); }
+  .state.idle { color: var(--k-muted); }
+  .dot.working { animation: pulse 1.4s ease-in-out infinite; }
+  .dot.blocked { animation: pulse .9s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .empty { grid-column: 1 / -1; color: var(--k-muted); text-align: center; padding: 40px 0; }
+  .group { grid-column: 1 / -1; color: var(--k-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Board</h1>
+  <div class="counts">
+    <span class="count" id="n-blocked" title="Waiting for you"><span class="dot blocked"></span><b>0</b> waiting</span>
+    <span class="count" id="n-working" title="Working"><span class="dot working"></span><b>0</b> working</span>
+    <span class="count" id="n-done" title="Finished"><span class="dot done"></span><b>0</b> done</span>
+  </div>
+  <button class="new" id="new" title="A new tab">+ Tab</button>
+</header>
+<main id="cards"></main>
+<script>
+  const RANK = { blocked: 0, done: 1, working: 2, idle: 3 };
+  const WORD = { blocked: "waiting", done: "done", working: "working", idle: "idle" };
+  const cards = new Map(); // pane id -> { el, canvas, ... }
+  const main = document.getElementById("cards");
+  let state = null;
+  let visible = true;
+
+  const ago = (t) => {
+    if (!t) return "";
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+
+  function card(p) {
+    let c = cards.get(p.id);
+    if (c) return c;
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = `<div class="pic"><canvas></canvas></div>
+      <div class="bar"><div class="line"><span class="dot"></span><span class="title"></span><span class="shown">on screen</span><span class="state"></span></div>
+      <div class="line"><span class="where"></span><span class="changed"></span></div></div>`;
+    el.addEventListener("click", () => kibann.run("pane.focus", { pane: p.id }));
+    el.addEventListener("dblclick", () => kibann.run("pane.zoom", { pane: p.id }));
+    c = {
+      el,
+      canvas: el.querySelector("canvas"),
+      pic: el.querySelector(".pic"),
+      dot: el.querySelector(".dot"),
+      title: el.querySelector(".title"),
+      state: el.querySelector(".state"),
+      where: el.querySelector(".where"),
+      changed: el.querySelector(".changed"),
+      pane: p,
+      seen: false,
+    };
+    cards.set(p.id, c);
+    io.observe(el);
+    return c;
+  }
+
+  // Only cards in view get their pictures redrawn.
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      for (const c of cards.values()) if (c.el === e.target) c.seen = e.isIntersecting;
+    }
+  });
+
+  function render(s) {
+    state = s;
+    const ids = new Set(s.panes.map((p) => p.id));
+    for (const [id, c] of cards) if (!ids.has(id)) { io.unobserve(c.el); c.el.remove(); cards.delete(id); }
+    const order = [...s.panes].sort((a, b) => (RANK[a.state] ?? 4) - (RANK[b.state] ?? 4));
+    const counts = { blocked: 0, working: 0, done: 0 };
+    for (const p of s.panes) if (p.state in counts) counts[p.state]++;
+    for (const k of Object.keys(counts)) {
+      const el = document.getElementById(`n-${k}`);
+      el.dataset.n = counts[k];
+      el.querySelector("b").textContent = counts[k];
+    }
+    if (order.length === 0) {
+      main.innerHTML = `<div class="empty">No panes</div>`;
+      return;
+    }
+    main.querySelector(".empty")?.remove();
+    order.forEach((p, i) => {
+      const c = card(p);
+      c.pane = p;
+      const st = p.state || "";
+      c.el.className = `card ${st} ${p.id === s.focused ? "focused" : ""} ${p.shown ? "on" : ""}`;
+      c.pic.style.setProperty("--pane-bg", p.bg);
+      c.dot.className = `dot ${st}`;
+      c.dot.style.display = st ? "" : "none";
+      c.title.textContent = p.agent ? `${p.agent} · ${p.title}` : p.title || "shell";
+      c.title.title = p.title;
+      c.state.className = `state ${st}`;
+      c.state.textContent = st ? `${WORD[st]} ${st === "idle" ? "" : ago(p.since)}`.trim() : "";
+      c.where.textContent = p.repo ? `${p.repo}${p.branch ? " · " + p.branch : ""}` : p.cwd;
+      c.changed.textContent = p.changed ? `●${p.changed}` : "";
+      if (main.children[i] !== c.el) main.insertBefore(c.el, main.children[i] || null);
+    });
+  }
+
+  async function paint() {
+    if (!state || !visible || !kibann.granted?.read) return;
+    for (const c of cards.values()) {
+      if (c.seen) await kibann.drawPane(c.canvas, c.pane.id).catch(() => {});
+    }
+  }
+
+  kibann.on("state", render);
+  kibann.on("show", (on) => { visible = on; });
+  document.getElementById("new").addEventListener("click", () => kibann.run("tab.new"));
+  // Times tick, pictures refresh.
+  setInterval(() => state && render(state), 1000);
+  (async function loop() {
+    await kibann.ready;
+    for (;;) {
+      await paint();
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  })();
+</script>
+</body>
+</html>
