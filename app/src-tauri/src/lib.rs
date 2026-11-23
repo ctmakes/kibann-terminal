@@ -8,7 +8,6 @@
 mod fonts;
 mod notify;
 mod open;
-#[cfg(unix)]
 mod screens;
 mod service;
 mod theme;
