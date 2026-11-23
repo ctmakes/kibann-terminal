@@ -16,6 +16,6 @@ members = [
 
 [workspace.package]
 # The app's version, for every crate: scripts/bump-version.sh sets it.
-version = "0.8.2"
+version = "0.8.3"
 edition = "2024"
 license = "MIT"

@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.8.3] - Unreleased
+## [0.8.3] - 2026-11-23
 
 - Panes measure the terminal font, not its fallback, when the app starts
   with its fonts not yet cached: rows could come out shorter than the font
