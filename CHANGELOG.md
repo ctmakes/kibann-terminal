@@ -5,7 +5,7 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
-## [0.8.0] - Unreleased
+## [0.8.0] - 2026-11-23
 
 - If the terminal service stops (it crashed, or something ended it), the
   window starts a new one and reopens your saved tabs and splits, instead
