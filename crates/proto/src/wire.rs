@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use crate::git::{Diff, GitInfo, PaneDir};
 use crate::layout::{Action, Layout, PaneId, TabId};
 use crate::status::{AgentState, PaneStatus};
-use crate::{Frame, InputEvent, Resize};
+use crate::{Frame, InputEvent, ReadSource, Resize};
 
 /// Bumped whenever a message is added or changes shape. A client and daemon
 /// with different versions can't talk, except for [`ClientMsg::Hello`], its
@@ -77,7 +77,7 @@ pub enum ClientMsg {
         lines: Option<u32>,
     },
     /// Whether the pane's program ended, and whether `mark` was printed
-    /// there (see [`MARK_OSC`]). Replied with [`Reply::Status`].
+    /// there (see [`crate::MARK_OSC`]). Replied with [`Reply::Status`].
     Status {
         req: ReqId,
         pane: PaneId,
@@ -174,22 +174,6 @@ impl ClientMsg {
         }
     }
 }
-
-/// What [`ClientMsg::Read`] returns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export)]
-pub enum ReadSource {
-    /// The screen as the program drew it, row by row.
-    Visible,
-    /// Scrollback and screen, with lines that wrapped joined again.
-    Recent,
-}
-
-/// An OSC number nothing else uses. `ESC ] 7770 ; <mark> ; <code> BEL` in a
-/// pane's output records `mark` with exit code `code`, for
-/// [`ClientMsg::Status`]; the emulator ignores it, so nothing shows.
-pub const MARK_OSC: u32 = 7770;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

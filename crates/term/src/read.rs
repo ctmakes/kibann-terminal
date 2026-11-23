@@ -2,7 +2,7 @@
 //! command prints when it finishes (`kibann pane run --wait`).
 
 use proto::Resize;
-use proto::wire::{MARK_OSC, ReadSource};
+use proto::{MARK_OSC, ReadSource};
 
 use crate::vt::Terminal;
 use crate::vt::error::Result;

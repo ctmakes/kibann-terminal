@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 
 use client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
+use proto::ReadSource;
 use proto::git::PaneDir;
 use proto::layout::PaneId;
 use proto::layout::{Action, Dir, Layout};
 use proto::status::{AgentState, PaneStatus};
-use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply};
+use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, Reply};
 use proto::{Frame, InputEvent, Resize, TextScreen};
 
 const SIZE: Resize = Resize {

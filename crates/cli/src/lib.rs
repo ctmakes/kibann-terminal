@@ -12,9 +12,10 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use proto::ReadSource;
 use proto::layout::{Action, Dir, Layout, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
-use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply};
+use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
@@ -768,11 +769,11 @@ fn timed_out(what: &str, timeout: Duration) -> Fail {
 }
 
 /// What to type after a command so the shell prints `mark` and the
-/// command's exit code when it finishes ([`proto::wire::MARK_OSC`]), in the
+/// command's exit code when it finishes ([`proto::MARK_OSC`]), in the
 /// language of `shell` (a POSIX shell unless it's fish or PowerShell).
 /// `None` for cmd, which can't print the escape.
 fn mark_suffix(shell: Option<&str>, mark: &str) -> Option<String> {
-    let osc = proto::wire::MARK_OSC;
+    let osc = proto::MARK_OSC;
     let name = shell
         .map(|s| {
             s.rsplit(['/', '\\'])

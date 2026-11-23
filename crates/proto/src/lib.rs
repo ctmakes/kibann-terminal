@@ -215,6 +215,22 @@ pub struct Row {
     pub runs: Vec<Run>,
 }
 
+/// Which text a read of a pane returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReadSource {
+    /// The screen as the program drew it, row by row.
+    Visible,
+    /// Scrollback and screen, with lines that wrapped joined again.
+    Recent,
+}
+
+/// An OSC number nothing else uses. `ESC ] 7770 ; <mark> ; <code> BEL` in a
+/// pane's output records `mark` with exit code `code`, for
+/// [`wire::ClientMsg::Status`]; the emulator ignores it, so nothing shows.
+pub const MARK_OSC: u32 = 7770;
+
 impl Row {
     /// The row as text: a space for each blank cell, nothing for a wide
     /// character's tail, trailing blanks dropped.

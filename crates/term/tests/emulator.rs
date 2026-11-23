@@ -842,13 +842,13 @@ fn hovering_never_reaches_the_program() {
 
 // ---- reading text for agents ----
 
-fn read(e: &Emulator, source: proto::wire::ReadSource, lines: Option<usize>) -> String {
+fn read(e: &Emulator, source: proto::ReadSource, lines: Option<usize>) -> String {
     term::read::text(e.terminal(), e.size(), source, lines).unwrap()
 }
 
 #[test]
 fn reading_the_screen_and_the_scrollback() {
-    use proto::wire::ReadSource::{Recent, Visible};
+    use proto::ReadSource::{Recent, Visible};
     let mut e = emu();
     for i in 1..=8 {
         e.write(format!("line {i}\r\n").as_bytes());
@@ -875,7 +875,7 @@ fn reading_the_screen_and_the_scrollback() {
 
 #[test]
 fn reading_a_mostly_empty_screen() {
-    use proto::wire::ReadSource::{Recent, Visible};
+    use proto::ReadSource::{Recent, Visible};
     let mut e = emu();
     e.write(b"$ ");
     assert_eq!(read(&e, Visible, None), "$");

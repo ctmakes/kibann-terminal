@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{self as channel, Receiver};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use proto::wire::ReadSource;
+use proto::ReadSource;
 use proto::{Frame, InputEvent, MouseAction, Resize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -564,13 +564,9 @@ impl Pty {
             agent::identify(&name, argv.as_deref().unwrap_or_default())
         });
         let agent = agent.map(|a| {
-            let text = crate::read::text(
-                emu.terminal(),
-                emu.size(),
-                proto::wire::ReadSource::Visible,
-                None,
-            )
-            .unwrap_or_default();
+            let text =
+                crate::read::text(emu.terminal(), emu.size(), proto::ReadSource::Visible, None)
+                    .unwrap_or_default();
             let lines: Vec<&str> = text.lines().collect();
             (a, agent::detect(a, &emu.title(), &lines))
         });

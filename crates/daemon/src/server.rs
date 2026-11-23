@@ -1283,7 +1283,7 @@ impl Daemon {
 fn type_when_ready(session: &Session, cmd: &str) {
     let deadline = Instant::now() + Duration::from_secs(3);
     while session
-        .read(proto::wire::ReadSource::Visible, None)
+        .read(proto::ReadSource::Visible, None)
         .is_none_or(|t| t.trim().is_empty())
         && Instant::now() < deadline
     {

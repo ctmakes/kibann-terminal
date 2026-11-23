@@ -420,7 +420,7 @@ fn typing_goes_through_ahead_of_a_flood_of_output() {
         assert!(std::time::Instant::now() < end, "the key never got through");
         std::thread::sleep(Duration::from_millis(1));
     }
-    let screen = h.session.read(proto::wire::ReadSource::Visible, None);
+    let screen = h.session.read(proto::ReadSource::Visible, None);
     assert!(
         !screen.expect("the screen").contains("END"),
         "the key waited for all the output"

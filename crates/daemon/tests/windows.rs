@@ -12,10 +12,11 @@ use std::time::{Duration, Instant};
 use client::Client;
 use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::InputEvent;
+use proto::ReadSource;
 use proto::Resize;
 use proto::layout::Action;
 use proto::layout::PaneId;
-use proto::wire::{ClientMsg, ReadSource, Reply};
+use proto::wire::{ClientMsg, Reply};
 
 fn socket() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
