@@ -542,6 +542,12 @@ fn dev_layout() -> Option<String> {
     std::env::var("KIBANN_LAYOUT").ok()
 }
 
+/// A line for the app's log (stderr) from the page.
+#[tauri::command]
+fn log(message: String) {
+    eprintln!("kibann: {}", message.chars().take(500).collect::<String>());
+}
+
 /// Cmd+click on a link. `target` is a URL or an absolute path; see
 /// [`open::plan`] for what is opened, revealed or ignored.
 #[tauri::command]
@@ -1321,6 +1327,7 @@ pub fn run() {
             screens::screen_choose,
             screens::part_exec,
             app_quit,
+            log,
             open_link,
             dev_layout
         ])

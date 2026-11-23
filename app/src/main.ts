@@ -204,6 +204,15 @@ async function start(): Promise<void> {
 }
 
 if (inTauri()) {
+  // Release builds have a stricter CSP than dev, the harness and the tests
+  // (0.7.0 lost its layout to it): say what it blocks, where it shows.
+  document.addEventListener("securitypolicyviolation", (e) => {
+    const what = e.blockedURI || "inline";
+    const where = e.sourceFile ? ` at ${e.sourceFile}:${e.lineNumber}` : "";
+    const message = `CSP ${e.effectiveDirective} blocked ${what}${where}`;
+    console.error(message);
+    void invoke("log", { message });
+  });
   await start();
 } else {
   el.innerHTML =
