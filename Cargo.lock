@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent"
-version = "0.8.0"
+version = "0.8.1"
 
 [[package]]
 name = "aho-corasick"
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "cli"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "client",
  "daemon",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "endpoint",
  "libc",
@@ -750,7 +750,7 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "daemon"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "agent",
  "client",
@@ -1017,7 +1017,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "endpoint"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "libc",
  "proto",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "files"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "proto",
  "serde",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "git"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ignore",
  "notify",
@@ -2233,7 +2233,7 @@ dependencies = [
 
 [[package]]
 name = "kibann"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "block2",
  "cli",
@@ -3286,7 +3286,7 @@ dependencies = [
 
 [[package]]
 name = "procinfo"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -3294,7 +3294,7 @@ dependencies = [
 
 [[package]]
 name = "proto"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "libc",
  "serde",
@@ -4716,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "term"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "agent",
  "crossbeam-channel",
