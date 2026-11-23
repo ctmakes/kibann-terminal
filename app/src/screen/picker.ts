@@ -2,6 +2,8 @@
 // each one at once; Enter keeps it (the config's `screen`), Esc goes back.
 
 import type { ScreenEntry, ScreenNow } from "../proto";
+import "../ui.css";
+import "./picker.css";
 
 export interface ScreenApi {
   /** The screen the config names, ready to show. When it can't be read,
@@ -21,8 +23,6 @@ export interface ScreenApi {
     timeout: number | null,
   ): Promise<{ code: number | null; stdout: string; stderr: string }>;
 }
-
-const ROW_H = 44;
 
 export class ScreenPicker {
   readonly el: HTMLDivElement;
@@ -49,45 +49,13 @@ export class ScreenPicker {
   ) {
     this.el = document.createElement("div");
     this.el.className = "screen-picker";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      inset: "0",
-      zIndex: "40",
-      display: "none",
-      justifyContent: "center",
-      alignItems: "flex-start",
-      background: "transparent",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-      pointerEvents: "none",
-    });
+    this.el.style.display = "none";
     const panel = document.createElement("div");
-    Object.assign(panel.style, {
-      marginTop: "8vh",
-      width: "min(460px, calc(100% - 32px))",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      borderRadius: "10px",
-      boxShadow: "0 16px 50px var(--k-shadow)",
-      overflow: "hidden",
-      pointerEvents: "auto",
-    });
+    panel.className = "screen-picker-panel";
     this.input = document.createElement("input");
     this.input.className = "screen-picker-input";
     this.input.spellcheck = false;
     this.input.placeholder = "Screens";
-    Object.assign(this.input.style, {
-      display: "block",
-      width: "100%",
-      boxSizing: "border-box",
-      padding: "10px 12px",
-      font: "13px -apple-system, system-ui, sans-serif",
-      color: "var(--k-bright)",
-      background: "transparent",
-      border: "none",
-      borderBottom: "1px solid var(--k-divider)",
-      outline: "none",
-    });
     this.input.addEventListener("input", () => this.filter());
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.input.addEventListener("blur", () => {
@@ -96,15 +64,9 @@ export class ScreenPicker {
     });
     this.list = document.createElement("div");
     this.list.className = "screen-picker-list";
-    Object.assign(this.list.style, { maxHeight: `${ROW_H * 8}px`, overflowY: "auto", padding: "4px 0" });
     const hint = document.createElement("div");
+    hint.className = "screen-picker-hint";
     hint.textContent = "↑↓ to try · Enter to keep · Esc to go back · kibann skill show screens to make one";
-    Object.assign(hint.style, {
-      padding: "6px 12px",
-      color: "var(--k-muted)",
-      borderTop: "1px solid var(--k-divider)",
-      fontSize: "11px",
-    });
     panel.append(this.input, this.list, hint);
     this.el.append(panel);
   }
@@ -149,34 +111,18 @@ export class ScreenPicker {
         const row = document.createElement("div");
         row.className = "screen-picker-row";
         row.dataset.name = s.name;
-        Object.assign(row.style, {
-          height: `${ROW_H}px`,
-          boxSizing: "border-box",
-          padding: "6px 12px",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: "2px",
-          cursor: "default",
-        });
         const top = document.createElement("div");
-        Object.assign(top.style, { display: "flex", gap: "8px", alignItems: "baseline" });
+        top.className = "screen-picker-top";
         const name = document.createElement("span");
+        name.className = "screen-picker-name";
         name.textContent = s.name;
-        Object.assign(name.style, { color: "var(--k-bright)", fontWeight: "600" });
         const origin = document.createElement("span");
+        origin.className = "screen-picker-origin";
         origin.textContent = s.builtin ? "built in" : "yours";
-        Object.assign(origin.style, { color: "var(--k-muted)", fontSize: "11px", marginLeft: "auto" });
         top.append(name, origin);
         const about = document.createElement("div");
+        about.className = "screen-picker-about";
         about.textContent = s.about ?? "";
-        Object.assign(about.style, {
-          color: "var(--k-text)",
-          fontSize: "11px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        });
         row.append(top, about);
         row.addEventListener("mousedown", (e) => {
           e.preventDefault();

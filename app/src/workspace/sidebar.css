@@ -1,0 +1,41 @@
+/* The sidebar and its rail. A file Vite bundles, not a <style> made at
+   run time: the release build's CSP blocks those. */
+.sidebar { position: relative; flex: 0 0 auto; display: block; background: var(--k-sidebar); box-sizing: border-box; color: var(--k-text); font: 12px var(--k-ui-font); overflow: hidden; }
+/* The list stops above the bottom row, which is 30px tall. */
+.sidebar-list { position: absolute; inset: 0 0 30px 0; overflow-y: auto; padding: 6px 4px; box-sizing: border-box; }
+/* The grab area, with the sidebar's edge line inside it. */
+.sidebar-grip { position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 2; border-right: 1px solid var(--k-edge); box-sizing: border-box; }
+.sidebar-preview { position: fixed; z-index: 20; pointer-events: none; border-radius: 6px; border: 1px solid var(--k-divider); box-shadow: 0 6px 24px var(--k-shadow); }
+
+/* The bottom row; on the rail its one button is centred. */
+.sidebar-bar { position: absolute; bottom: 0; left: 0; right: 5px; height: 30px; border-top: 1px solid var(--k-edge); display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 6px; box-sizing: border-box; }
+.sidebar[data-expanded="false"] .sidebar-bar { justify-content: center; padding: 0; right: 0; }
+.sidebar-icon { display: flex; flex: 0 0 auto; padding: 3px 5px; border-radius: 5px; color: var(--k-muted); cursor: default; }
+.sidebar-spacer { flex: 1; }
+.sidebar-update { position: relative; align-items: center; gap: 4px; margin-right: 2px; color: var(--k-strong); border: 1px solid var(--k-divider); }
+.sidebar-fold { position: relative; }
+/* The red dot that says an update is ready. */
+.update-dot { position: absolute; top: 1px; right: 1px; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; box-shadow: 0 0 0 1.5px var(--k-sidebar); pointer-events: none; }
+
+/* A group's name; on the rail, a short line between its badges. */
+.sidebar-group { overflow: hidden; }
+.sidebar[data-expanded="true"] .sidebar-group { margin: 8px 6px 2px; color: var(--k-muted); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar[data-expanded="true"] .sidebar-group:first-child { margin: 0 6px 2px; }
+.sidebar[data-expanded="false"] .sidebar-group { margin: 6px 8px; height: 1px; background: var(--k-divider); font-size: 0; }
+.sidebar[data-expanded="false"] .sidebar-group:first-child { margin: 0; height: 0; }
+
+/* A pane's row, and on the rail its badge. */
+.sidebar-card { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; border-radius: 4px; cursor: default; white-space: nowrap; }
+.sidebar[data-expanded="false"] .sidebar-card { gap: 3px; padding: 0 4px; }
+/* The dot's slot keeps titles aligned whether or not there's an agent. */
+.sidebar-slot { flex: 0 0 8px; display: flex; justify-content: center; }
+.sidebar-title { flex: 1 1 auto; min-width: 24px; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-line { flex: 0 1 auto; display: flex; gap: 5px; min-width: 0; max-width: 60%; overflow: hidden; font-size: 11px; }
+.sidebar-badge { flex: 0 0 20px; letter-spacing: -0.3px; text-align: center; font-weight: 600; overflow: hidden; }
+.sidebar-tab { flex: 0 0 auto; min-width: 9px; font-size: 10px; text-align: center; color: var(--k-muted); font-variant-numeric: tabular-nums; }
+/* The header's parts in a row. They share the pane header's class names, so
+   these are a step more specific than a plain .pane-branch rule. */
+.sidebar-line > span { flex: 0 0 auto; min-width: auto; overflow: hidden; text-overflow: ellipsis; color: var(--k-muted); cursor: inherit; }
+.sidebar-line > .pane-branch { flex: 0 1 auto; min-width: 0; }
+.sidebar-line > .pane-changed { color: var(--k-changed); cursor: pointer; }
+.sidebar-line > .pane-conflicts { color: var(--k-conflicts); }

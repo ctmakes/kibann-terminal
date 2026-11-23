@@ -7,6 +7,8 @@ import type { Settings } from "../proto";
 import iconUrl from "../../src-tauri/icons/128x128@2x.png";
 import { changesView } from "./changes";
 import { sheetGrid } from "./shortcuts";
+import "../ui.css";
+import "./settings.css";
 
 export type SettingsTab = "general" | "appearance" | "shortcuts" | "about" | "updates";
 
@@ -81,8 +83,6 @@ const TABS: Array<{ group: string; tabs: Array<{ id: SettingsTab; label: string;
   },
 ];
 
-const css = (el: HTMLElement, style: Partial<CSSStyleDeclaration>) => Object.assign(el.style, style);
-
 function div(cls?: string, text?: string): HTMLDivElement {
   const d = document.createElement("div");
   if (cls) d.className = cls;
@@ -96,17 +96,6 @@ function button(text: string, run: () => void, primary = false): HTMLButtonEleme
   const b = document.createElement("button");
   b.className = primary ? "settings-button settings-primary" : "settings-button";
   b.textContent = text;
-  const rest = primary ? "var(--k-accent)" : "transparent";
-  css(b, {
-    flex: "0 0 auto",
-    font: `${primary ? "500 " : ""}12px -apple-system, system-ui, sans-serif`,
-    padding: "4px 12px",
-    borderRadius: "6px",
-    border: primary ? "1px solid var(--k-accent)" : "1px solid var(--k-muted)",
-    background: rest,
-    color: primary ? "var(--k-accent-text)" : "var(--k-bright)",
-    cursor: "default",
-  });
   b.addEventListener("mouseenter", () => {
     if (b.disabled) return;
     if (primary) b.style.filter = "brightness(1.1)";
@@ -114,7 +103,7 @@ function button(text: string, run: () => void, primary = false): HTMLButtonEleme
   });
   b.addEventListener("mouseleave", () => {
     b.style.filter = "";
-    b.style.background = rest;
+    b.style.background = "";
   });
   b.addEventListener("click", run);
   return b;
@@ -123,8 +112,8 @@ function button(text: string, run: () => void, primary = false): HTMLButtonEleme
 function link(text: string, run: () => void): HTMLAnchorElement {
   const a = document.createElement("a");
   a.textContent = text;
+  a.className = "settings-link";
   a.href = "#";
-  css(a, { color: "var(--k-accent)", textDecoration: "none", cursor: "pointer" });
   a.addEventListener("click", (e) => {
     e.preventDefault();
     run();
@@ -189,17 +178,7 @@ export class SettingsModal {
       // Storage unavailable: start on General.
     }
     this.el = div("settings-modal");
-    css(this.el, {
-      position: "absolute",
-      inset: "0",
-      zIndex: "30",
-      display: "none",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "var(--k-scrim)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-    });
+    this.el.style.display = "none";
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el) {
         e.preventDefault();
@@ -208,45 +187,16 @@ export class SettingsModal {
     });
     this.panel = div("settings-panel");
     this.panel.tabIndex = -1;
-    css(this.panel, {
-      display: "flex",
-      width: "min(760px, calc(100% - 32px))",
-      height: "min(540px, calc(100% - 32px))",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      borderRadius: "12px",
-      boxShadow: "0 12px 40px var(--k-shadow)",
-      overflow: "hidden",
-      outline: "none",
-    });
     this.nav = div("settings-nav");
-    css(this.nav, {
-      flex: "0 0 168px",
-      background: "var(--k-sidebar)",
-      borderRight: "1px solid var(--k-divider)",
-      padding: "14px 8px",
-      boxSizing: "border-box",
-      overflowY: "auto",
-    });
-    const main = div();
-    css(main, { flex: "1 1 auto", minWidth: "0", display: "flex", flexDirection: "column" });
-    const head = div();
-    css(head, {
-      display: "flex",
-      alignItems: "center",
-      padding: "12px 16px",
-      borderBottom: "1px solid var(--k-divider)",
-    });
+    const main = div("settings-main");
+    const head = div("settings-head");
     this.title = div("settings-title");
-    css(this.title, { flex: "1", fontSize: "14px", fontWeight: "600", color: "var(--k-bright)" });
     const close = div("settings-close");
     close.innerHTML = svg(`<path d="M4 4l8 8M12 4l-8 8"/>`);
     close.setAttribute("aria-label", "Close");
-    css(close, { display: "flex", padding: "3px", borderRadius: "5px", color: "var(--k-muted)" });
     close.addEventListener("click", () => this.hide());
     head.append(this.title, close);
     this.body = div("settings-body");
-    css(this.body, { flex: "1 1 auto", overflowY: "auto", padding: "14px 18px 18px", lineHeight: "1.45" });
     // A redraw put off while typing happens when the field is left.
     this.body.addEventListener("focusout", () => {
       queueMicrotask(() => {
@@ -357,49 +307,25 @@ export class SettingsModal {
   }
 
   private renderNav(): void {
-    const title = div(undefined, "Settings");
-    css(title, { fontSize: "14px", fontWeight: "600", color: "var(--k-bright)", padding: "0 8px 10px" });
-    const items: HTMLElement[] = [title];
+    const items: HTMLElement[] = [div("settings-nav-title", "Settings")];
     for (const g of TABS) {
-      const h = div(undefined, g.group);
-      css(h, {
-        fontSize: "10px",
-        fontWeight: "600",
-        textTransform: "uppercase",
-        letterSpacing: "0.6px",
-        color: "var(--k-muted)",
-        padding: "10px 8px 4px",
-      });
-      items.push(h);
+      items.push(div("settings-group", g.group));
       for (const t of g.tabs) {
-        const on = t.id === this.tab;
         const b = div("settings-tab");
         b.dataset.tab = t.id;
         b.setAttribute("role", "tab");
-        b.setAttribute("aria-selected", String(on));
-        css(b, {
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "5px 8px",
-          marginBottom: "1px",
-          borderRadius: "6px",
-          background: on ? "var(--k-current)" : "",
-          color: on ? "var(--k-current-text)" : "var(--k-text)",
-          cursor: "default",
-        });
+        b.setAttribute("aria-selected", String(t.id === this.tab));
         const icon = document.createElement("span");
+        icon.className = "settings-tab-icon";
         icon.innerHTML = t.icon;
-        css(icon, { display: "flex", opacity: on ? "1" : "0.8" });
         const label = document.createElement("span");
+        label.className = "settings-tab-label";
         label.textContent = t.label;
-        label.style.flex = "1";
         b.append(icon, label);
         // An update waiting for a restart.
         if (t.id === "updates" && this.update?.state === "ready") {
           const dot = document.createElement("span");
           dot.className = "settings-update-dot";
-          css(dot, { width: "7px", height: "7px", borderRadius: "50%", background: "var(--k-accent)" });
           b.append(dot);
         }
         b.addEventListener("mousedown", (e) => {
@@ -415,33 +341,16 @@ export class SettingsModal {
   /** A titled group of rows. */
   private section(title: string, ...rows: HTMLElement[]): HTMLElement {
     const box = div("settings-section");
-    css(box, { marginBottom: "18px" });
-    const h = div(undefined, title);
-    css(h, { fontSize: "11px", fontWeight: "600", color: "var(--k-muted)", marginBottom: "6px" });
-    box.append(h, ...rows);
+    box.append(div("settings-section-title", title), ...rows);
     return box;
   }
 
   /** A label (and a line under it) with a control on the right. */
   private row(label: string, help: string, control: HTMLElement): HTMLElement {
     const r = div("settings-row");
-    css(r, {
-      display: "flex",
-      alignItems: "center",
-      gap: "16px",
-      padding: "8px 0",
-      borderBottom: "1px solid var(--k-divider)",
-    });
-    const text = div();
-    text.style.flex = "1";
-    const l = div("settings-label", label);
-    l.style.color = "var(--k-bright)";
-    text.append(l);
-    if (help) {
-      const h = div(undefined, help);
-      css(h, { color: "var(--k-muted)", fontSize: "11px", marginTop: "2px" });
-      text.append(h);
-    }
+    const text = div("settings-row-text");
+    text.append(div("settings-label", label));
+    if (help) text.append(div("settings-help", help));
     r.append(text, control);
     return r;
   }
@@ -453,28 +362,8 @@ export class SettingsModal {
     b.dataset.key = key;
     b.setAttribute("role", "switch");
     b.setAttribute("aria-checked", String(on));
-    css(b, {
-      flex: "0 0 auto",
-      position: "relative",
-      width: "32px",
-      height: "18px",
-      borderRadius: "9px",
-      border: "none",
-      padding: "0",
-      background: on ? "var(--k-accent)" : "var(--k-divider)",
-      cursor: "default",
-    });
     const knob = document.createElement("span");
-    css(knob, {
-      position: "absolute",
-      top: "2px",
-      left: on ? "16px" : "2px",
-      width: "14px",
-      height: "14px",
-      borderRadius: "50%",
-      background: "#fff",
-      boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
-    });
+    knob.className = "settings-knob";
     b.append(knob);
     b.addEventListener("click", () => {
       // Shown at once; the file's echo confirms it.
@@ -499,9 +388,7 @@ export class SettingsModal {
 
   /** A line at the top of the tab, for a save that failed. */
   private flash(text: string): void {
-    const n = div("settings-error", text);
-    css(n, { color: "var(--k-conflicts)", marginBottom: "10px" });
-    this.body.prepend(n);
+    this.body.prepend(div("settings-error", text));
   }
 
   private general(): HTMLElement[] {
@@ -540,27 +427,19 @@ export class SettingsModal {
       out.push(this.section("Behavior", ...rows));
     }
     const file = div("settings-path", this.info?.path ?? "");
-    css(file, { font: "11px ui-monospace, SFMono-Regular, Menlo, monospace", color: "var(--k-text)", userSelect: "text", wordBreak: "break-all" });
-    const buttons = div();
-    css(buttons, { display: "flex", gap: "8px", marginTop: "8px" });
+    const buttons = div("settings-buttons");
     buttons.append(
       button("Open in Editor", () => this.openConfig(false)),
       button(this.hooks.platform === "mac" ? "Show in Finder" : "Show in Folder", () => this.openConfig(true)),
     );
-    const note = div(undefined, "Every setting lives in this file, in Ghostty's syntax. Edits apply when you save it.");
-    css(note, { color: "var(--k-muted)", fontSize: "11px", marginBottom: "6px" });
+    const note = div("settings-note", "Every setting lives in this file, in Ghostty's syntax. Edits apply when you save it.");
     const rows: HTMLElement[] = [note, file, buttons];
     const problems = this.info?.problems ?? [];
     if (problems.length) {
       const list = div("settings-problems");
-      css(list, { marginTop: "10px", color: "var(--k-conflicts)" });
       const h = div(undefined, problems.length === 1 ? "1 line can't be used:" : `${problems.length} lines can't be used:`);
       list.append(h);
-      for (const p of problems) {
-        const l = div(undefined, p);
-        css(l, { font: "11px ui-monospace, SFMono-Regular, Menlo, monospace", marginTop: "2px" });
-        list.append(l);
-      }
+      for (const p of problems) list.append(div("settings-problem", p));
       rows.push(list);
     }
     out.push(this.section("Config file", ...rows));
@@ -571,10 +450,8 @@ export class SettingsModal {
     const s = this.settings;
     const info = this.info;
     const theme = div("settings-theme");
-    theme.style.color = "var(--k-text)";
     if (info) theme.textContent = info.light === info.dark ? info.light : `Light: ${info.light} · Dark: ${info.dark}`;
-    const themeBox = div();
-    css(themeBox, { display: "flex", alignItems: "center", gap: "12px" });
+    const themeBox = div("settings-theme-box");
     themeBox.append(
       theme,
       button(
@@ -601,7 +478,7 @@ export class SettingsModal {
     const current = families[0] ?? "";
     if (this.fonts) {
       const sel = document.createElement("select");
-      sel.className = "settings-font";
+      sel.className = "settings-field settings-font";
       const opt = (value: string, text: string) => {
         const o = document.createElement("option");
         o.value = value;
@@ -616,7 +493,7 @@ export class SettingsModal {
       family = sel;
     } else {
       const input = document.createElement("input");
-      input.className = "settings-font";
+      input.className = "settings-field settings-font";
       input.placeholder = "JetBrains Mono (built in)";
       input.value = current;
       const commit = () => {
@@ -626,35 +503,17 @@ export class SettingsModal {
       input.addEventListener("keydown", (e) => e.key === "Enter" && input.blur());
       family = input;
     }
-    css(family, {
-      width: "200px",
-      font: "12px -apple-system, system-ui, sans-serif",
-      padding: "3px 6px",
-      borderRadius: "6px",
-      border: "1px solid var(--k-divider)",
-      background: "var(--k-bg)",
-      color: "var(--k-bright)",
-    });
     const size = s.font_size ?? this.hooks.defaultFontSize;
     const setSize = (n: number | null) =>
       void this.save("font-size", n === null ? [] : [String(Math.round(Math.min(72, Math.max(6, n)) * 2) / 2)]);
     const sizeBox = div("settings-size");
-    css(sizeBox, { display: "flex", alignItems: "center", gap: "6px" });
     const num = document.createElement("input");
+    num.className = "settings-field settings-size-input";
     num.type = "number";
     num.min = "6";
     num.max = "72";
     num.step = "0.5";
     num.value = String(size);
-    css(num, {
-      width: "56px",
-      font: "12px -apple-system, system-ui, sans-serif",
-      padding: "3px 6px",
-      borderRadius: "6px",
-      border: "1px solid var(--k-divider)",
-      background: "var(--k-bg)",
-      color: "var(--k-bright)",
-    });
     num.addEventListener("change", () => {
       const n = Number(num.value);
       if (Number.isFinite(n) && n > 0) setSize(n);
@@ -680,8 +539,7 @@ export class SettingsModal {
   }
 
   private shortcuts(): HTMLElement[] {
-    const note = div();
-    css(note, { color: "var(--k-muted)", marginBottom: "12px" });
+    const note = div("settings-intro");
     note.append(
       "Ghostty's shortcuts. To change one, add a ",
       Object.assign(document.createElement("code"), { textContent: "keybind = …" }),
@@ -695,20 +553,16 @@ export class SettingsModal {
   private about(): HTMLElement[] {
     const version = this.changelog?.[1] ?? "";
     const top = div("settings-about");
-    css(top, { display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "6px 0 14px" });
     const img = document.createElement("img");
+    img.className = "settings-icon";
     img.src = iconUrl;
     img.alt = "";
-    css(img, { width: "72px", height: "72px" });
-    const name = div(undefined, "Kibann Terminal");
-    css(name, { fontSize: "16px", fontWeight: "600", color: "var(--k-bright)" });
+    const name = div("settings-name", "Kibann Terminal");
     const v = div("settings-version", version ? `Version ${version}` : "");
-    v.style.color = "var(--k-muted)";
     top.append(img, name, v, link("GitHub", () => this.api.openUrl(REPO)));
-    const desc = div(undefined, "A terminal for working alongside coding agents, built on libghostty.");
-    css(desc, { background: "var(--k-tab)", borderRadius: "8px", padding: "10px 12px", color: "var(--k-text)", marginBottom: "14px" });
+    const desc = div("settings-desc", "A terminal for working alongside coding agents, built on libghostty.");
     const features = document.createElement("ul");
-    css(features, { margin: "0 0 14px", paddingLeft: "18px", color: "var(--k-text)" });
+    features.className = "settings-features";
     for (const f of [
       "Agents open panes beside you, run commands and wait on them",
       "Every agent's state at a glance, with a notification when one needs you",
@@ -719,11 +573,9 @@ export class SettingsModal {
       li.textContent = f;
       features.append(li);
     }
-    const credits = div();
-    css(credits, { color: "var(--k-muted)", fontSize: "11px", display: "flex", flexDirection: "column", gap: "4px" });
+    const credits = div("settings-credits");
     const by = div();
-    const heart = Object.assign(document.createElement("span"), { textContent: "♥" });
-    heart.style.color = "#ef4444";
+    const heart = Object.assign(document.createElement("span"), { className: "settings-heart", textContent: "♥" });
     by.append("Built with ", heart, " by ", link("@ctmakes", () => this.api.openUrl("https://ctmakes.com")));
     const more = div();
     more.append(
@@ -747,14 +599,10 @@ export class SettingsModal {
     const [text, version] = this.changelog ?? ["", ""];
     const u = this.update ?? { state: "idle", version: null, error: null, checked: null };
     const card = div("settings-update");
-    css(card, { display: "flex", alignItems: "center", gap: "12px", background: "var(--k-tab)", borderRadius: "8px", padding: "12px" });
-    const left = div();
-    left.style.flex = "1";
-    const v = div(undefined, version ? `Kibann Terminal ${version}` : "Kibann Terminal");
-    css(v, { fontWeight: "600", color: "var(--k-bright)" });
+    const left = div("settings-update-text");
+    const v = div("settings-update-name", version ? `Kibann Terminal ${version}` : "Kibann Terminal");
     const said = updateText(u as UpdateStatus, version);
-    const state = div("settings-update-state", said.text);
-    css(state, { color: u.state === "error" ? "var(--k-conflicts)" : "var(--k-muted)", marginTop: "2px" });
+    const state = div(u.state === "error" ? "settings-update-state error" : "settings-update-state", said.text);
     left.append(v, state);
     card.append(left);
     if (u.state === "ready") {
@@ -772,11 +620,10 @@ export class SettingsModal {
         true,
       );
       b.disabled = !said.canCheck;
-      if (b.disabled) b.style.opacity = "0.5";
       card.append(b);
     }
     const notes = this.section("What's New", changesView(text, version));
-    notes.style.marginTop = "18px";
+    notes.classList.add("settings-notes");
     return [card, notes];
   }
 }

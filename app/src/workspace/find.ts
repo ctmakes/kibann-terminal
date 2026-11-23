@@ -3,6 +3,8 @@
 // the bar sends what's typed and shows "3 of 17".
 
 import type { Find } from "../proto";
+import "../ui.css";
+import "./find.css";
 
 export interface FindBarOptions {
   /** The text to find changed ("" finds nothing). */
@@ -22,21 +24,6 @@ export function countText(needle: string, find: Find | null): string {
   return `${find.index + 1} of ${find.total}${more}`;
 }
 
-const BUTTON = {
-  width: "22px",
-  height: "22px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "0",
-  borderRadius: "4px",
-  background: "transparent",
-  color: "var(--k-label)",
-  font: "13px -apple-system, system-ui, sans-serif",
-  cursor: "default",
-  padding: "0",
-};
-
 export class FindBar {
   readonly el: HTMLDivElement;
   readonly input: HTMLInputElement;
@@ -47,22 +34,7 @@ export class FindBar {
   constructor(private readonly opts: FindBarOptions) {
     this.el = document.createElement("div");
     this.el.className = "find-bar";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      top: "6px",
-      right: "14px",
-      zIndex: "6",
-      display: "none",
-      alignItems: "center",
-      gap: "2px",
-      padding: "3px 4px 3px 8px",
-      borderRadius: "7px",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      boxShadow: "0 4px 14px var(--k-shadow)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-    });
+    this.el.style.display = "none";
     // Clicks in the bar stay in the bar, not the terminal under it.
     this.el.addEventListener("mousedown", (e) => e.stopPropagation());
 
@@ -74,15 +46,6 @@ export class FindBar {
     for (const [k, v] of Object.entries({ autocapitalize: "off", autocomplete: "off", autocorrect: "off", spellcheck: "false" })) {
       this.input.setAttribute(k, v);
     }
-    Object.assign(this.input.style, {
-      width: "170px",
-      border: "0",
-      outline: "none",
-      background: "transparent",
-      color: "var(--k-bright)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      padding: "2px 0",
-    });
     this.input.addEventListener("input", () => {
       this.opts.onNeedle(this.input.value);
       this.render();
@@ -99,22 +62,13 @@ export class FindBar {
 
     this.count = document.createElement("span");
     this.count.className = "find-count";
-    Object.assign(this.count.style, {
-      minWidth: "64px",
-      textAlign: "right",
-      color: "var(--k-muted)",
-      fontVariantNumeric: "tabular-nums",
-      marginRight: "4px",
-      whiteSpace: "nowrap",
-    });
 
     const button = (cls: string, text: string, label: string, run: () => void) => {
       const b = document.createElement("button");
-      b.className = cls;
+      b.className = `find-button ${cls}`;
       b.textContent = text;
       b.title = label;
       b.setAttribute("aria-label", label);
-      Object.assign(b.style, BUTTON);
       b.addEventListener("mousedown", (e) => {
         e.preventDefault(); // keep focus in the field
         run();

@@ -1,5 +1,7 @@
-/* The pulse for working dots. Bundled, not a <style> made at run time
-   (the release build's CSP blocks those). */
+/* Agent dots, and the pulse for working ones. Bundled, not a <style> made
+   at run time (the release build's CSP blocks those). A dot is shown
+   (display) and colored inline. */
+.agent-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; pointer-events: none; }
 @keyframes kibann-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
 .agent-dot[data-state="working"] { animation: kibann-pulse 1.6s ease-in-out infinite }
 .kibann-hidden .agent-dot { animation-play-state: paused }

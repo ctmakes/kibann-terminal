@@ -1,0 +1,76 @@
+/* Settings (Cmd+,). A file Vite bundles, not a <style> made at run time:
+   the release build's CSP blocks those. */
+/* The overlay; its display is set from the code, to show and hide it. */
+.settings-modal { position: absolute; inset: 0; z-index: 30; align-items: center; justify-content: center; background: var(--k-scrim); font: 12px var(--k-ui-font); color: var(--k-strong); }
+.settings-panel { display: flex; width: min(760px, calc(100% - 32px)); height: min(540px, calc(100% - 32px)); background: var(--k-panel); border: 1px solid var(--k-divider); border-radius: 12px; box-shadow: 0 12px 40px var(--k-shadow); overflow: hidden; outline: none; }
+.settings-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.settings-head { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--k-divider); }
+.settings-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--k-bright); }
+.settings-close { display: flex; padding: 3px; border-radius: 5px; color: var(--k-muted); }
+.settings-body { flex: 1 1 auto; overflow-y: auto; padding: 14px 18px 18px; line-height: 1.45; }
+
+/* The tabs down the left. */
+.settings-nav { flex: 0 0 168px; background: var(--k-sidebar); border-right: 1px solid var(--k-divider); padding: 14px 8px; box-sizing: border-box; overflow-y: auto; }
+.settings-nav-title { font-size: 14px; font-weight: 600; color: var(--k-bright); padding: 0 8px 10px; }
+.settings-group { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--k-muted); padding: 10px 8px 4px; }
+.settings-tab { display: flex; align-items: center; gap: 8px; padding: 5px 8px; margin-bottom: 1px; border-radius: 6px; color: var(--k-text); cursor: default; }
+.settings-tab[aria-selected="true"] { background: var(--k-current); color: var(--k-current-text); }
+.settings-tab-icon { display: flex; opacity: 0.8; }
+.settings-tab[aria-selected="true"] .settings-tab-icon { opacity: 1; }
+.settings-tab-label { flex: 1; }
+.settings-update-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--k-accent); }
+
+/* Controls. The button's hover is set from the code. */
+.settings-button { flex: 0 0 auto; font: 12px var(--k-ui-font); padding: 4px 12px; border-radius: 6px; border: 1px solid var(--k-muted); background: transparent; color: var(--k-bright); cursor: default; }
+.settings-button.settings-primary { font: 500 12px var(--k-ui-font); border: 1px solid var(--k-accent); background: var(--k-accent); color: var(--k-accent-text); }
+.settings-button:disabled { opacity: 0.5; }
+.settings-link { color: var(--k-accent); text-decoration: none; cursor: pointer; }
+.settings-field { font: 12px var(--k-ui-font); padding: 3px 6px; border-radius: 6px; border: 1px solid var(--k-divider); background: var(--k-bg); color: var(--k-bright); }
+.settings-font { width: 200px; }
+.settings-size-input { width: 56px; }
+.settings-switch { flex: 0 0 auto; position: relative; width: 32px; height: 18px; border-radius: 9px; border: none; padding: 0; background: var(--k-divider); cursor: default; }
+.settings-switch[aria-checked="true"] { background: var(--k-accent); }
+.settings-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.settings-switch[aria-checked="true"] .settings-knob { left: 16px; }
+
+/* Sections and rows. */
+.settings-section { margin-bottom: 18px; }
+.settings-section-title { font-size: 11px; font-weight: 600; color: var(--k-muted); margin-bottom: 6px; }
+.settings-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--k-divider); }
+.settings-row-text { flex: 1; }
+.settings-label { color: var(--k-bright); }
+.settings-help { color: var(--k-muted); font-size: 11px; margin-top: 2px; }
+.settings-error { color: var(--k-conflicts); margin-bottom: 10px; }
+
+/* General. */
+.settings-note { color: var(--k-muted); font-size: 11px; margin-bottom: 6px; }
+.settings-path { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--k-text); user-select: text; word-break: break-all; }
+.settings-buttons { display: flex; gap: 8px; margin-top: 8px; }
+.settings-problems { margin-top: 10px; color: var(--k-conflicts); }
+.settings-problem { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 2px; }
+
+/* Appearance. */
+.settings-theme { color: var(--k-text); }
+.settings-theme-box { display: flex; align-items: center; gap: 12px; }
+.settings-size { display: flex; align-items: center; gap: 6px; }
+
+/* Shortcuts. */
+.settings-intro { color: var(--k-muted); margin-bottom: 12px; }
+
+/* About. */
+.settings-about { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 14px; }
+.settings-icon { width: 72px; height: 72px; }
+.settings-name { font-size: 16px; font-weight: 600; color: var(--k-bright); }
+.settings-version { color: var(--k-muted); }
+.settings-desc { background: var(--k-tab); border-radius: 8px; padding: 10px 12px; color: var(--k-text); margin-bottom: 14px; }
+.settings-features { margin: 0 0 14px; padding-left: 18px; color: var(--k-text); }
+.settings-credits { color: var(--k-muted); font-size: 11px; display: flex; flex-direction: column; gap: 4px; }
+.settings-heart { color: #ef4444; }
+
+/* Updates. */
+.settings-update { display: flex; align-items: center; gap: 12px; background: var(--k-tab); border-radius: 8px; padding: 12px; }
+.settings-update-text { flex: 1; }
+.settings-update-name { font-weight: 600; color: var(--k-bright); }
+.settings-update-state { color: var(--k-muted); margin-top: 2px; }
+.settings-update-state.error { color: var(--k-conflicts); }
+.settings-notes { margin-top: 18px; }

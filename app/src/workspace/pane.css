@@ -1,0 +1,13 @@
+/* The pane header. A file Vite bundles, not a <style> made at run time:
+   the release build's CSP blocks those. Its height (HEADER_H) and color
+   (focused or not) are set inline. */
+.pane-header { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; background: var(--k-header); font: 11px var(--k-ui-font); white-space: nowrap; overflow: hidden; }
+/* The parts' box; its place part is `.pane-place` too, hence the parent. */
+.pane-header > .pane-place { flex: 1 1 auto; min-width: 0; display: flex; gap: 8px; overflow: hidden; }
+.pane-place > span { flex: 0 0 auto; min-width: auto; overflow: hidden; text-overflow: ellipsis; color: inherit; }
+/* The branch gives way first when narrow, then the place. */
+.pane-place > .pane-branch { flex: 0 1 auto; min-width: 2em; }
+.pane-place > .pane-place, .pane-place > .pane-worktree { flex: 0 0.5 auto; min-width: 2em; }
+.pane-place > .pane-op { color: var(--k-op); }
+.pane-place > .pane-conflicts { color: var(--k-conflicts); }
+.pane-place > .pane-changed { color: var(--k-changed); cursor: pointer; }

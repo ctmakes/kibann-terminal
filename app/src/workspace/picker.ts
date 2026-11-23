@@ -3,11 +3,12 @@
 // click) keeps it, Esc goes back to the one in use before.
 
 import type { ThemeApi, ThemeEntry } from "./theme";
+import "../ui.css";
+import "./picker.css";
 
 /** Wait this long on a row before previewing it, so holding an arrow key
  * doesn't recolor every pane for every row passed. */
 const PREVIEW_MS = 60;
-const ROW_H = 26;
 
 export class ThemePicker {
   readonly el: HTMLDivElement;
@@ -28,17 +29,7 @@ export class ThemePicker {
   ) {
     this.el = document.createElement("div");
     this.el.className = "theme-picker";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      inset: "0",
-      zIndex: "30",
-      display: "none",
-      justifyContent: "center",
-      alignItems: "flex-start",
-      background: "var(--k-scrim)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-    });
+    this.el.style.display = "none";
     // A click outside the panel closes it, as Esc does.
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el) {
@@ -47,44 +38,18 @@ export class ThemePicker {
       }
     });
     const panel = document.createElement("div");
-    Object.assign(panel.style, {
-      marginTop: "10vh",
-      width: "min(440px, calc(100% - 32px))",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      borderRadius: "10px",
-      boxShadow: "0 12px 40px var(--k-shadow)",
-      overflow: "hidden",
-    });
+    panel.className = "theme-picker-panel";
     this.input = document.createElement("input");
     this.input.className = "theme-picker-input";
     this.input.placeholder = "Search themes";
     this.input.spellcheck = false;
-    Object.assign(this.input.style, {
-      display: "block",
-      width: "100%",
-      boxSizing: "border-box",
-      padding: "10px 12px",
-      font: "13px -apple-system, system-ui, sans-serif",
-      color: "var(--k-bright)",
-      background: "transparent",
-      border: "none",
-      borderBottom: "1px solid var(--k-divider)",
-      outline: "none",
-    });
     this.input.addEventListener("input", () => this.filter());
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.list = document.createElement("div");
     this.list.className = "theme-picker-list";
-    Object.assign(this.list.style, { maxHeight: `${ROW_H * 12}px`, overflowY: "auto", padding: "4px 0" });
     const hint = document.createElement("div");
+    hint.className = "theme-picker-hint";
     hint.textContent = "↑↓ preview   ↩ keep   esc cancel";
-    Object.assign(hint.style, {
-      padding: "6px 12px",
-      color: "var(--k-muted)",
-      borderTop: "1px solid var(--k-divider)",
-      fontSize: "11px",
-    });
     panel.append(this.input, this.list, hint);
     this.el.append(panel);
   }
@@ -129,24 +94,14 @@ export class ThemePicker {
   private render(): void {
     const rows = this.shown.map((t, i) => {
       const row = document.createElement("div");
-      row.className = "theme-picker-row";
+      row.className = i === this.at ? "theme-picker-row current" : "theme-picker-row";
       row.dataset.name = t.name;
-      Object.assign(row.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        height: `${ROW_H}px`,
-        padding: "0 12px",
-        cursor: "default",
-        background: i === this.at ? "var(--k-current)" : "",
-        color: i === this.at ? "var(--k-current-text)" : "",
-      });
       const name = document.createElement("span");
+      name.className = "theme-picker-name";
       name.textContent = t.name;
-      Object.assign(name.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
       const tag = document.createElement("span");
+      tag.className = "theme-picker-tag";
       tag.textContent = (t.name === this.original ? "in use · " : "") + (t.dark ? "dark" : "light");
-      Object.assign(tag.style, { color: "var(--k-muted)", fontSize: "11px" });
       row.append(name, tag);
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -157,8 +112,8 @@ export class ThemePicker {
     });
     if (rows.length === 0) {
       const none = document.createElement("div");
+      none.className = "theme-picker-none";
       none.textContent = "No theme matches.";
-      Object.assign(none.style, { padding: "6px 12px", color: "var(--k-muted)" });
       rows.push(none);
     }
     this.list.replaceChildren(...rows);

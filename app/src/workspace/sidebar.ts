@@ -13,12 +13,12 @@ import { headerParts, paneName, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
 import { GEAR_ICON } from "./settings";
 import { tooltip } from "./tooltip";
+import "../ui.css";
+import "./sidebar.css";
 
 export const SIDEBAR = { min: 140, max: 480, default: 220 };
 /** The collapsed rail's width. */
 export const RAIL = 44;
-/** The bottom row's height. */
-const BAR_H = 30;
 /** The sidebar icon: a window with its left column marked. */
 const ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
 <rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><line x1="5.5" y1="2.5" x2="5.5" y2="13.5"/></svg>`;
@@ -38,17 +38,6 @@ const UPDATE_WORD_MIN = 200;
 function redDot(): HTMLSpanElement {
   const d = document.createElement("span");
   d.className = "update-dot";
-  Object.assign(d.style, {
-    position: "absolute",
-    top: "1px",
-    right: "1px",
-    width: "7px",
-    height: "7px",
-    borderRadius: "50%",
-    background: "#e5484d",
-    boxShadow: "0 0 0 1.5px var(--k-sidebar)",
-    pointerEvents: "none",
-  });
   return d;
 }
 /** Dragging the edge narrower than this collapses it. */
@@ -59,7 +48,6 @@ const PREVIEW_MS = 250;
 const PREVIEW_SCALE = 0.5;
 /** The preview's largest size (CSS px); a bigger pane is cropped. */
 const PREVIEW_MAX = { w: 440, h: 260 };
-const ROW_H = 24;
 const STORE = "kibann.sidebar";
 
 /** A pane as the sidebar needs it. */
@@ -196,40 +184,11 @@ export class Sidebar {
   constructor(private readonly opts: SidebarOptions) {
     this.el = document.createElement("div");
     this.el.className = "sidebar";
-    Object.assign(this.el.style, {
-      position: "relative",
-      flex: "0 0 auto",
-      display: "block",
-      background: "var(--k-sidebar)",
-      boxSizing: "border-box",
-      color: "var(--k-text)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      overflow: "hidden",
-    });
     this.list = document.createElement("div");
     this.list.className = "sidebar-list";
-    Object.assign(this.list.style, {
-      position: "absolute",
-      inset: `0 0 ${BAR_H}px 0`,
-      overflowY: "auto",
-      padding: "6px 4px",
-      boxSizing: "border-box",
-    });
     this.list.addEventListener("mouseleave", () => this.hidePreview());
     const grip = document.createElement("div");
     grip.className = "sidebar-grip";
-    Object.assign(grip.style, {
-      position: "absolute",
-      top: "0",
-      right: "0",
-      width: "5px",
-      height: "100%",
-      cursor: "col-resize",
-      zIndex: "2",
-      // The sidebar's edge line, inside the grab area.
-      borderRight: "1px solid var(--k-edge)",
-      boxSizing: "border-box",
-    });
     grip.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       this.hidePreview();
@@ -257,51 +216,23 @@ export class Sidebar {
     // panes beside the sidebar and never takes the pointer.
     this.preview = document.createElement("canvas");
     this.preview.className = "sidebar-preview";
-    Object.assign(this.preview.style, {
-      position: "fixed",
-      display: "none",
-      zIndex: "20",
-      pointerEvents: "none",
-      borderRadius: "6px",
-      border: "1px solid var(--k-divider)",
-      boxShadow: "0 6px 24px var(--k-shadow)",
-    });
+    this.preview.style.display = "none";
     // Bottom: the theme picker, the shortcut sheet and Settings on the left, the
     // button that collapses and expands it on the right.
     this.bar = document.createElement("div");
     this.bar.className = "sidebar-bar";
-    Object.assign(this.bar.style, {
-      position: "absolute",
-      bottom: "0",
-      left: "0",
-      right: "5px",
-      height: `${BAR_H}px`,
-      borderTop: "1px solid var(--k-edge)",
-      display: "flex",
-      alignItems: "center",
-      gap: "2px",
-      padding: "0 6px",
-      boxSizing: "border-box",
-    });
     const icon = (cls: string, svg: string, run: () => void) => {
       const b = document.createElement("div");
-      b.className = cls;
+      b.className = `sidebar-icon ${cls}`;
       b.innerHTML = svg;
-      Object.assign(b.style, {
-        display: "flex",
-        flex: "0 0 auto",
-        padding: "3px 5px",
-        borderRadius: "5px",
-        color: "var(--k-muted)",
-        cursor: "default",
-      });
       b.addEventListener("mouseenter", () => {
         b.style.background = "var(--k-tab)";
         b.style.color = "var(--k-strong)";
       });
+      // Back to its class's colour.
       b.addEventListener("mouseleave", () => {
         b.style.background = "";
-        b.style.color = "var(--k-muted)";
+        b.style.color = "";
       });
       b.addEventListener("mousedown", (e) => {
         e.preventDefault(); // keep focus in the terminal
@@ -323,25 +254,15 @@ export class Sidebar {
       this.extras.push(gear);
     }
     const spacer = document.createElement("div");
-    spacer.style.flex = "1";
+    spacer.className = "sidebar-spacer";
     this.extras.push(spacer);
     // A downloaded update: a button that stays (the notice can be dismissed).
     this.updateBtn = icon("sidebar-update", UPDATE_ICON, () => opts.onUpdate?.());
-    Object.assign(this.updateBtn.style, {
-      position: "relative",
-      alignItems: "center",
-      gap: "4px",
-      marginRight: "2px",
-      color: "var(--k-strong)",
-      border: "1px solid var(--k-divider)",
-    });
-    this.updateBtn.addEventListener("mouseleave", () => (this.updateBtn.style.color = "var(--k-strong)"));
     this.updateWord = document.createElement("span");
     this.updateWord.textContent = "Update";
     this.updateBtn.append(this.updateWord, redDot());
     tooltip(this.updateBtn, () => `Kibann Terminal ${this.updateVersion} is ready: restart to update`, "", true);
     const fold = icon("sidebar-fold", ICON, () => this.toggle());
-    fold.style.position = "relative";
     this.foldDot = redDot();
     fold.append(this.foldDot);
     tooltip(
@@ -391,9 +312,6 @@ export class Sidebar {
     this.updateBtn.style.display = update && this.expanded ? "flex" : "none";
     this.updateWord.style.display = this.width >= UPDATE_WORD_MIN ? "" : "none";
     this.foldDot.style.display = update && !this.expanded ? "" : "none";
-    this.bar.style.justifyContent = this.expanded ? "flex-end" : "center";
-    this.bar.style.padding = this.expanded ? "0 6px" : "0";
-    this.bar.style.right = this.expanded ? "5px" : "0";
     this.opts.onResize();
   }
 
@@ -447,27 +365,6 @@ export class Sidebar {
       h.className = "sidebar-group";
       h.textContent = g.label;
       h.title = g.label;
-      Object.assign(
-        h.style,
-        this.expanded
-          ? {
-              margin: nodes.length ? "8px 6px 2px" : "0 6px 2px",
-              color: "var(--k-muted)",
-              fontSize: "11px",
-              fontWeight: "600",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }
-          : // On the rail a group is a short line between its badges.
-            {
-              margin: nodes.length ? "6px 8px" : "0",
-              height: nodes.length ? "1px" : "0",
-              background: "var(--k-divider)",
-              fontSize: "0",
-              overflow: "hidden",
-            },
-      );
       nodes.push(h);
       const badges = badgeTexts(g.panes.map((p) => badgeSource(p.title, git[String(p.id)])));
       g.panes.forEach((p, i) => {
@@ -484,59 +381,19 @@ export class Sidebar {
     const el = document.createElement("div");
     el.className = "sidebar-card";
     el.dataset.pane = String(id);
-    Object.assign(el.style, {
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-      height: `${ROW_H}px`,
-      padding: "0 6px",
-      borderRadius: "4px",
-      cursor: "default",
-      whiteSpace: "nowrap",
-    });
     // The dot's slot keeps titles aligned whether or not there's an agent.
     const slot = document.createElement("span");
-    Object.assign(slot.style, { flex: "0 0 8px", display: "flex", justifyContent: "center" });
+    slot.className = "sidebar-slot";
     const dot = makeDot();
     slot.append(dot);
     const title = document.createElement("span");
     title.className = "sidebar-title";
-    Object.assign(title.style, {
-      flex: "1 1 auto",
-      minWidth: "24px",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-    });
     const line = document.createElement("span");
     line.className = "sidebar-line";
-    Object.assign(line.style, {
-      flex: "0 1 auto",
-      display: "flex",
-      gap: "5px",
-      minWidth: "0",
-      maxWidth: "60%",
-      overflow: "hidden",
-      fontSize: "11px",
-    });
     const badge = document.createElement("span");
     badge.className = "sidebar-badge";
-    Object.assign(badge.style, {
-      flex: "0 0 20px",
-      letterSpacing: "-0.3px",
-      textAlign: "center",
-      fontWeight: "600",
-      overflow: "hidden",
-    });
     const num = document.createElement("span");
     num.className = "sidebar-tab";
-    Object.assign(num.style, {
-      flex: "0 0 auto",
-      minWidth: "9px",
-      fontSize: "10px",
-      textAlign: "center",
-      color: "var(--k-muted)",
-      fontVariantNumeric: "tabular-nums",
-    });
     el.append(slot, badge, num, title, line);
     el.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
@@ -565,8 +422,6 @@ export class Sidebar {
     r.badge.style.display = full ? "none" : "";
     r.title.style.display = full ? "" : "none";
     r.line.style.display = full ? "flex" : "none";
-    r.el.style.padding = full ? "0 6px" : "0 4px";
-    r.el.style.gap = full ? "6px" : "3px";
     const current = p.focused && p.shown;
     r.el.style.background = current ? "var(--k-current)" : "";
     const color = current ? "var(--k-current-text)" : p.shown ? "var(--k-title)" : "var(--k-label)";
@@ -581,14 +436,6 @@ export class Sidebar {
         const span = document.createElement("span");
         span.className = `pane-${x.kind}`;
         span.textContent = x.text;
-        Object.assign(span.style, {
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          flex: x.kind === "branch" ? "0 1 auto" : "0 0 auto",
-          minWidth: x.kind === "branch" ? "0" : "",
-          color: x.kind === "changed" ? "var(--k-changed)" : x.kind === "conflicts" ? "var(--k-conflicts)" : "var(--k-muted)",
-          cursor: x.kind === "changed" ? "pointer" : "",
-        });
         return span;
       }),
     );

@@ -1,10 +1,9 @@
 import type { InputEvent, Scrollbar } from "./proto";
+import "./terminal.css";
 
 /** Thumb width at rest and while hovered or dragged, in CSS px. */
 const THIN = 4;
 const WIDE = 8;
-/** Width of the strip along the right edge that takes the pointer. */
-const HIT = 12;
 const MIN_THUMB = 16;
 
 export interface ScrollbarHooks {
@@ -42,23 +41,9 @@ export class ScrollbarLayer {
   constructor(parent: HTMLElement, private readonly hooks: ScrollbarHooks) {
     this.track = document.createElement("div");
     this.track.className = "term-scrollbar-track";
-    Object.assign(this.track.style, {
-      position: "absolute",
-      right: "0",
-      width: `${HIT}px`,
-      display: "none",
-      cursor: "default",
-      touchAction: "none",
-    });
+    this.track.style.display = "none";
     this.thumb = document.createElement("div");
     this.thumb.className = "term-scrollbar";
-    Object.assign(this.thumb.style, {
-      position: "absolute",
-      right: "2px",
-      width: `${THIN}px`,
-      borderRadius: `${THIN / 2}px`,
-      transition: "width 120ms ease-out, border-radius 120ms ease-out, opacity 120ms ease-out",
-    });
     this.track.append(this.thumb);
     parent.append(this.track);
 

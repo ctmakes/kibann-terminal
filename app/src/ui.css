@@ -1,0 +1,3 @@
+/* What all of Kibann's own chrome shares. A file Vite bundles, not a
+   <style> made at run time: the release build's CSP blocks those. */
+:root { --k-ui-font: -apple-system, system-ui, sans-serif; }

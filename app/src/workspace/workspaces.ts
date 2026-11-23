@@ -4,6 +4,8 @@
 // app's backend (`files::workspaces`); see README "Workspace files".
 
 import type { PaneId } from "./layout";
+import "../ui.css";
+import "./workspaces.css";
 
 import type { WorkspaceEntry } from "../proto";
 export type { WorkspaceEntry };
@@ -18,8 +20,6 @@ export interface WorkspaceApi {
    * Fails with a message containing "exists" unless `force`. */
   save(name: string, force: boolean): Promise<string>;
 }
-
-const ROW_H = 30;
 
 const ORIGIN: Record<WorkspaceEntry["origin"], string> = {
   project: "this project",
@@ -52,17 +52,7 @@ export class WorkspacePicker {
   ) {
     this.el = document.createElement("div");
     this.el.className = "workspace-picker";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      inset: "0",
-      zIndex: "30",
-      display: "none",
-      justifyContent: "center",
-      alignItems: "flex-start",
-      background: "var(--k-scrim)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-    });
+    this.el.style.display = "none";
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el) {
         e.preventDefault();
@@ -70,30 +60,10 @@ export class WorkspacePicker {
       }
     });
     const panel = document.createElement("div");
-    Object.assign(panel.style, {
-      marginTop: "10vh",
-      width: "min(480px, calc(100% - 32px))",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      borderRadius: "10px",
-      boxShadow: "0 12px 40px var(--k-shadow)",
-      overflow: "hidden",
-    });
+    panel.className = "workspace-picker-panel";
     this.input = document.createElement("input");
     this.input.className = "workspace-picker-input";
     this.input.spellcheck = false;
-    Object.assign(this.input.style, {
-      display: "block",
-      width: "100%",
-      boxSizing: "border-box",
-      padding: "10px 12px",
-      font: "13px -apple-system, system-ui, sans-serif",
-      color: "var(--k-bright)",
-      background: "transparent",
-      border: "none",
-      borderBottom: "1px solid var(--k-divider)",
-      outline: "none",
-    });
     this.input.addEventListener("input", () => {
       this.replacing = null;
       this.filter();
@@ -101,14 +71,8 @@ export class WorkspacePicker {
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.list = document.createElement("div");
     this.list.className = "workspace-picker-list";
-    Object.assign(this.list.style, { maxHeight: `${ROW_H * 10}px`, overflowY: "auto", padding: "4px 0" });
     this.hint = document.createElement("div");
-    Object.assign(this.hint.style, {
-      padding: "6px 12px",
-      color: "var(--k-muted)",
-      borderTop: "1px solid var(--k-divider)",
-      fontSize: "11px",
-    });
+    this.hint.className = "workspace-picker-hint";
     panel.append(this.input, this.list, this.hint);
     this.el.append(panel);
   }
@@ -164,34 +128,22 @@ export class WorkspacePicker {
   private render(): void {
     const rows = this.shown.map((l, i) => {
       const row = document.createElement("div");
-      row.className = "workspace-picker-row";
-      row.dataset.name = l.name;
       const on = this.mode === "open" && i === this.at;
-      Object.assign(row.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        minHeight: `${ROW_H}px`,
-        padding: "0 12px",
-        cursor: "default",
-        background: on ? "var(--k-current)" : "",
-        color: on ? "var(--k-current-text)" : "",
-      });
+      row.className = on ? "workspace-picker-row current" : "workspace-picker-row";
+      row.dataset.name = l.name;
       const text = document.createElement("div");
-      Object.assign(text.style, { flex: "1", minWidth: "0" });
+      text.className = "workspace-picker-text";
       const name = document.createElement("div");
+      name.className = "workspace-picker-name";
       name.textContent = l.name;
       const about = document.createElement("div");
+      about.className = "workspace-picker-about";
       about.textContent = l.about ?? "";
-      for (const s of [name, about]) {
-        Object.assign(s.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-      }
-      Object.assign(about.style, { fontSize: "11px", opacity: "0.65" });
       text.append(name);
       if (l.about) text.append(about);
       const tag = document.createElement("span");
+      tag.className = "workspace-picker-tag";
       tag.textContent = ORIGIN[l.origin];
-      Object.assign(tag.style, { color: "var(--k-muted)", fontSize: "11px", flex: "0 0 auto" });
       row.append(text, tag);
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -207,8 +159,8 @@ export class WorkspacePicker {
     });
     if (rows.length === 0 && this.mode === "open") {
       const none = document.createElement("div");
+      none.className = "workspace-picker-none";
       none.textContent = this.all.length ? "No workspace matches." : "";
-      Object.assign(none.style, { padding: "6px 12px", color: "var(--k-muted)" });
       rows.push(none);
     }
     this.list.replaceChildren(...rows);

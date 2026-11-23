@@ -2,6 +2,8 @@ import type { Grid } from "./grid";
 import type { Metrics } from "./metrics";
 import type { Link } from "./proto";
 import { css } from "./painter/color";
+import "./terminal.css";
+import "./ui.css";
 
 /** Whether viewport cell (`x`, `y`) is part of `link`. */
 export function linkCovers(link: Link, x: number, y: number): boolean {
@@ -23,25 +25,11 @@ export class LinkLayer {
   constructor(gridEl: HTMLElement, root: HTMLElement) {
     this.el = document.createElement("div");
     this.el.className = "term-links";
-    Object.assign(this.el.style, { position: "absolute", left: "0", top: "0", pointerEvents: "none" });
     gridEl.append(this.el);
 
     this.preview = document.createElement("div");
     this.preview.className = "term-link-preview";
-    Object.assign(this.preview.style, {
-      position: "absolute",
-      left: "4px",
-      bottom: "4px",
-      maxWidth: "calc(100% - 8px)",
-      padding: "2px 6px",
-      borderRadius: "4px",
-      font: "12px -apple-system, system-ui, sans-serif",
-      whiteSpace: "nowrap",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      pointerEvents: "none",
-      display: "none",
-    });
+    this.preview.style.display = "none";
     root.append(this.preview);
   }
 
@@ -63,7 +51,6 @@ export class LinkLayer {
       const u = document.createElement("div");
       u.className = "term-link-underline";
       Object.assign(u.style, {
-        position: "absolute",
         left: `${(s.x * m.cellW) / m.dpr}px`,
         top: `${((s.y + 1) * m.cellH) / m.dpr - 2 * thick}px`,
         width: `${(s.len * m.cellW) / m.dpr}px`,

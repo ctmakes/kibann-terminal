@@ -2,6 +2,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/jetbrains-mono/400-italic.css";
 import "@fontsource/jetbrains-mono/700-italic.css";
+import "./terminal.css";
 
 import type { Cursor, Find, Frame, InputEvent } from "./proto";
 import { CursorLayer } from "./cursor";
@@ -125,29 +126,15 @@ export class TerminalView {
 
     this.root = document.createElement("div");
     this.root.className = "term";
-    Object.assign(this.root.style, {
-      position: "relative",
-      width: "100%",
-      height: "100%",
-      overflow: "hidden",
-      background: css(this.grid.defaultBg),
-      // Nothing here is selectable page content; without this a click in the
-      // padding starts a WebKit selection that tints the whole canvas blue.
-      userSelect: "none",
-      webkitUserSelect: "none",
-    });
+    this.root.style.background = css(this.grid.defaultBg);
 
     this.gridEl = document.createElement("div");
     this.gridEl.className = "term-grid";
-    Object.assign(this.gridEl.style, { position: "absolute" });
 
     this.gridCanvas = document.createElement("canvas");
     this.gridCanvas.className = "term-canvas";
     this.overlay = document.createElement("canvas");
     this.overlay.className = "term-overlay";
-    for (const c of [this.gridCanvas, this.overlay]) {
-      Object.assign(c.style, { position: "absolute", left: "0", top: "0", display: "block" });
-    }
 
     this.textarea = document.createElement("textarea");
     this.textarea.className = "term-input";
@@ -155,37 +142,10 @@ export class TerminalView {
     for (const [k, v] of Object.entries({ autocapitalize: "off", autocomplete: "off", autocorrect: "off", spellcheck: "false" })) {
       this.textarea.setAttribute(k, v);
     }
-    Object.assign(this.textarea.style, {
-      position: "absolute",
-      opacity: "0",
-      width: "2px",
-      padding: "0",
-      border: "0",
-      margin: "0",
-      outline: "none",
-      resize: "none",
-      overflow: "hidden",
-      whiteSpace: "nowrap",
-      caretColor: "transparent",
-      // The root disables selection; WebKit can then refuse typing into a
-      // textarea that inherits it.
-      userSelect: "text",
-      webkitUserSelect: "text",
-      color: "transparent",
-      background: "transparent",
-      zIndex: "-1",
-    });
 
     this.dimEl = document.createElement("div");
     this.dimEl.className = "term-dim";
-    Object.assign(this.dimEl.style, {
-      position: "absolute",
-      inset: "0",
-      pointerEvents: "none",
-      display: "none",
-      // Ghostty's unfocused-split-opacity: 0.7 over the background.
-      opacity: "0.3",
-    });
+    this.dimEl.style.display = "none";
 
     this.gridEl.append(this.gridCanvas, this.overlay, this.textarea);
     this.root.append(this.gridEl);

@@ -66,18 +66,10 @@ export function agentName(agent: string): string {
 }
 
 /** A dot element (hidden until it has a state). */
-export function makeDot(extra: Partial<CSSStyleDeclaration> = {}): HTMLSpanElement {
+export function makeDot(): HTMLSpanElement {
   const d = document.createElement("span");
   d.className = "agent-dot";
-  Object.assign(d.style, {
-    display: "none",
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    flex: "0 0 auto",
-    pointerEvents: "none",
-    ...extra,
-  });
+  d.style.display = "none";
   return d;
 }
 

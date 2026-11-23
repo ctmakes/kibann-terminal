@@ -1,0 +1,12 @@
+/* What's New, in Settings → Updates. A file Vite bundles, not a <style>
+   made at run time: the release build's CSP blocks those. */
+.changes { line-height: 1.5; user-select: text; }
+.changes-head { display: flex; gap: 8px; align-items: baseline; margin: 14px 0 4px; }
+.changes-version { font-size: 13px; font-weight: 600; color: var(--k-bright); }
+.changes-when { color: var(--k-muted); }
+.changes-list { margin: 4px 0; padding-left: 18px; }
+.changes-item { margin: 2px 0; }
+.changes-h { font-weight: 600; margin: 8px 0 2px; }
+.changes-p { margin: 4px 0; }
+.changes-code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--k-kbd); border-radius: 3px; padding: 0 3px; }
+.changes-strong { color: var(--k-bright); }

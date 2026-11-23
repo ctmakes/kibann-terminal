@@ -287,7 +287,7 @@ export class ScreenView {
       const strip = document.createElement("div");
       strip.className = "screen-peek";
       const edgeSide = { left: "right", right: "left", top: "bottom", bottom: "top" }[f.edge];
-      Object.assign(strip.style, { position: "absolute", zIndex: "2", [edgeSide]: "0" });
+      strip.style.setProperty(edgeSide, "0");
       strip.style.setProperty(across ? "width" : "height", `${Math.max(f.peek, 6)}px`);
       strip.style.setProperty(across ? "top" : "left", "0");
       strip.style.setProperty(across ? "bottom" : "right", "0");

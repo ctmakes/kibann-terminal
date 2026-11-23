@@ -54,6 +54,8 @@ import {
   type Rect,
   type Tree,
 } from "./layout";
+import "../ui.css";
+import "./workspace.css";
 
 /** How far one resize shortcut moves a divider, in CSS px (Ghostty's 10). */
 const RESIZE_STEP = 10;
@@ -61,12 +63,10 @@ const RESIZE_STEP = 10;
 const MENU_ECHO_MS = 300;
 
 const COLORS = {
-  bar: "var(--k-bar)",
   tab: "var(--k-tab)",
   activeTab: "var(--k-tabActive)",
   text: "var(--k-text)",
   activeText: "var(--k-bright)",
-  divider: "var(--k-divider)",
 };
 
 export interface Pane {
@@ -200,21 +200,11 @@ export class Workspace {
     const sheetKey = () => keyFor({ kind: "shortcuts" }, this.platform);
     this.root = document.createElement("div");
     this.root.className = "workspace";
-    Object.assign(this.root.style, {
-      position: "absolute",
-      inset: "0",
-      display: "flex",
-      background: COLORS.divider,
-      userSelect: "none",
-      webkitUserSelect: "none",
-    });
     // The screen decides where the sidebar, the tab bar and the panes go.
     this.frame = document.createElement("div");
     this.frame.className = "workspace-screen";
-    Object.assign(this.frame.style, { position: "absolute", inset: "0" });
     this.holder = document.createElement("div");
     this.holder.className = "workspace-holder";
-    this.holder.style.display = "none";
     this.sidebar = new Sidebar({
       onPick: (id) => this.show(id),
       onDiff: (id) => {
@@ -234,31 +224,14 @@ export class Workspace {
     });
     this.bar = document.createElement("div");
     this.bar.className = "tab-bar";
-    Object.assign(this.bar.style, {
-      display: "none",
-      flex: "1 1 auto",
-      height: "30px",
-      background: COLORS.bar,
-      gap: "1px",
-      font: "12px -apple-system, system-ui, sans-serif",
-    });
+    // Inline, as screen.css's `.screen-block > .tab-bar` would beat a class.
+    Object.assign(this.bar.style, { display: "none", flex: "1 1 auto" });
     this.stage = document.createElement("div");
     this.stage.className = "stage";
-    Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden", minWidth: "0", minHeight: "0" });
     this.help = document.createElement("div");
     this.help.className = "tab-help";
     this.help.textContent = "?";
     tooltip(this.help, "Keyboard shortcuts", sheetKey);
-    Object.assign(this.help.style, {
-      flex: "0 0 30px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "var(--k-muted)",
-      background: "var(--k-tab)",
-      cursor: "default",
-      fontWeight: "600",
-    });
     this.help.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
       this.shortcuts.toggle();
@@ -267,18 +240,6 @@ export class Workspace {
     // Notices: the first-run hint, a theme that can't be read.
     this.notices = document.createElement("div");
     this.notices.className = "notices";
-    Object.assign(this.notices.style, {
-      position: "absolute",
-      right: "12px",
-      bottom: "12px",
-      zIndex: "25",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      alignItems: "flex-end",
-      pointerEvents: "none",
-      font: "12px -apple-system, system-ui, sans-serif",
-    });
 
     this.shortcuts = new ShortcutSheet(this.platform);
     this.picker = opts.themes
@@ -726,10 +687,10 @@ export class Workspace {
   private makeTab(id: number, tree: Tree, focused: PaneId): Tab {
     const el = document.createElement("div");
     el.className = "tab-stage";
-    Object.assign(el.style, { position: "absolute", inset: "0", display: "none" });
+    el.style.display = "none";
     this.stage.append(el);
     const button = document.createElement("div");
-    const dot = makeDot({ marginRight: "6px" });
+    const dot = makeDot();
     const tab: Tab = { id, title: null, tree, focused, zoomed: null, el, button, dot };
     this.makeTabButton(tab);
     return tab;
@@ -753,27 +714,14 @@ export class Workspace {
   private makeTabButton(tab: Tab): void {
     const b = tab.button;
     b.className = "tab";
-    Object.assign(b.style, {
-      flex: "1 1 0",
-      minWidth: "0",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      position: "relative",
-      padding: "0 28px",
-      cursor: "default",
-    });
     const label = document.createElement("span");
     label.className = "tab-title";
-    Object.assign(label.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
     const x = document.createElement("span");
     x.className = "tab-close";
     x.textContent = "×";
-    Object.assign(x.style, { position: "absolute", left: "8px", fontSize: "14px", opacity: "0.6" });
     // Its number: Cmd+1–8 goes to it (Ctrl elsewhere).
     const n = document.createElement("span");
     n.className = "tab-number";
-    Object.assign(n.style, { position: "absolute", right: "10px", fontSize: "11px", opacity: "0.55", fontVariantNumeric: "tabular-nums" });
     b.append(x, tab.dot, label, n);
     b.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
@@ -819,15 +767,6 @@ export class Workspace {
       const b = document.createElement("button");
       b.className = "notice-action";
       b.textContent = action.label;
-      Object.assign(b.style, {
-        marginLeft: "10px",
-        padding: "2px 10px",
-        border: "1px solid var(--k-divider)",
-        borderRadius: "5px",
-        background: "var(--k-current)",
-        color: "var(--k-current-text)",
-        font: "12px -apple-system, system-ui, sans-serif",
-      });
       b.addEventListener("click", () => {
         n.remove();
         action.run();
@@ -836,20 +775,10 @@ export class Workspace {
       x.className = "notice-close";
       x.textContent = "✕";
       x.setAttribute("aria-label", "Dismiss");
-      Object.assign(x.style, { marginLeft: "6px", border: "0", background: "transparent", color: "var(--k-muted)" });
       x.addEventListener("click", () => n.remove());
       n.append(b, x);
       n.style.pointerEvents = "auto";
     }
-    Object.assign(n.style, {
-      maxWidth: "420px",
-      padding: "7px 10px",
-      borderRadius: "6px",
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      color: "var(--k-strong)",
-      boxShadow: "0 4px 16px var(--k-shadow)",
-    });
     this.notices.append(n);
     if (!action) window.setTimeout(() => n.remove(), ms);
   }
@@ -931,8 +860,8 @@ export class Workspace {
 
   private slotProblem(slot: BlockSlot, text: string): void {
     const d = document.createElement("div");
+    d.className = "slot-problem";
     d.textContent = text;
-    Object.assign(d.style, { padding: "12px", color: "var(--k-muted)", font: "12px -apple-system, system-ui, sans-serif" });
     slot.el.append(d);
   }
 
@@ -1160,7 +1089,6 @@ export class Workspace {
     const el = document.createElement("div");
     el.className = "pane";
     el.dataset.pane = String(id);
-    Object.assign(el.style, { position: "absolute", overflow: "hidden" });
     const dot = makeDot();
     const header = new PaneHeader(dot, () => {
       const p = this.panes.get(id);
@@ -1179,7 +1107,7 @@ export class Workspace {
     // The terminal fills what the header leaves.
     const body = document.createElement("div");
     body.className = "pane-body";
-    Object.assign(body.style, { position: "absolute", left: "0", right: "0", top: `${HEADER_H}px`, bottom: "0" });
+    body.style.top = `${HEADER_H}px`;
     el.append(header.el, body);
     tab.el.append(el);
     const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false, find: null };
@@ -1302,13 +1230,11 @@ export class Workspace {
       const grab = 6;
       const row = d.dir === "row";
       Object.assign(el.style, {
-        position: "absolute",
         left: `${row ? d.rect.x - grab / 2 : d.rect.x}px`,
         top: `${row ? d.rect.y : d.rect.y - grab / 2}px`,
         width: `${row ? d.rect.w + grab : d.rect.w}px`,
         height: `${row ? d.rect.h : d.rect.h + grab}px`,
         cursor: row ? "col-resize" : "row-resize",
-        zIndex: "2",
       });
       el.addEventListener("pointerdown", (e) => {
         e.preventDefault();

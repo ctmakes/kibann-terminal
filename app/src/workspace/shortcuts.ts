@@ -4,6 +4,8 @@
 
 import type { Platform } from "../input/keyboard";
 import { bindings, type Action, type Binding } from "./keymap";
+import "../ui.css";
+import "./shortcuts.css";
 
 export interface SheetRow {
   label: string;
@@ -163,40 +165,25 @@ export function sheetFor(platform: Platform): SheetGroup[] {
  * and Settings → Shortcuts. */
 export function sheetGrid(platform: Platform): HTMLDivElement {
   const cols = document.createElement("div");
-  Object.assign(cols.style, {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
-    columnGap: "28px",
-    rowGap: "12px",
-  });
+  cols.className = "shortcut-grid";
   for (const g of sheetFor(platform)) {
     const box = document.createElement("div");
     box.className = "shortcut-group";
     const h = document.createElement("div");
+    h.className = "shortcut-group-title";
     h.textContent = g.title;
-    Object.assign(h.style, { color: "var(--k-muted)", fontSize: "11px", fontWeight: "600", margin: "4px 0 4px" });
     box.append(h);
     for (const r of g.rows) {
       const line = document.createElement("div");
       line.className = "shortcut-row";
-      Object.assign(line.style, { display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" });
       const label = document.createElement("span");
+      label.className = "shortcut-label";
       label.textContent = r.label;
-      label.style.flex = "1";
       line.append(label);
       for (const key of r.keys) {
         const kbd = document.createElement("kbd");
+        kbd.className = "shortcut-key";
         kbd.textContent = key;
-        Object.assign(kbd.style, {
-          font: "11px -apple-system, system-ui, sans-serif",
-          letterSpacing: "0.5px",
-          color: "var(--k-bright)",
-          background: "var(--k-kbd)",
-          border: "1px solid var(--k-divider)",
-          borderRadius: "4px",
-          padding: "1px 6px",
-          whiteSpace: "nowrap",
-        });
         line.append(kbd);
       }
       box.append(line);
@@ -214,17 +201,7 @@ export class ShortcutSheet {
   constructor(private readonly platform: Platform) {
     this.el = document.createElement("div");
     this.el.className = "shortcut-sheet";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      inset: "0",
-      zIndex: "30",
-      display: "none",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "var(--k-scrim)",
-      font: "12px -apple-system, system-ui, sans-serif",
-      color: "var(--k-strong)",
-    });
+    this.el.style.display = "none";
     // Any click closes it, and keeps focus in the terminal.
     this.el.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -237,25 +214,15 @@ export class ShortcutSheet {
   rebuild(): void {
     const platform = this.platform;
     const panel = document.createElement("div");
-    Object.assign(panel.style, {
-      background: "var(--k-panel)",
-      border: "1px solid var(--k-divider)",
-      borderRadius: "10px",
-      boxShadow: "0 12px 40px var(--k-shadow)",
-      padding: "16px 20px 18px",
-      width: "min(760px, calc(100% - 32px))",
-      maxHeight: "calc(100% - 32px)",
-      overflowY: "auto",
-      boxSizing: "border-box",
-    });
+    panel.className = "shortcut-panel";
     const head = document.createElement("div");
-    Object.assign(head.style, { display: "flex", alignItems: "baseline", marginBottom: "10px" });
+    head.className = "shortcut-head";
     const title = document.createElement("div");
+    title.className = "shortcut-title";
     title.textContent = "Keyboard Shortcuts";
-    Object.assign(title.style, { flex: "1", fontSize: "14px", fontWeight: "600", color: "var(--k-bright)" });
     const hint = document.createElement("div");
+    hint.className = "shortcut-hint";
     hint.textContent = "Esc to close";
-    hint.style.color = "var(--k-muted)";
     head.append(title, hint);
     const cols = sheetGrid(platform);
     panel.append(head, cols);

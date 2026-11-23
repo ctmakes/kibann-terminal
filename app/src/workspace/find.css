@@ -1,0 +1,6 @@
+/* The find bar over a pane. A file Vite bundles, not a <style> made at
+   run time: the release build's CSP blocks those. */
+.find-bar { position: absolute; top: 6px; right: 14px; z-index: 6; align-items: center; gap: 2px; padding: 3px 4px 3px 8px; border-radius: 7px; background: var(--k-panel); border: 1px solid var(--k-divider); box-shadow: 0 4px 14px var(--k-shadow); font: 12px var(--k-ui-font); color: var(--k-strong); }
+.find-input { width: 170px; border: 0; outline: none; background: transparent; color: var(--k-bright); font: 12px var(--k-ui-font); padding: 2px 0; }
+.find-count { min-width: 64px; text-align: right; color: var(--k-muted); font-variant-numeric: tabular-nums; margin-right: 4px; white-space: nowrap; }
+.find-button { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; color: var(--k-label); font: 13px var(--k-ui-font); cursor: default; padding: 0; }

@@ -3,6 +3,8 @@
 // moving between directories never resizes the terminal.
 
 import type { GitOp, PaneDir } from "../proto";
+import "../ui.css";
+import "./pane.css";
 
 export const HEADER_H = 20;
 
@@ -52,16 +54,6 @@ export function branchOf(place: PaneDir | undefined): string | null {
   return g ? (g.branch ?? g.detached ?? null) : null;
 }
 
-const COLORS: Record<PartKind, string> = {
-  place: "inherit",
-  worktree: "inherit",
-  branch: "inherit",
-  op: "var(--k-op)",
-  conflicts: "var(--k-conflicts)",
-  changed: "var(--k-changed)",
-  sync: "inherit",
-};
-
 export class PaneHeader {
   readonly el: HTMLDivElement;
   private readonly text: HTMLDivElement;
@@ -71,32 +63,9 @@ export class PaneHeader {
   constructor(dot: HTMLElement, onDiff?: () => void) {
     this.el = document.createElement("div");
     this.el.className = "pane-header";
-    Object.assign(this.el.style, {
-      position: "absolute",
-      left: "0",
-      right: "0",
-      top: "0",
-      height: `${HEADER_H}px`,
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      padding: "0 8px",
-      boxSizing: "border-box",
-      background: "var(--k-header)",
-      color: "var(--k-muted)",
-      font: "11px -apple-system, system-ui, sans-serif",
-      whiteSpace: "nowrap",
-      overflow: "hidden",
-    });
+    Object.assign(this.el.style, { height: `${HEADER_H}px`, color: "var(--k-muted)" });
     this.text = document.createElement("div");
     this.text.className = "pane-place";
-    Object.assign(this.text.style, {
-      flex: "1 1 auto",
-      minWidth: "0",
-      display: "flex",
-      gap: "8px",
-      overflow: "hidden",
-    });
     this.el.append(this.text, dot);
     this.el.addEventListener("mousedown", (e) => {
       if ((e.target as HTMLElement).classList.contains("pane-changed") && onDiff) {
@@ -121,16 +90,6 @@ export class PaneHeader {
         const s = document.createElement("span");
         s.className = `pane-${p.kind}`;
         s.textContent = p.text;
-        // The branch gives way first when narrow, then the place.
-        const shrink = p.kind === "branch" ? "1" : p.kind === "place" || p.kind === "worktree" ? "0.5" : "0";
-        Object.assign(s.style, {
-          flex: `0 ${shrink} auto`,
-          minWidth: shrink === "0" ? "auto" : "2em",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          color: COLORS[p.kind],
-          cursor: p.kind === "changed" ? "pointer" : "",
-        });
         return s;
       }),
     );
