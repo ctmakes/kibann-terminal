@@ -497,7 +497,10 @@ fn clients_racing_to_start_share_one_daemon() {
         })
         .collect();
     let clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
-    let builds: Vec<_> = clients.iter().map(|(c, _)| c.hello().unwrap().build).collect();
+    let builds: Vec<_> = clients
+        .iter()
+        .map(|(c, _)| c.hello().unwrap().build)
+        .collect();
     assert_eq!(builds[0], daemon::BUILD);
     assert!(builds.iter().all(|b| *b == builds[0]));
 

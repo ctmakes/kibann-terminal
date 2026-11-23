@@ -37,7 +37,12 @@ fn foreign_terminal_variables_are_dropped() {
         let _ = tx.send(e);
     });
     let mut line = String::new();
-    while let Event::Frame(f) = rx.recv_timeout(Duration::from_secs(5)).expect("event") {
+    loop {
+        let f = match rx.recv_timeout(Duration::from_secs(5)).expect("event") {
+            Event::Frame(f) => f,
+            Event::Foreground(_) => continue,
+            Event::Exited(_) => break,
+        };
         session.ack(f.seq);
         if let Some(row) = f.rows.iter().find(|r| r.y == 0) {
             line = row

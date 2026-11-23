@@ -1,7 +1,10 @@
 //! A running terminal: shell on a PTY, emulator thread, frame pacing.
 //!
 //! Threads:
-//! - **session**: owns the [`Emulator`]; handles every [`Msg`] in order.
+//! - **session**: owns the [`Emulator`]. Handles control messages (input,
+//!   resize, acks) before PTY output, so typing never waits behind a flood
+//!   of output, and publishes what queries need ([`Session::title`] and
+//!   the like) after each pass, so they don't wait on it at all.
 //! - **reader**: PTY output to the session thread.
 //! - **writer**: bytes from the session thread to the PTY, so a program that
 //!   stops reading input can't stall the emulator.
@@ -14,10 +17,11 @@
 
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crossbeam_channel::{self as channel, Receiver};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use proto::wire::ReadSource;
 use proto::{Frame, InputEvent, MouseAction, Resize};
@@ -33,8 +37,8 @@ use crate::selection::AUTOSCROLL_INTERVAL;
 pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// How much PTY output to process before checking whether a frame is due.
 const OUTPUT_BUDGET: usize = 1 << 20;
-/// Messages in flight to the session thread. Bounded so a flood of output
-/// slows the reader down instead of growing memory.
+/// Chunks of PTY output in flight to the session thread. Bounded so a
+/// flood of output slows the reader down instead of growing memory.
 const QUEUE: usize = 256;
 /// How long to wait for the last output after the child exits. ConPTY may
 /// never report the end of output on its own.
@@ -84,15 +88,25 @@ fn enters(e: &InputEvent) -> bool {
     }
 }
 
-/// How often at most to look at the screen for an agent's state while
-/// output arrives; one more look follows when it stops.
-const AGENT_CHECK: Duration = Duration::from_millis(250);
+/// How often at most to look at what runs in the pane (the foreground
+/// program, its directory, an agent's state on screen) while output
+/// arrives. The first output after a quiet spell gets a look at once, and
+/// one more look follows when output stops.
+const LOOK_INTERVAL: Duration = Duration::from_millis(250);
+/// How often to look with no output, for what changes silently (a `cd` in
+/// a script).
+const LOOK_IDLE: Duration = Duration::from_secs(2);
 
 pub type Sink = Box<dyn FnMut(Event) + Send>;
 
+/// PTY output, on the bounded queue.
+enum Output {
+    Data(Vec<u8>),
+    End,
+}
+
+/// Everything else, handled before any queued output.
 enum Msg {
-    Output(Vec<u8>),
-    OutputEnd,
     ChildExited(Option<u32>),
     Input(InputEvent),
     Resize(Resize),
@@ -100,18 +114,31 @@ enum Msg {
     RequestFull,
     Theme(proto::theme::Theme),
     Attach(Sink),
-    Cwd(Sender<Option<PathBuf>>),
-    Title(Sender<String>),
-    Program(Sender<Option<Vec<String>>>),
     Show(Vec<u8>),
     Read(ReadSource, Option<usize>, Sender<String>),
     Shutdown,
 }
 
-/// Marks seen in the output (see [`crate::read::MarkScanner`]), oldest
-/// first, at most [`MAX_MARKS`].
-type Marks = Arc<Mutex<VecDeque<(String, i32)>>>;
+/// What the session thread last saw, for queries that shouldn't wait on
+/// it.
+#[derive(Default)]
+struct Seen {
+    title: String,
+    /// The directory the shell reported (OSC 7), else the one the OS gave
+    /// at the last look.
+    cwd: Option<PathBuf>,
+    /// The foreground program, when it isn't the shell, at the last look.
+    program: Option<Vec<String>>,
+    /// Marks seen in the output (see [`crate::read::MarkScanner`]), oldest
+    /// first, at most [`MAX_MARKS`].
+    marks: VecDeque<(String, i32)>,
+}
+type Shared = Arc<Mutex<Seen>>;
 const MAX_MARKS: usize = 64;
+
+fn seen(shared: &Shared) -> std::sync::MutexGuard<'_, Seen> {
+    shared.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// What to run. Defaults to the user's login shell.
 #[derive(Default)]
@@ -124,8 +151,8 @@ pub struct Spawn {
 
 /// Handle to a session. Dropping it kills the shell and stops the threads.
 pub struct Session {
-    tx: SyncSender<Msg>,
-    marks: Marks,
+    tx: channel::Sender<Msg>,
+    seen: Shared,
     thread: Option<JoinHandle<()>>,
     killer: Option<Box<dyn ChildKiller + Send + Sync>>,
 }
@@ -156,7 +183,8 @@ impl Session {
         for (k, v) in &spawn.env {
             cmd.env(k, v);
         }
-        if let Some(dir) = spawn.cwd.clone().or_else(home_dir) {
+        let dir = spawn.cwd.clone().or_else(home_dir);
+        if let Some(dir) = &dir {
             cmd.cwd(dir);
         }
 
@@ -168,8 +196,8 @@ impl Session {
         let reader = pair.master.try_clone_reader().map_err(io::Error::other)?;
         let writer = pair.master.take_writer().map_err(io::Error::other)?;
 
-        let (tx, rx) = mpsc::sync_channel(QUEUE);
-        spawn_reader(reader, tx.clone());
+        let (tx, rx) = channel::unbounded();
+        let output = spawn_reader(reader);
         {
             let tx = tx.clone();
             thread::Builder::new()
@@ -181,25 +209,29 @@ impl Session {
         }
         let pty_writer = spawn_writer(writer)?;
         let master = pair.master;
-        let marks = Marks::default();
-        let m = marks.clone();
+        // Until the first look, the directory it started in.
+        let seen = Shared::new(Mutex::new(Seen {
+            cwd: dir,
+            ..Seen::default()
+        }));
+        let shared = seen.clone();
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
                 let pty = Pty { master, shell_pid };
                 run(
-                    rx,
+                    Inbox { rx, output },
                     size,
                     pty_writer,
                     Some(pty),
                     true,
                     debug_recorder(size),
-                    m,
+                    shared,
                 );
             })?;
         Ok(Self {
             tx,
-            marks,
+            seen,
             thread: Some(thread),
             killer: Some(killer),
         })
@@ -212,19 +244,27 @@ impl Session {
         output: impl Read + Send + 'static,
         input: impl Write + Send + 'static,
     ) -> io::Result<Self> {
-        let (tx, rx) = mpsc::sync_channel(QUEUE);
-        spawn_reader(Box::new(output), tx.clone());
+        let (tx, rx) = channel::unbounded();
+        let output = spawn_reader(Box::new(output));
         let pty_writer = spawn_writer(Box::new(input))?;
-        let marks = Marks::default();
-        let m = marks.clone();
+        let seen = Shared::default();
+        let shared = seen.clone();
         let thread = thread::Builder::new()
             .name("term-session".into())
             .spawn(move || {
-                run(rx, size, pty_writer, None, false, None, m);
+                run(
+                    Inbox { rx, output },
+                    size,
+                    pty_writer,
+                    None,
+                    false,
+                    None,
+                    shared,
+                );
             })?;
         Ok(Self {
             tx,
-            marks,
+            seen,
             thread: Some(thread),
             killer: None,
         })
@@ -259,28 +299,22 @@ impl Session {
     }
 
     /// The shell's working directory: what it last reported (OSC 7), else
-    /// what the OS says for the foreground program or the shell. `None` when
-    /// unknown (or the session is busy for more than a moment).
+    /// what the OS says for the foreground program or the shell, as of at
+    /// most [`LOOK_INTERVAL`] after the last output. `None` when unknown.
     pub fn cwd(&self) -> Option<PathBuf> {
-        let (tx, rx) = mpsc::channel();
-        self.send(Msg::Cwd(tx));
-        rx.recv_timeout(Duration::from_millis(500)).ok().flatten()
+        seen(&self.seen).cwd.clone()
     }
 
     /// The title the tab shows: the program's own, else its name.
     pub fn title(&self) -> String {
-        let (tx, rx) = mpsc::channel();
-        self.send(Msg::Title(tx));
-        rx.recv_timeout(Duration::from_millis(500))
-            .unwrap_or_default()
+        seen(&self.seen).title.clone()
     }
 
     /// The program running in the foreground, `argv[0]` first, when it
-    /// isn't the shell itself. `None` at the prompt, or when unknown.
+    /// isn't the shell itself. `None` at the prompt, or when unknown. As
+    /// fresh as [`Session::cwd`].
     pub fn program(&self) -> Option<Vec<String>> {
-        let (tx, rx) = mpsc::channel();
-        self.send(Msg::Program(tx));
-        rx.recv_timeout(Duration::from_millis(500)).ok().flatten()
+        seen(&self.seen).program.clone()
     }
 
     /// Put `text` on the screen as if the program had printed it, without
@@ -289,18 +323,22 @@ impl Session {
         self.send(Msg::Show(text.as_bytes().to_vec()));
     }
 
-    /// The pane's text (see [`crate::read::text`]). Empty if the session is
-    /// gone or busy for more than a moment.
-    pub fn read(&self, source: ReadSource, lines: Option<usize>) -> String {
+    /// The pane's text (see [`crate::read::text`]). `None` if the session
+    /// is gone, or still busy with one pass after two seconds.
+    pub fn read(&self, source: ReadSource, lines: Option<usize>) -> Option<String> {
         let (tx, rx) = mpsc::channel();
         self.send(Msg::Read(source, lines, tx));
-        rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default()
+        rx.recv_timeout(Duration::from_secs(2)).ok()
     }
 
     /// The code printed with `mark`, once the output has carried it.
     pub fn mark(&self, mark: &str) -> Option<i32> {
-        let marks = self.marks.lock().unwrap_or_else(|e| e.into_inner());
-        marks.iter().rev().find(|(m, _)| m == mark).map(|(_, c)| *c)
+        let seen = seen(&self.seen);
+        seen.marks
+            .iter()
+            .rev()
+            .find(|(m, _)| m == mark)
+            .map(|(_, c)| *c)
     }
 
     fn send(&self, m: Msg) {
@@ -369,7 +407,8 @@ fn pty_size(s: Resize) -> PtySize {
     }
 }
 
-fn spawn_reader(mut r: Box<dyn Read + Send>, tx: SyncSender<Msg>) {
+fn spawn_reader(mut r: Box<dyn Read + Send>) -> Receiver<Output> {
+    let (tx, rx) = channel::bounded(QUEUE);
     let _ = thread::Builder::new()
         .name("term-reader".into())
         .spawn(move || {
@@ -378,7 +417,7 @@ fn spawn_reader(mut r: Box<dyn Read + Send>, tx: SyncSender<Msg>) {
                 match r.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if tx.send(Msg::Output(buf[..n].to_vec())).is_err() {
+                        if tx.send(Output::Data(buf[..n].to_vec())).is_err() {
                             return;
                         }
                     }
@@ -386,8 +425,59 @@ fn spawn_reader(mut r: Box<dyn Read + Send>, tx: SyncSender<Msg>) {
                     Err(_) => break,
                 }
             }
-            let _ = tx.send(Msg::OutputEnd);
+            let _ = tx.send(Output::End);
         });
+    rx
+}
+
+/// The session thread's two queues: control messages, then output.
+struct Inbox {
+    rx: Receiver<Msg>,
+    output: Receiver<Output>,
+}
+
+/// One message from an [`Inbox`].
+enum In {
+    Msg(Msg),
+    Output(Output),
+}
+
+impl Inbox {
+    /// Wait until `wake` (forever if `None`) for a message, control first;
+    /// output only while `output` (the reader hasn't ended). `None` on
+    /// timeout; `Err` once nothing can send any more.
+    fn wait(&self, wake: Option<Instant>, output: bool) -> Result<Option<In>, ()> {
+        if let Some(m) = self.next(output) {
+            return Ok(Some(m));
+        }
+        let never = channel::never();
+        let out = if output { &self.output } else { &never };
+        let timeout = match wake {
+            Some(w) => channel::after(w.saturating_duration_since(Instant::now())),
+            None => channel::never(),
+        };
+        channel::select_biased! {
+            recv(self.rx) -> m => m.map(|m| Some(In::Msg(m))).map_err(|_| ()),
+            // A reader that's gone without saying so has ended too.
+            recv(out) -> o => Ok(Some(In::Output(o.unwrap_or(Output::End)))),
+            recv(timeout) -> _ => Ok(None),
+        }
+    }
+
+    /// The next waiting message, control first; output only if `output`.
+    fn next(&self, output: bool) -> Option<In> {
+        if let Ok(m) = self.rx.try_recv() {
+            return Some(In::Msg(m));
+        }
+        if !output {
+            return None;
+        }
+        match self.output.try_recv() {
+            Ok(o) => Some(In::Output(o)),
+            Err(channel::TryRecvError::Empty) => None,
+            Err(channel::TryRecvError::Disconnected) => Some(In::Output(Output::End)),
+        }
+    }
 }
 
 fn spawn_writer(mut w: Box<dyn Write + Send>) -> io::Result<Sender<Vec<u8>>> {
@@ -430,6 +520,24 @@ impl Pacer {
         self.last_frame = Some(now);
         if let Some(s) = &mut self.sink {
             s(Event::Frame(f));
+        }
+    }
+
+    /// Send what changed now, if the viewer is keeping up, whether or not
+    /// a frame is due or the screen is held.
+    fn flush(&mut self, emu: &mut Emulator, now: Instant) {
+        if !self.can_send() {
+            return;
+        }
+        if let Some(f) = emu.take_captured() {
+            self.emit(f, now);
+        }
+        if self.can_send()
+            && let Ok(Some(f)) = emu.build_frame(self.force_full)
+        {
+            self.emit(f, now);
+            self.dirty = false;
+            self.force_full = false;
         }
     }
 
@@ -496,24 +604,16 @@ impl Pty {
         self.shell_pid.and_then(|p| i32::try_from(p).ok())
     }
 
-    /// The foreground program's arguments, when it isn't the shell.
-    fn program(&self) -> Option<Vec<String>> {
-        let fg = self.foreground_pid()?;
-        let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok());
-        if Some(fg) == shell {
-            return None;
-        }
-        crate::process::argv(fg).filter(|a| !a.is_empty())
-    }
-
-    /// The foreground program, and if it is a known agent, its state.
-    fn foreground(&self, emu: &Emulator) -> Foreground {
+    /// What runs in the foreground, and its arguments when it isn't the
+    /// shell.
+    fn look(&self, emu: &Emulator) -> (Foreground, Option<Vec<String>>) {
         let fg = self.foreground_pid();
         let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok());
+        let at_shell = fg.is_some() && fg == shell;
+        let argv = fg.and_then(crate::process::argv);
         let agent = fg.and_then(|pid| {
             let name = crate::process::name(pid).unwrap_or_default();
-            let argv = crate::process::argv(pid).unwrap_or_default();
-            crate::agent::identify(&name, &argv)
+            crate::agent::identify(&name, argv.as_deref().unwrap_or_default())
         });
         let agent = agent.map(|a| {
             let text = crate::read::text(
@@ -526,12 +626,14 @@ impl Pty {
             let lines: Vec<&str> = text.lines().collect();
             (a, crate::agent::detect(a, &emu.title(), &lines))
         });
-        Foreground {
+        let program = argv.filter(|a| !at_shell && !a.is_empty());
+        let fg = Foreground {
             agent,
-            at_shell: fg.is_some() && fg == shell,
+            at_shell,
             cwd: emu.reported_dir().or_else(|| self.cwd()),
             entered: 0,
-        }
+        };
+        (fg, program)
     }
 
     fn cwd(&self) -> Option<PathBuf> {
@@ -543,14 +645,26 @@ impl Pty {
     }
 }
 
+/// Bytes the emulator has for the program (keys, replies to queries).
+fn send_outbox(emu: &mut Emulator, pty: &Sender<Vec<u8>>, rec: &mut Option<Recorder>) {
+    let out = emu.take_outbox();
+    if !out.is_empty() {
+        if let Some(r) = rec {
+            let _ = r.input(&out);
+            let _ = r.flush();
+        }
+        let _ = pty.send(out);
+    }
+}
+
 fn run(
-    rx: Receiver<Msg>,
+    inbox: Inbox,
     size: Resize,
     pty: Sender<Vec<u8>>,
     master: Option<Pty>,
     report_exit: bool,
     mut rec: Option<Recorder>,
-    marks: Marks,
+    shared: Shared,
 ) {
     let mut scanner = crate::read::MarkScanner::default();
     let Ok(mut emu) = Emulator::new(size) else {
@@ -573,9 +687,11 @@ fn run(
     let mut autoscroll: Option<Instant> = None;
     // When to search on, while a search has more scrollback to look through.
     let mut find_due: Option<Instant> = None;
-    // Next look at the screen for an agent's state, and the last result.
-    let mut agent_due: Option<Instant> = None;
+    // The next look at what runs in the pane, the last one, and what it saw.
+    let mut look_due: Option<Instant> = master.as_ref().map(|_| Instant::now());
+    let mut looked: Option<Instant> = None;
     let mut foreground: Option<Foreground> = None;
+    let mut os_cwd: Option<PathBuf> = seen(&shared).cwd.clone();
     let mut entered: u64 = 0;
 
     loop {
@@ -587,49 +703,44 @@ fn run(
             emu.hold_deadline(),
             exit_wait,
             autoscroll,
-            agent_due,
+            look_due,
             find_due,
         ]
         .into_iter()
         .flatten()
         .min();
-        let first = match wake {
-            Some(w) => match rx.recv_timeout(w.saturating_duration_since(Instant::now())) {
-                Ok(m) => Some(m),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => return,
-            },
-            None => match rx.recv() {
-                Ok(m) => Some(m),
-                Err(_) => return,
-            },
+        let Ok(first) = inbox.wait(wake, !output_done) else {
+            return;
         };
 
         let mut budget = OUTPUT_BUDGET;
         let mut next = first;
         while let Some(m) = next.take() {
+            let control = matches!(m, In::Msg(_));
             match m {
-                Msg::Output(data) => {
+                In::Output(Output::Data(data)) => {
                     budget = budget.saturating_sub(data.len());
                     emu.write(&data);
                     p.dirty = true;
-                    if master.is_some() && agent_due.is_none() {
-                        agent_due = Some(Instant::now() + AGENT_CHECK);
+                    if let Some(due) = look_due {
+                        let now = Instant::now();
+                        let soon = looked.map_or(now, |t| (t + LOOK_INTERVAL).max(now));
+                        look_due = Some(due.min(soon));
                     }
                     scanner.scan(&data, |mark, code| {
-                        let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
-                        if m.len() == MAX_MARKS {
-                            m.pop_front();
+                        let marks = &mut seen(&shared).marks;
+                        if marks.len() == MAX_MARKS {
+                            marks.pop_front();
                         }
-                        m.push_back((mark, code));
+                        marks.push_back((mark, code));
                     });
                     if let Some(r) = &mut rec {
                         let _ = r.output(&data);
                     }
                 }
-                Msg::OutputEnd => output_done = true,
-                Msg::ChildExited(code) => exit = Some((code, Instant::now())),
-                Msg::Input(e) => {
+                In::Output(Output::End) => output_done = true,
+                In::Msg(Msg::ChildExited(code)) => exit = Some((code, Instant::now())),
+                In::Msg(Msg::Input(e)) => {
                     if let Some(r) = &mut rec
                         && !matches!(
                             e,
@@ -648,7 +759,7 @@ fn run(
                     // Selection and scrolling change the screen with no output.
                     p.dirty = true;
                 }
-                Msg::Resize(s) => {
+                In::Msg(Msg::Resize(s)) => {
                     if let Some(r) = &mut rec {
                         let _ = r.resize(s.cols, s.rows);
                     }
@@ -660,20 +771,20 @@ fn run(
                         p.force_full = true;
                     }
                 }
-                Msg::Ack(seq) => p.acked = p.acked.max(seq.min(p.sent)),
+                In::Msg(Msg::Ack(seq)) => p.acked = p.acked.max(seq.min(p.sent)),
                 // The client asks after missing a frame, and drops every
                 // partial frame until a full one: frames in flight will never
                 // be acked, and waiting on them would stall the pane for good.
-                Msg::RequestFull => {
+                In::Msg(Msg::RequestFull) => {
                     p.force_full = true;
                     p.acked = p.sent;
                 }
-                Msg::Theme(t) => {
+                In::Msg(Msg::Theme(t)) => {
                     let _ = emu.set_theme(&t);
                     p.dirty = true;
                     p.force_full = true;
                 }
-                Msg::Attach(sink) => {
+                In::Msg(Msg::Attach(sink)) => {
                     p.sink = Some(sink);
                     // Frames sent to the old sink will never be acked.
                     p.acked = p.sent;
@@ -681,32 +792,23 @@ fn run(
                     p.last_frame = None;
                     exit_sent = false;
                 }
-                Msg::Cwd(reply) => {
-                    let dir = emu
-                        .reported_dir()
-                        .or_else(|| master.as_ref().and_then(Pty::cwd));
-                    let _ = reply.send(dir);
-                }
-                Msg::Title(reply) => {
-                    let _ = reply.send(emu.title());
-                }
-                Msg::Program(reply) => {
-                    let _ = reply.send(master.as_ref().and_then(Pty::program));
-                }
-                Msg::Show(data) => {
+                In::Msg(Msg::Show(data)) => {
                     emu.write(&data);
                     p.dirty = true;
                 }
-                Msg::Read(source, lines, reply) => {
+                In::Msg(Msg::Read(source, lines, reply)) => {
                     let text = crate::read::text(emu.terminal(), emu.size(), source, lines);
                     let _ = reply.send(text.unwrap_or_default());
                 }
-                Msg::Shutdown => return,
+                In::Msg(Msg::Shutdown) => return,
             }
-            if budget == 0 {
-                break;
+            // What a key or a reply to the program sends goes out now,
+            // not after the rest of the output in this pass.
+            if control {
+                send_outbox(&mut emu, &pty, &mut rec);
             }
-            next = rx.try_recv().ok();
+            // Control messages keep coming through after the output budget.
+            next = inbox.next(budget > 0 && !output_done);
         }
 
         // The foreground program changes as programs start, exit or exec,
@@ -725,14 +827,7 @@ fn run(
             emu.set_cwd(m.cwd());
         }
 
-        let out = emu.take_outbox();
-        if !out.is_empty() {
-            if let Some(r) = &mut rec {
-                let _ = r.input(&out);
-                let _ = r.flush();
-            }
-            let _ = pty.send(out);
-        }
+        send_outbox(&mut emu, &pty, &mut rec);
 
         let now = Instant::now();
         if emu.expire_hold(now) {
@@ -759,20 +854,33 @@ fn run(
         }
         deadline = p.tick(&mut emu, now);
 
-        if let Some(due) = agent_due
+        let mut program = None;
+        if let Some(due) = look_due
             && now >= due
             && let Some(m) = &master
         {
-            agent_due = None;
-            let now_fg = Foreground {
-                entered,
-                ..m.foreground(&emu)
-            };
-            if foreground.as_ref() != Some(&now_fg) {
-                foreground = Some(now_fg.clone());
+            look_due = Some(now + LOOK_IDLE);
+            looked = Some(now);
+            let (fg, argv) = m.look(&emu);
+            os_cwd = fg.cwd.clone();
+            program = Some(argv);
+            let fg = Foreground { entered, ..fg };
+            if foreground.as_ref() != Some(&fg) {
+                foreground = Some(fg.clone());
                 if let Some(sink) = p.sink.as_mut() {
-                    sink(Event::Foreground(now_fg));
+                    sink(Event::Foreground(fg));
                 }
+            }
+        }
+        {
+            let mut seen = seen(&shared);
+            let title = emu.title();
+            if seen.title != title {
+                seen.title = title;
+            }
+            seen.cwd = emu.reported_dir().or_else(|| os_cwd.clone());
+            if let Some(argv) = program {
+                seen.program = argv;
             }
         }
 
@@ -780,14 +888,14 @@ fn run(
             && let Some((code, at)) = exit
             && (output_done || now >= at + EXIT_GRACE)
             && !exit_sent
-            && let Some(sink) = p.sink.as_mut()
+            && p.sink.is_some()
         {
-            // Make sure the last output is on screen first.
-            if let Ok(Some(f)) = emu.build_frame(false) {
-                p.sent = f.seq;
-                sink(Event::Frame(f));
+            // The last output goes on screen first, if the viewer is
+            // keeping up (a captured frame before it).
+            p.flush(&mut emu, now);
+            if let Some(sink) = p.sink.as_mut() {
+                sink(Event::Exited(code));
             }
-            sink(Event::Exited(code));
             exit_sent = true;
         }
     }

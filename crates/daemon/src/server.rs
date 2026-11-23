@@ -471,8 +471,9 @@ impl Daemon {
                 lines,
             } => {
                 let reply = match self.session(pane) {
-                    Some(s) => Reply::Text {
-                        text: s.read(source, lines.map(|n| n as usize)),
+                    Some(s) => match s.read(source, lines.map(|n| n as usize)) {
+                        Some(text) => Reply::Text { text },
+                        None => err(ErrorCode::Failed, format!("pane p{pane} is busy")),
                     },
                     None => err(ErrorCode::NotFound, format!("no pane p{pane}")),
                 };
@@ -1088,7 +1089,6 @@ impl Daemon {
                 })
                 .collect()
         };
-        // Each asks the session thread: outside the lock.
         let panes = list
             .into_iter()
             .map(|(id, tab, s, status, git)| PaneInfo {
@@ -1284,8 +1284,7 @@ fn type_when_ready(session: &Session, cmd: &str) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while session
         .read(proto::wire::ReadSource::Visible, None)
-        .trim()
-        .is_empty()
+        .is_none_or(|t| t.trim().is_empty())
         && std::time::Instant::now() < deadline
     {
         thread::sleep(std::time::Duration::from_millis(50));

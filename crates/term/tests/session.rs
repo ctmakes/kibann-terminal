@@ -407,3 +407,27 @@ fn title_is_the_programs_or_the_process_name() {
     assert!(seen.contains(&"hello".to_owned()), "{seen:?}");
     assert_eq!(seen.last().map(String::as_str), Some("awk"), "{seen:?}");
 }
+
+#[test]
+fn typing_goes_through_ahead_of_a_flood_of_output() {
+    let h = harness();
+    let _ = h.next();
+    // 16 MB of output queued, the last line saying so.
+    let chunk = "flood flood flood\r\n".repeat(64 * 1024 / 19).into_bytes();
+    for _ in 0..256 {
+        h.pty.send(chunk.clone()).unwrap();
+    }
+    h.pty.send(b"END".to_vec()).unwrap();
+    h.session.input(InputEvent::Text { data: "x".into() });
+
+    let end = std::time::Instant::now() + WAIT;
+    while !h.written.0.lock().unwrap().contains(&b'x') {
+        assert!(std::time::Instant::now() < end, "the key never got through");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let screen = h.session.read(proto::wire::ReadSource::Visible, None);
+    assert!(
+        !screen.expect("the screen").contains("END"),
+        "the key waited for all the output"
+    );
+}

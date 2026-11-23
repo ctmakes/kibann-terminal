@@ -1,3 +1,6 @@
 # ts-rs writes generated TypeScript here when `cargo test -p proto` runs.
 [env]
 TS_RS_EXPORT_DIR = { value = "app/src/proto/generated", relative = true }
+# libghostty-vt in Zig's Debug mode (what dev builds get otherwise) takes
+# seconds for 64 KB of output, which makes dev builds and tests crawl.
+LIBGHOSTTY_VT_SYS_OPTIMIZE = "ReleaseFast"

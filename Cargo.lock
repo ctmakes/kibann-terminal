@@ -4692,6 +4692,7 @@ dependencies = [
 name = "term"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "libc",
  "libghostty-vt",
  "portable-pty",
