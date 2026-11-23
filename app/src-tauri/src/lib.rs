@@ -18,7 +18,9 @@ mod tray;
 mod update;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use client::{Client, ClientEvent};
 use proto::layout::{Action, Layout, PaneId, TabId};
@@ -37,6 +39,11 @@ type Channels = Arc<Mutex<HashMap<PaneId, Channel>>>;
 struct Term {
     link: std::sync::RwLock<Option<Arc<Client>>>,
     channels: Channels,
+    /// Connections made so far: each one's events know its number.
+    made: AtomicU64,
+    /// The number of the connection in use, 0 for none. Only its end means
+    /// the service went away (not a replaced service's, nor a failed try's).
+    live: AtomicU64,
 }
 
 impl Term {
@@ -48,8 +55,11 @@ impl Term {
             .ok_or_else(|| "no terminal service".to_owned())
     }
 
+    /// Use `client`, the connection [`events`] was last asked to handle.
     fn set(&self, client: Client) {
         *self.link.write().unwrap() = Some(Arc::new(client));
+        self.live
+            .store(self.made.load(Ordering::SeqCst), Ordering::SeqCst);
     }
 
     fn send(&self, msg: ClientMsg) -> Result<(), String> {
@@ -57,9 +67,24 @@ impl Term {
     }
 }
 
+/// The handler for each new connection's events (see [`on_event`]).
+fn events(app: &AppHandle) -> impl Fn() -> Box<dyn FnMut(ClientEvent<'_>) + Send> + use<> {
+    let app = app.clone();
+    move || {
+        let term = app.state::<Term>();
+        let me = term.made.fetch_add(1, Ordering::SeqCst) + 1;
+        Box::new(on_event(app.clone(), term.channels.clone(), me))
+    }
+}
+
 /// Frames go to their session's channel as the JSON the daemon sent, without
-/// being decoded here; layouts become `layout` events.
-fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) + Send + 'static {
+/// being decoded here; layouts become `layout` events. `me`: this
+/// connection's number (see [`Term::live`]).
+fn on_event(
+    app: AppHandle,
+    channels: Channels,
+    me: u64,
+) -> impl FnMut(ClientEvent<'_>) + Send + 'static {
     move |event| match event {
         ClientEvent::Frame { session, json } => {
             if let Some(ch) = channels.lock().unwrap().get(&session) {
@@ -76,8 +101,19 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
             let _ = app.emit(event::PANE_GIT, panes);
         }
         // The daemon went away, and its shells with it: no panes are left.
+        // The page clears them (without quitting, as when the last pane
+        // closes), and a new service starts.
         ClientEvent::Disconnected => {
-            let _ = app.emit(event::LAYOUT, Layout::default());
+            let term = app.state::<Term>();
+            if term
+                .live
+                .compare_exchange(me, 0, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return;
+            }
+            *term.link.write().unwrap() = None;
+            let _ = app.emit(event::SERVICE_LOST, ());
             let _ = app.emit(
                 event::AGENT_STATUS,
                 std::collections::BTreeMap::<u32, proto::status::PaneStatus>::new(),
@@ -86,8 +122,59 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
                 event::PANE_GIT,
                 std::collections::BTreeMap::<u32, proto::git::PaneDir>::new(),
             );
+            reconnect(app.clone());
         }
     }
+}
+
+/// Connect to a service again, starting one, sooner at first and then
+/// every few seconds. Then bring back the saved tabs (or open one), as at
+/// launch, and tell the page (`service-back`, with the panes reopened).
+fn reconnect(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut wait = Duration::from_millis(200);
+        loop {
+            std::thread::sleep(wait);
+            let c = match service::connect(events(&app)) {
+                Ok(service::Connected::Ready(c) | service::Connected::Older(c, _)) => c,
+                Ok(service::Connected::Unusable(busy)) => {
+                    service::offer_restart(&app, &busy);
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("kibann: no terminal service yet: {e}");
+                    wait = (wait * 2).min(Duration::from_secs(5));
+                    continue;
+                }
+            };
+            send_theme(&app, &c);
+            let restored = reopen(&c);
+            app.state::<Term>().set(c);
+            let _ = app.emit(event::SERVICE_BACK, restored);
+            return;
+        }
+    });
+}
+
+/// With no panes open, the saved tabs and splits (if restore-layout is on),
+/// else one new tab; then watch the layout. How many panes came back.
+fn reopen(c: &Client) -> u32 {
+    let restored = if files::config::read_settings().0.restore_layout {
+        c.restore().map_or(0, |(_, panes)| panes)
+    } else {
+        0
+    };
+    if let Ok(layout) = c.watch()
+        && layout.tabs.is_empty()
+    {
+        let _ = c.act(Action::NewTab {
+            near: None,
+            cwd: None,
+            argv: None,
+            focus: true,
+        });
+    }
+    restored
 }
 
 /// Every command the page can invoke. `cargo test` writes their names to
@@ -514,12 +601,15 @@ fn show_theme(app: &AppHandle) {
     if let Some(term) = app.try_state::<Term>()
         && let Ok(c) = term.client()
     {
-        let _ = c.request(|req| ClientMsg::SetTheme {
-            req,
-            theme: theme.clone(),
-        });
+        send_theme(app, &c);
     }
     let _ = app.emit(event::THEME, ThemeNow { name, theme });
+}
+
+/// Give the service the theme in use (its shells' colors).
+fn send_theme(app: &AppHandle, c: &Client) {
+    let theme = app.state::<Mutex<Looks>>().lock().unwrap().theme.clone();
+    let _ = c.request(|req| ClientMsg::SetTheme { req, theme });
 }
 
 /// The window around the webview in the theme's colors: the title bar's
@@ -1038,8 +1128,7 @@ pub fn run() {
             let handle = app.handle();
             app.manage(Term::default());
             let term = app.state::<Term>();
-            let made = |h: AppHandle, c: Channels| move || on_event(h.clone(), c.clone());
-            match service::connect(made(handle.clone(), term.channels.clone())) {
+            match service::connect(events(handle)) {
                 Ok(service::Connected::Ready(c)) => term.set(c),
                 Ok(service::Connected::Older(c, busy)) => {
                     term.set(c);

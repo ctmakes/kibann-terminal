@@ -60,6 +60,7 @@ async function start(): Promise<void> {
   // colors the terminals through the daemon; the window follows here.
   const now = await invoke<ThemeNow>("theme_current");
   let themeName = now.name;
+  let serviceLost = false;
   const themes: ThemeApi = {
     list: () => invoke<ThemeEntry[]>("theme_list"),
     preview: (name) => invoke("theme_preview", { name }),
@@ -101,7 +102,8 @@ async function start(): Promise<void> {
     firstRunHint: true,
     transport: (pane) => new TauriTransport(pane),
     onTitle: (title) => void win.setTitle(title),
-    onEmpty: () => void invoke("app_quit"),
+    // The last pane closed: quit, unless the service went away instead.
+    onEmpty: () => void (serviceLost || invoke("app_quit")),
     onContextMenu: (pane) => void showContextMenu(ws, pane),
     // The Dock icon shows how many agents wait for the user (macOS).
     onBlocked: (count) => void invoke("set_badge", { count }),
@@ -169,6 +171,18 @@ async function start(): Promise<void> {
   // Panes still running from before (the app was closed, or the page
   // reloaded) come back as they were.
   await listen<Layout>("layout", (e) => ws.apply(e.payload));
+  // The service ended (it crashed or was stopped), and its shells with it.
+  // The app starts another, reopens the saved tabs, then says so.
+  await listen("service-lost", () => {
+    serviceLost = true;
+    ws.apply({ tabs: [], active: null });
+    ws.notice("The terminal service stopped. Starting it again…", 15000);
+  });
+  await listen<number>("service-back", (e) => {
+    serviceLost = false;
+    const n = e.payload;
+    ws.notice(`The terminal service started again${n > 0 ? `; reopened ${n === 1 ? "1 pane" : `${n} panes`}` : ""}.`, 6000);
+  });
   // Agent status comes the same way, right after the first layout.
   await listen<StatusMap>("agent-status", (e) => ws.setStatus(e.payload));
   await listen<GitMap>("pane-git", (e) => ws.setGit(e.payload));

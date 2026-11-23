@@ -58,4 +58,6 @@ export type EventName =
   | "window-shown"
   | "show-waiting"
   | "update-status"
-  | "update-ready";
+  | "update-ready"
+  | "service-lost"
+  | "service-back";

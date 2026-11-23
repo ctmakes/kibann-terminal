@@ -42,4 +42,8 @@ events! {
     UPDATE_STATUS = "update-status";
     /// An update is downloaded (`UpdateReady`).
     UPDATE_READY = "update-ready";
+    /// The terminal service went away, and its shells with it.
+    SERVICE_LOST = "service-lost";
+    /// A terminal service runs again (the panes reopened, a number).
+    SERVICE_BACK = "service-back";
 }
