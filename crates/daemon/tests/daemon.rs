@@ -17,7 +17,7 @@ use proto::layout::PaneId;
 use proto::layout::{Action, Dir, Layout};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply};
-use proto::{Frame, InputEvent, Resize};
+use proto::{Frame, InputEvent, Resize, TextScreen};
 
 const SIZE: Resize = Resize {
     cols: 60,
@@ -153,38 +153,10 @@ fn type_text(c: &Client, session: PaneId, text: &str) {
     .unwrap();
 }
 
-/// The session's screen as the frames describe it, one string per row.
-#[derive(Default)]
-struct Screen(BTreeMap<u16, String>);
-
-impl Screen {
-    fn apply(&mut self, f: &Frame) {
-        if f.full {
-            self.0.clear();
-        }
-        for row in &f.rows {
-            let mut s = String::new();
-            for run in &row.runs {
-                match &run.text {
-                    Some(t) => t
-                        .iter()
-                        .for_each(|c| s.push_str(if c.is_empty() { " " } else { c })),
-                    None => s.push_str(&" ".repeat(run.len as usize)),
-                }
-            }
-            self.0.insert(row.y, s);
-        }
-    }
-
-    fn contains(&self, needle: &str) -> bool {
-        self.0.values().any(|r| r.contains(needle))
-    }
-}
-
 /// Apply frames for `session` (acking them, as the app does) until the
 /// screen shows `needle`.
-fn wait_for(c: &Client, rx: &Receiver<Ev>, session: PaneId, needle: &str) -> Screen {
-    let mut screen = Screen::default();
+fn wait_for(c: &Client, rx: &Receiver<Ev>, session: PaneId, needle: &str) -> TextScreen {
+    let mut screen = TextScreen::default();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -202,7 +174,7 @@ fn wait_for(c: &Client, rx: &Receiver<Ev>, session: PaneId, needle: &str) -> Scr
             _ => {}
         }
     }
-    panic!("never saw {needle:?}; screen: {:#?}", screen.0);
+    panic!("never saw {needle:?}; screen: {:#?}", screen.lines());
 }
 
 #[test]
@@ -595,7 +567,7 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
                     })
                     .unwrap();
                     screen.apply(&f);
-                    if screen.0.values().any(|r| r.trim_end().ends_with(&marker)) {
+                    if screen.lines().iter().any(|r| r.ends_with(&marker)) {
                         break;
                     }
                 }

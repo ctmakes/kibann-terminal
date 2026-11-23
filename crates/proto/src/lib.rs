@@ -215,6 +215,58 @@ pub struct Row {
     pub runs: Vec<Run>,
 }
 
+impl Row {
+    /// The row as text: a space for each blank cell, nothing for a wide
+    /// character's tail, trailing blanks dropped.
+    pub fn text(&self) -> String {
+        let mut s = String::new();
+        for run in &self.runs {
+            let wide = run.wide.as_deref().unwrap_or(&[]);
+            for i in 0..run.len {
+                let tail = i > 0 && wide.contains(&(i - 1));
+                match run.text.as_ref().map(|t| t[usize::from(i)].as_str()) {
+                    Some(c) if !c.is_empty() => s.push_str(c),
+                    _ if tail => {}
+                    _ => s.push(' '),
+                }
+            }
+        }
+        s.truncate(s.trim_end().len());
+        s
+    }
+}
+
+impl Frame {
+    /// Row `y` as text ([`Row::text`]), if the frame carries it.
+    pub fn row_text(&self, y: u16) -> Option<String> {
+        self.rows.iter().find(|r| r.y == y).map(Row::text)
+    }
+}
+
+/// A pane's screen as text, kept up by applying its frames in order.
+#[derive(Debug, Default, Clone)]
+pub struct TextScreen(std::collections::BTreeMap<u16, String>);
+
+impl TextScreen {
+    pub fn apply(&mut self, f: &Frame) {
+        if f.full {
+            self.0.clear();
+        }
+        for row in &f.rows {
+            self.0.insert(row.y, row.text());
+        }
+    }
+
+    /// The rows seen so far, top to bottom.
+    pub fn lines(&self) -> Vec<String> {
+        self.0.values().cloned().collect()
+    }
+
+    pub fn contains(&self, needle: &str) -> bool {
+        self.0.values().any(|r| r.contains(needle))
+    }
+}
+
 /// Consecutive cells with the same style.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

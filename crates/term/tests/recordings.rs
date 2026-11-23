@@ -4,9 +4,9 @@
 //! `UPDATE_RECORDINGS=1 cargo test -p term --test recordings` rewrites the
 //! frame files (`npm run gen:recordings` in `app/`).
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use proto::TextScreen;
 use term::cast;
 use term::replay::{self, TimedFrame};
 
@@ -23,31 +23,14 @@ fn replayed(name: &str) -> Vec<TimedFrame> {
 
 /// The screen as text after each frame.
 fn screens(frames: &[TimedFrame]) -> Vec<Vec<String>> {
-    let mut grid: BTreeMap<u16, String> = BTreeMap::new();
-    let mut out = Vec::new();
-    for tf in frames {
-        let f = &tf.frame;
-        if f.full {
-            grid.clear();
-        }
-        for row in &f.rows {
-            let mut s = String::new();
-            for run in &row.runs {
-                let wide = run.wide.as_deref().unwrap_or(&[]);
-                for i in 0..run.len {
-                    let tail = i > 0 && wide.contains(&(i - 1));
-                    match run.text.as_ref().map(|t| t[i as usize].as_str()) {
-                        Some(c) if !c.is_empty() => s.push_str(c),
-                        _ if tail => {}
-                        _ => s.push(' '),
-                    }
-                }
-            }
-            grid.insert(row.y, s.trim_end().to_owned());
-        }
-        out.push(grid.values().cloned().collect());
-    }
-    out
+    let mut screen = TextScreen::default();
+    frames
+        .iter()
+        .map(|tf| {
+            screen.apply(&tf.frame);
+            screen.lines()
+        })
+        .collect()
 }
 
 const NAMES: [&str; 3] = ["vim", "man", "sync"];

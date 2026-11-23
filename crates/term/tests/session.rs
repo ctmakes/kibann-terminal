@@ -50,17 +50,7 @@ impl Write for Captured {
 
 /// Row 0's text, blanks as spaces.
 fn line0(f: &Frame) -> String {
-    let row = f.rows.iter().find(|r| r.y == 0).expect("row 0");
-    let mut s = String::new();
-    for run in &row.runs {
-        match &run.text {
-            Some(t) => t
-                .iter()
-                .for_each(|c| s.push_str(if c.is_empty() { " " } else { c })),
-            None => s.extend(std::iter::repeat_n(' ', run.len as usize)),
-        }
-    }
-    s.trim_end().to_owned()
+    f.row_text(0).expect("row 0")
 }
 
 /// A session's frames (for view 0) and events, in one stream.

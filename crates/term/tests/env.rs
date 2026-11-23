@@ -48,15 +48,11 @@ fn foreign_terminal_variables_are_dropped() {
             Err(Event::Exited(_)) => break,
         };
         session.ack(0, f.seq);
-        if let Some(row) = f.rows.iter().find(|r| r.y == 0) {
-            line = row
-                .runs
-                .iter()
-                .flat_map(|r| r.text.clone().unwrap_or_default())
-                .collect::<String>();
+        if let Some(l) = f.row_text(0) {
+            line = l;
         }
     }
-    assert_eq!(line.trim_end(), "kibann|unset|unset|vim");
+    assert_eq!(line, "kibann|unset|unset|vim");
 
     assert!(is_foreign_terminal_var("KITTY_WINDOW_ID"));
     assert!(is_foreign_terminal_var("VSCODE_INJECTION"));

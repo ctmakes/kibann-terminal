@@ -12,25 +12,9 @@ fn emu() -> Emulator {
     Emulator::new(SIZE).unwrap()
 }
 
-/// Row `y` of a frame as text, with blanks as spaces and wide tails dropped.
+/// Row `y` of a frame as text.
 fn row_text(f: &Frame, y: u16) -> String {
-    let row = f.rows.iter().find(|r| r.y == y).expect("row in frame");
-    let mut s = String::new();
-    for run in &row.runs {
-        for i in 0..run.len as usize {
-            let wide_tail = i > 0
-                && run
-                    .wide
-                    .as_ref()
-                    .is_some_and(|w| w.contains(&(i as u16 - 1)));
-            match &run.text {
-                Some(t) if !t[i].is_empty() => s.push_str(&t[i]),
-                _ if wide_tail => {}
-                _ => s.push(' '),
-            }
-        }
-    }
-    s.trim_end().to_owned()
+    f.row_text(y).expect("row in frame")
 }
 
 fn key(code: &str, text: Option<&str>, mods: u16) -> InputEvent {
