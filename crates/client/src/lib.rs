@@ -3,12 +3,14 @@
 //! passes them on (the app, to its webview) does no per-frame work.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use proto::git::PaneDir;
 use proto::layout::{Action, Layout, PaneId, TabId};
@@ -261,164 +263,135 @@ pub fn list_programs(programs: &[String]) -> String {
     }
 }
 
-#[cfg(unix)]
-mod unix {
-    use std::ffi::OsString;
-    use std::io;
-    use std::os::unix::net::UnixStream;
-    use std::os::unix::process::CommandExt;
-    use std::path::Path;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+/// How long to wait for a daemon we started to start listening.
+const START_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a daemon may take to end its sessions and exit.
+const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
-    use super::{Client, ClientEvent};
+pub use endpoint::lock_held;
 
-    /// A client over `stream` that shuts it down when dropped.
+/// Wait until no daemon holds `socket`'s lock.
+fn wait_for_exit(socket: &Path, timeout: Duration) -> io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while lock_held(socket) {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the terminal service didn't exit",
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    Ok(())
+}
+
+impl Client {
+    /// A client over `conn` that hangs it up when dropped.
     fn over(
-        stream: UnixStream,
+        conn: endpoint::Conn,
         on_event: impl FnMut(ClientEvent<'_>) + Send + 'static,
-    ) -> io::Result<Client> {
-        let handle = stream.try_clone()?;
-        let mut c = Client::new(stream.try_clone()?, stream, on_event)?;
-        c.hangup = Some(Box::new(move || {
-            let _ = handle.shutdown(std::net::Shutdown::Both);
-        }));
+    ) -> io::Result<Self> {
+        let mut c = Client::new(conn.reader, conn.writer, on_event)?;
+        c.hangup = Some(conn.hangup);
         Ok(c)
     }
 
-    /// How long to wait for a daemon we started to start listening.
-    const START_TIMEOUT: Duration = Duration::from_secs(3);
-    /// How long a daemon may take to end its sessions and exit.
-    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-
-    /// The lock a daemon holds for as long as it runs (`<socket>.lock`).
-    fn lock_path(socket: &Path) -> std::path::PathBuf {
-        let mut p = socket.as_os_str().to_owned();
-        p.push(".lock");
-        p.into()
+    /// Connect to a running daemon.
+    pub fn connect(
+        socket: &Path,
+        on_event: impl FnMut(ClientEvent<'_>) + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::over(endpoint::connect(socket)?, on_event)
     }
 
-    /// Whether a daemon for `socket` is running, or still ending: it holds
-    /// the lock until its process is gone.
-    pub fn lock_held(socket: &Path) -> bool {
-        use std::os::fd::AsRawFd;
-        let Ok(f) = std::fs::File::options()
-            .read(true)
-            .write(true)
-            .open(lock_path(socket))
-        else {
-            return false;
-        };
-        // SAFETY: a valid open file descriptor; the lock goes with the file.
-        unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 }
-    }
-
-    /// Wait until no daemon holds `socket`'s lock.
-    fn wait_for_exit(socket: &Path, timeout: Duration) -> io::Result<()> {
-        let deadline = Instant::now() + timeout;
-        while lock_held(socket) {
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "the terminal service didn't exit",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(20));
+    /// Connect, starting the daemon with `command` (program and
+    /// arguments; `--socket PATH` is added) first if none is running.
+    /// Two clients racing start at most one daemon: the second one to
+    /// start finds the lock taken and exits, and both clients connect to
+    /// the first.
+    pub fn connect_or_start(
+        socket: &Path,
+        command: &[OsString],
+        on_event: impl FnMut(ClientEvent<'_>) + Send + 'static,
+    ) -> io::Result<Self> {
+        if let Ok(c) = endpoint::connect(socket) {
+            return Self::over(c, on_event);
         }
-        Ok(())
-    }
-
-    impl Client {
-        /// Connect to a running daemon.
-        pub fn connect(
-            socket: &Path,
-            on_event: impl FnMut(ClientEvent<'_>) + Send + 'static,
-        ) -> io::Result<Self> {
-            over(UnixStream::connect(socket)?, on_event)
-        }
-
-        /// Connect, starting the daemon with `command` (program and
-        /// arguments; `--socket PATH` is added) first if none is running.
-        /// Two clients racing start at most one daemon: the second one to
-        /// start finds the lock taken and exits, and both clients connect to
-        /// the first.
-        pub fn connect_or_start(
-            socket: &Path,
-            command: &[OsString],
-            on_event: impl FnMut(ClientEvent<'_>) + Send + 'static,
-        ) -> io::Result<Self> {
-            if let Ok(s) = UnixStream::connect(socket) {
-                return over(s, on_event);
-            }
-            // One that's ending still holds the lock, and a new one would
-            // find it taken and give up.
-            wait_for_exit(socket, STOP_TIMEOUT)?;
-            start_daemon(socket, command)?;
-            let deadline = Instant::now() + START_TIMEOUT;
-            loop {
-                match UnixStream::connect(socket) {
-                    Ok(s) => return over(s, on_event),
-                    Err(e) if Instant::now() >= deadline => return Err(e),
-                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
-                }
+        // One that's ending still holds the lock, and a new one would
+        // find it taken and give up.
+        wait_for_exit(socket, STOP_TIMEOUT)?;
+        start_daemon(socket, command)?;
+        let deadline = Instant::now() + START_TIMEOUT;
+        loop {
+            match endpoint::connect(socket) {
+                Ok(c) => return Self::over(c, on_event),
+                Err(e) if Instant::now() >= deadline => return Err(e),
+                Err(_) => thread::sleep(Duration::from_millis(20)),
             }
         }
     }
 
-    impl Client {
-        /// Ask the daemon on `socket` (of any version) to save its layout,
-        /// end its sessions and exit, and wait until it has.
-        pub fn stop(self, socket: &Path) -> io::Result<()> {
-            self.send(&super::ClientMsg::Shutdown)?;
-            drop(self);
-            wait_for_exit(socket, STOP_TIMEOUT)
-        }
-    }
-
-    /// Start `command` as the daemon for `socket`: in its own session, so
-    /// closing the app (or its terminal) doesn't signal it, with output going
-    /// to a log file beside the socket.
-    pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
-        let (exe, args) = command
-            .split_first()
-            .ok_or_else(|| io::Error::other("no daemon command"))?;
-        let dir = socket
-            .parent()
-            .ok_or_else(|| io::Error::other("socket path has no directory"))?;
-        proto::paths::prepare_dir(dir)?;
-        let mut log_path = socket.as_os_str().to_owned();
-        log_path.push(".log");
-        let log = std::fs::File::options()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
-        let mut cmd = Command::new(exe);
-        cmd.args(args)
-            .arg("--socket")
-            .arg(socket)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            // Don't keep the app's directory busy.
-            .current_dir("/");
-        // SAFETY: setsid is async-signal-safe.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let mut child = cmd.spawn()?;
-        // Reap it when it exits, so it doesn't linger as a zombie while the
-        // app runs.
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        Ok(())
+    /// Ask the daemon on `socket` (of any version) to save its layout,
+    /// end its sessions and exit, and wait until it has.
+    pub fn stop(self, socket: &Path) -> io::Result<()> {
+        self.send(&ClientMsg::Shutdown)?;
+        drop(self);
+        wait_for_exit(socket, STOP_TIMEOUT)
     }
 }
 
+/// Start `command` as the daemon for `socket`: in its own session, so
+/// closing the app (or its terminal) doesn't signal it, with output going
+/// to a log file beside the socket.
 #[cfg(unix)]
-pub use unix::{lock_held, start_daemon};
+pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let (exe, args) = command
+        .split_first()
+        .ok_or_else(|| io::Error::other("no daemon command"))?;
+    let dir = socket
+        .parent()
+        .ok_or_else(|| io::Error::other("socket path has no directory"))?;
+    proto::paths::prepare_dir(dir)?;
+    let mut log_path = socket.as_os_str().to_owned();
+    log_path.push(".log");
+    let log = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    let mut cmd = Command::new(exe);
+    cmd.args(args)
+        .arg("--socket")
+        .arg(socket)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        // Don't keep the app's directory busy.
+        .current_dir("/");
+    // SAFETY: setsid is async-signal-safe.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn()?;
+    // Reap it when it exits, so it doesn't linger as a zombie while the
+    // app runs.
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn start_daemon(_socket: &Path, _command: &[OsString]) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "the terminal service doesn't run on this platform yet",
+    ))
+}

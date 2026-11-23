@@ -12,6 +12,7 @@ path = "src/bin/kibannd.rs"
 [dependencies]
 proto = { path = "../proto" }
 client = { path = "../client" }
+endpoint = { path = "../endpoint" }
 term = { path = "../term" }
 git = { path = "../git" }
 serde = { version = "1", features = ["derive"] }

@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use proto::git::PaneDir;
 use proto::layout::{Action, Dir, PaneId, TabId};
@@ -1171,7 +1172,7 @@ impl Daemon {
     /// Keep the layout in `path` from now on, for [`Self::restore`],
     /// written once it stayed the same for `delay`
     /// ([`crate::saved::SAVE_DELAY`]).
-    pub fn save_layout_to(&self, path: PathBuf, delay: std::time::Duration) {
+    pub fn save_layout_to(&self, path: PathBuf, delay: Duration) {
         let mut st = self.lock();
         st.saver = Some(crate::saved::Saver::start(path, delay));
     }
@@ -1284,7 +1285,7 @@ impl Daemon {
         // Outside the lock: the saver writes on its own thread.
         let saver = self.lock().saver.take();
         if let Some(s) = &saver {
-            s.flush(std::time::Duration::from_secs(2));
+            s.flush(Duration::from_secs(2));
         }
         let sessions = {
             let mut st = self.lock();
@@ -1323,13 +1324,13 @@ impl Daemon {
 /// Type `cmd` and Enter into a pane just opened, once its shell is
 /// reading: text typed before the first output (the prompt) shows twice.
 fn type_when_ready(session: &Session, cmd: &str) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(3);
     while session
         .read(proto::wire::ReadSource::Visible, None)
         .is_none_or(|t| t.trim().is_empty())
-        && std::time::Instant::now() < deadline
+        && Instant::now() < deadline
     {
-        thread::sleep(std::time::Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50));
     }
     session.input(proto::InputEvent::Text { data: cmd.into() });
     session.input(proto::InputEvent::Text { data: "\r".into() });
@@ -1339,130 +1340,51 @@ fn spawn_error(e: io::Error) -> Reply {
     err(ErrorCode::Failed, format!("could not start the shell: {e}"))
 }
 
-#[cfg(unix)]
-pub use unix::{SocketConfig, serve_socket};
+pub struct SocketConfig {
+    pub socket: PathBuf,
+    /// Exit after this long with no clients and no running sessions.
+    pub idle_exit: Duration,
+}
 
-#[cfg(unix)]
-mod unix {
-    use std::fs::File;
-    use std::io;
-    use std::os::fd::AsRawFd;
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
+/// How often the accept loop looks at whether it should stop.
+const ACCEPT_WAIT: Duration = Duration::from_millis(50);
 
-    use super::Daemon;
+/// Listen on the socket and serve until shut down or idle. Fails with
+/// `AddrInUse` if another daemon already serves this socket.
+pub fn serve_socket(daemon: &Arc<Daemon>, cfg: &SocketConfig) -> io::Result<()> {
+    let listener = endpoint::Listener::bind(&cfg.socket)?;
+    serve_listener(daemon, listener, cfg.idle_exit)
+}
 
-    pub struct SocketConfig {
-        pub socket: PathBuf,
-        /// Exit after this long with no clients and no running sessions.
-        pub idle_exit: Duration,
-    }
-
-    /// The user id of the process at the other end of `s`.
-    fn peer_uid(s: &UnixStream) -> Option<u32> {
-        let fd = s.as_raw_fd();
-        #[cfg(target_os = "linux")]
-        {
-            let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
-            let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-            // SAFETY: `cred` and `len` are valid for SO_PEERCRED.
-            let r = unsafe {
-                libc::getsockopt(
-                    fd,
-                    libc::SOL_SOCKET,
-                    libc::SO_PEERCRED,
-                    (&raw mut cred).cast(),
-                    &mut len,
-                )
-            };
-            (r == 0).then_some(cred.uid)
+/// Serve the clients `listener` takes until shut down, or idle for
+/// `idle_exit`. Then new clients find nobody there, and the lock stays
+/// held until every session has ended.
+pub fn serve_listener(
+    daemon: &Arc<Daemon>,
+    listener: endpoint::Listener,
+    idle_exit: Duration,
+) -> io::Result<()> {
+    let mut idle_since: Option<Instant> = None;
+    let result = loop {
+        if daemon.is_shut_down() {
+            break Ok(());
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let (mut uid, mut gid) = (0, 0);
-            // SAFETY: plain out-parameters.
-            let r = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) };
-            (r == 0).then_some(uid)
+        match listener.accept(ACCEPT_WAIT) {
+            Ok(Some(c)) => daemon.serve(c.reader, c.writer)?,
+            Ok(None) => {}
+            Err(e) => break Err(e),
         }
-    }
-
-    /// Only the user who runs the daemon may connect: anyone who can
-    /// connect can type into every shell.
-    pub fn peer_allowed(s: &UnixStream) -> bool {
-        // SAFETY: geteuid has no preconditions.
-        peer_uid(s) == Some(unsafe { libc::geteuid() })
-    }
-
-    /// Hold an exclusive lock on `path` for as long as the file stays open.
-    /// Fails if another daemon holds it.
-    fn lock_file(path: &std::path::Path) -> io::Result<File> {
-        let f = File::options()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(path)?;
-        // SAFETY: a valid open file descriptor.
-        let r = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if r != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::AddrInUse,
-                "another daemon is running",
-            ));
-        }
-        Ok(f)
-    }
-
-    /// Listen on the socket and serve until shut down or idle. Fails with
-    /// `AddrInUse` if another daemon already serves this socket.
-    pub fn serve_socket(daemon: &Arc<Daemon>, cfg: &SocketConfig) -> io::Result<()> {
-        let dir = cfg
-            .socket
-            .parent()
-            .ok_or_else(|| io::Error::other("socket path has no directory"))?;
-        proto::paths::prepare_dir(dir)?;
-        let mut lock_path = cfg.socket.clone().into_os_string();
-        lock_path.push(".lock");
-        let _lock = lock_file(std::path::Path::new(&lock_path))?;
-        // Holding the lock means any socket file left here is stale.
-        let _ = std::fs::remove_file(&cfg.socket);
-        let listener = UnixListener::bind(&cfg.socket)?;
-        std::fs::set_permissions(&cfg.socket, std::fs::Permissions::from_mode(0o600))?;
-        listener.set_nonblocking(true)?;
-
-        let mut idle_since: Option<Instant> = None;
-        let result = loop {
-            if daemon.is_shut_down() {
+        if daemon.clients() == 0 && daemon.live_sessions() == 0 {
+            let since = *idle_since.get_or_insert_with(Instant::now);
+            if since.elapsed() >= idle_exit {
                 break Ok(());
             }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    if stream.set_nonblocking(false).is_err() || !peer_allowed(&stream) {
-                        continue;
-                    }
-                    match stream.try_clone() {
-                        Ok(reader) => daemon.serve(reader, stream)?,
-                        Err(_) => continue,
-                    }
-                }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => break Err(e),
-            }
-            if daemon.clients() == 0 && daemon.live_sessions() == 0 {
-                let since = *idle_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= cfg.idle_exit {
-                    break Ok(());
-                }
-            } else {
-                idle_since = None;
-            }
-        };
-        let _ = std::fs::remove_file(&cfg.socket);
-        daemon.shutdown();
-        result
-    }
+        } else {
+            idle_since = None;
+        }
+    };
+    let lock = listener.close();
+    daemon.shutdown();
+    drop(lock);
+    result
 }

@@ -7,6 +7,7 @@ description = "How a program talks to the daemon, and starts it when it isn't ru
 
 [dependencies]
 proto = { path = "../proto" }
+endpoint = { path = "../endpoint" }
 serde_json = { version = "1", features = ["raw_value"] }
 
 [target.'cfg(unix)'.dependencies]

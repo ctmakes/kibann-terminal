@@ -60,7 +60,6 @@ fn plan(fit: &Fit, dev: bool, idle: bool, restores: bool, replaced: bool) -> Ste
 /// Connect to the service, starting it if needed, and replace it when
 /// [`plan`] says so. `on_event` makes the event handler for each
 /// connection. The service is this same executable run with `--daemon`.
-#[cfg(unix)]
 pub fn connect<F>(on_event: impl Fn() -> F) -> io::Result<Connected>
 where
     F: FnMut(ClientEvent<'_>) + Send + 'static,
@@ -96,27 +95,13 @@ where
     }
 }
 
-#[cfg(not(unix))]
-pub fn connect<F>(_on_event: impl Fn() -> F) -> io::Result<Connected>
-where
-    F: FnMut(ClientEvent<'_>) + Send + 'static,
-{
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "the terminal service doesn't run on this platform yet",
-    ))
-}
-
 /// Replace the running service, then start the app again on the new one.
 fn replace_and_restart(app: &AppHandle) {
-    #[cfg(unix)]
+    let socket = proto::paths::socket_path(cfg!(debug_assertions));
+    if let Ok(old) = Client::connect(&socket, |_| {})
+        && let Err(e) = old.stop(&socket)
     {
-        let socket = proto::paths::socket_path(cfg!(debug_assertions));
-        if let Ok(old) = Client::connect(&socket, |_| {})
-            && let Err(e) = old.stop(&socket)
-        {
-            eprintln!("kibann: stopping the terminal service: {e}");
-        }
+        eprintln!("kibann: stopping the terminal service: {e}");
     }
     app.restart();
 }

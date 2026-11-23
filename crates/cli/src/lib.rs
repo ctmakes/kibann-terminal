@@ -14,9 +14,7 @@ use std::time::{Duration, Instant};
 
 use proto::layout::{Action, Dir, Layout, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
-#[cfg(unix)]
-use proto::wire::PROTOCOL_VERSION;
-use proto::wire::{ClientMsg, ErrorCode, ReadSource, Reply};
+use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
@@ -285,17 +283,6 @@ fn tab_id(t: TabId) -> String {
     format!("t{t}")
 }
 
-/// The daemon runs inside the app there (no socket yet), so nothing can
-/// reach it from outside.
-#[cfg(not(unix))]
-fn connect() -> Result<Client, Fail> {
-    Err(error(
-        "unsupported",
-        "the kibann command needs the daemon's socket, which this platform doesn't have yet",
-    ))
-}
-
-#[cfg(unix)]
 fn connect() -> Result<Client, Fail> {
     let socket = proto::paths::socket_path(cfg!(debug_assertions));
     let client = Client::connect(&socket, |_| {}).map_err(|e| {

@@ -4,6 +4,7 @@ members = [
     "crates/proto",
     "crates/term",
     "crates/git",
+    "crates/endpoint",
     "crates/client",
     "crates/daemon",
     "crates/files",
