@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { agentName, arrivals, blockedCount, dotFor, rollUp, type StatusMap } from "./status";
+import {
+  agentName,
+  arrivals,
+  blockedCount,
+  dotFor,
+  rollUp,
+  type StatusMap,
+} from "./status";
 
 const map: StatusMap = {
   "1": { agent: "claude", state: "working", since: 0 },
@@ -30,10 +37,17 @@ describe("agent status", () => {
 
 describe("notifications", () => {
   const map = (o: Record<number, string>): StatusMap =>
-    Object.fromEntries(Object.entries(o).map(([id, state]) => [id, { agent: "claude", state }])) as StatusMap;
+    Object.fromEntries(
+      Object.entries(o).map(([id, state]) => [id, { agent: "claude", state }]),
+    ) as StatusMap;
 
   it("tells of an agent that starts waiting or finishes, elsewhere", () => {
-    const prev = map({ 1: "working", 2: "working", 3: "blocked", 4: "working" });
+    const prev = map({
+      1: "working",
+      2: "working",
+      3: "blocked",
+      4: "working",
+    });
     const next = map({ 1: "blocked", 2: "done", 3: "blocked", 4: "working" });
     expect(arrivals(prev, next, null).map((a) => [a.pane, a.state])).toEqual([
       [1, "blocked"],
@@ -42,7 +56,11 @@ describe("notifications", () => {
   });
 
   it("working to idle is finishing too (the focused pane, window behind)", () => {
-    const got = arrivals(map({ 1: "working", 2: "blocked" }), map({ 1: "idle", 2: "idle" }), null);
+    const got = arrivals(
+      map({ 1: "working", 2: "blocked" }),
+      map({ 1: "idle", 2: "idle" }),
+      null,
+    );
     expect(got.map((a) => [a.pane, a.state])).toEqual([[1, "done"]]);
   });
 

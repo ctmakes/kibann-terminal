@@ -56,13 +56,19 @@ describe("sidebar groups", () => {
       "4": { agent: "claude", state: "blocked", since: 0 },
     });
     expect(g.map((x) => x.label)).toEqual(["alpha", "~", "beta", "…"]);
-    const g2 = groupPanes(panes, git, { "3": { agent: "claude", state: "blocked", since: 0 } });
+    const g2 = groupPanes(panes, git, {
+      "3": { agent: "claude", state: "blocked", since: 0 },
+    });
     expect(g2.map((x) => x.label)).toEqual(["beta", "alpha", "~", "…"]);
   });
 });
 
 describe("rail badges", () => {
-  const at = (shown: string): PaneDir => ({ dir: shown.replace("~", "/home/me"), shown, git: null });
+  const at = (shown: string): PaneDir => ({
+    dir: shown.replace("~", "/home/me"),
+    shown,
+    git: null,
+  });
 
   it("use the program, else the directory for a shell", () => {
     expect(badgeSource("vim", at("~/src/app"))).toBe("vim");

@@ -5,13 +5,8 @@
 
 import type { PaneId } from "./layout";
 
-export interface WorkspaceEntry {
-  name: string;
-  origin: "project" | "user" | "builtin" | "file";
-  path?: string;
-  /** The file's first comment sentence. */
-  about?: string;
-}
+import type { WorkspaceEntry } from "../proto";
+export type { WorkspaceEntry };
 
 export interface WorkspaceApi {
   /** The workspaces for the directory `pane` is in. */
@@ -106,7 +101,11 @@ export class WorkspacePicker {
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.list = document.createElement("div");
     this.list.className = "workspace-picker-list";
-    Object.assign(this.list.style, { maxHeight: `${ROW_H * 10}px`, overflowY: "auto", padding: "4px 0" });
+    Object.assign(this.list.style, {
+      maxHeight: `${ROW_H * 10}px`,
+      overflowY: "auto",
+      padding: "4px 0",
+    });
     this.hint = document.createElement("div");
     Object.assign(this.hint.style, {
       padding: "6px 12px",
@@ -130,7 +129,10 @@ export class WorkspacePicker {
     this.replacing = null;
     this.el.style.display = "flex";
     this.input.value = "";
-    this.input.placeholder = mode === "open" ? "Search workspaces" : "Name the workspace (saved to your workspaces)";
+    this.input.placeholder =
+      mode === "open"
+        ? "Search workspaces"
+        : "Name the workspace (saved to your workspaces)";
     this.input.focus();
     this.setHint();
     this.all = [];
@@ -145,7 +147,10 @@ export class WorkspacePicker {
 
   private setHint(text?: string): void {
     this.hint.textContent =
-      text ?? (this.mode === "open" ? "↑↓ choose   ↩ open   esc cancel" : "↩ save   esc cancel");
+      text ??
+      (this.mode === "open"
+        ? "↑↓ choose   ↩ open   esc cancel"
+        : "↩ save   esc cancel");
   }
 
   close(): void {
@@ -156,10 +161,19 @@ export class WorkspacePicker {
   }
 
   private filter(): void {
-    const words = this.input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const pool = this.mode === "open" ? this.all : this.all.filter((l) => l.origin === "user");
+    const words = this.input.value
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    const pool =
+      this.mode === "open"
+        ? this.all
+        : this.all.filter((l) => l.origin === "user");
     this.shown = pool.filter((l) => {
-      const hay = `${l.name} ${l.about ?? ""} ${ORIGIN[l.origin]}`.toLowerCase();
+      const hay = `${l.name} ${l.about ?? ""} ${
+        ORIGIN[l.origin]
+      }`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
     this.at = 0;
@@ -189,14 +203,22 @@ export class WorkspacePicker {
       const about = document.createElement("div");
       about.textContent = l.about ?? "";
       for (const s of [name, about]) {
-        Object.assign(s.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        Object.assign(s.style, {
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        });
       }
       Object.assign(about.style, { fontSize: "11px", opacity: "0.65" });
       text.append(name);
       if (l.about) text.append(about);
       const tag = document.createElement("span");
       tag.textContent = ORIGIN[l.origin];
-      Object.assign(tag.style, { color: "var(--k-muted)", fontSize: "11px", flex: "0 0 auto" });
+      Object.assign(tag.style, {
+        color: "var(--k-muted)",
+        fontSize: "11px",
+        flex: "0 0 auto",
+      });
       row.append(text, tag);
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -213,7 +235,10 @@ export class WorkspacePicker {
     if (rows.length === 0 && this.mode === "open") {
       const none = document.createElement("div");
       none.textContent = this.all.length ? "No workspace matches." : "";
-      Object.assign(none.style, { padding: "6px 12px", color: "var(--k-muted)" });
+      Object.assign(none.style, {
+        padding: "6px 12px",
+        color: "var(--k-muted)",
+      });
       rows.push(none);
     }
     this.list.replaceChildren(...rows);

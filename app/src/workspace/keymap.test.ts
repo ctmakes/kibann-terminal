@@ -4,8 +4,15 @@ import { actionFor } from "./keymap";
 
 function key(code: string, mods: string): KeyLike {
   return {
-    key: "", code, repeat: false, isComposing: false, keyCode: 0,
-    ctrlKey: mods.includes("c"), altKey: mods.includes("a"), metaKey: mods.includes("m"), shiftKey: mods.includes("s"),
+    key: "",
+    code,
+    repeat: false,
+    isComposing: false,
+    keyCode: 0,
+    ctrlKey: mods.includes("c"),
+    altKey: mods.includes("a"),
+    metaKey: mods.includes("m"),
+    shiftKey: mods.includes("s"),
   };
 }
 

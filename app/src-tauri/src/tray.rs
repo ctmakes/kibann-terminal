@@ -281,7 +281,7 @@ pub fn show_window(app: &AppHandle) {
         let _ = w.set_focus();
     }
     // An empty window (its last pane was closed) opens a shell.
-    let _ = app.emit("window-shown", ());
+    let _ = app.emit(crate::event::WINDOW_SHOWN, ());
 }
 
 /// Close the window but keep running (Cmd+Q on macOS).
@@ -304,16 +304,16 @@ pub fn on_menu(app: &AppHandle, id: &str) {
         SHOW => show_window(app),
         NEW_TAB => {
             show_window(app);
-            let _ = app.emit("menu-action", r#"{"kind":"newTab"}"#);
+            let _ = app.emit(crate::event::MENU_ACTION, r#"{"kind":"newTab"}"#);
         }
         WAITING => {
             show_window(app);
-            let _ = app.emit("show-waiting", ());
+            let _ = app.emit(crate::event::SHOW_WAITING, ());
         }
         UPDATE => {
             if let Err(e) = crate::update::update_install(app.clone()) {
                 show_window(app);
-                let _ = app.emit("notice", format!("Couldn't update: {e}"));
+                let _ = app.emit(crate::event::NOTICE, format!("Couldn't update: {e}"));
             }
         }
         CHECK => {
@@ -324,11 +324,11 @@ pub fn on_menu(app: &AppHandle, id: &str) {
         }
         WHATS_NEW => {
             show_window(app);
-            let _ = app.emit("whats-new", ());
+            let _ = app.emit(crate::event::WHATS_NEW, ());
         }
         SETTINGS => {
             show_window(app);
-            let _ = app.emit("menu-action", r#"{"kind":"settings"}"#);
+            let _ = app.emit(crate::event::MENU_ACTION, r#"{"kind":"settings"}"#);
         }
         QUIT => quit(app),
         _ => {}

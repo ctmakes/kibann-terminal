@@ -14,7 +14,14 @@ export function paneName(title: string | undefined): string {
   return title || "shell";
 }
 
-export type PartKind = "place" | "worktree" | "branch" | "op" | "conflicts" | "changed" | "sync";
+export type PartKind =
+  | "place"
+  | "worktree"
+  | "branch"
+  | "op"
+  | "conflicts"
+  | "changed"
+  | "sync";
 
 export interface Part {
   kind: PartKind;
@@ -39,9 +46,13 @@ export function headerParts(place: PaneDir | undefined): Part[] {
   if (g.worktree) parts.push({ kind: "worktree", text: `› ${g.worktree}` });
   parts.push({ kind: "branch", text: `⎇ ${g.branch ?? g.detached ?? "?"}` });
   if (g.operation) parts.push({ kind: "op", text: OPS[g.operation] });
-  if (g.conflicts > 0) parts.push({ kind: "conflicts", text: `!${g.conflicts}` });
+  if (g.conflicts > 0)
+    parts.push({ kind: "conflicts", text: `!${g.conflicts}` });
   if (g.changed > 0) parts.push({ kind: "changed", text: `●${g.changed}` });
-  const sync = [g.ahead > 0 ? `↑${g.ahead}` : "", g.behind > 0 ? `↓${g.behind}` : ""].filter(Boolean);
+  const sync = [
+    g.ahead > 0 ? `↑${g.ahead}` : "",
+    g.behind > 0 ? `↓${g.behind}` : "",
+  ].filter(Boolean);
   if (sync.length) parts.push({ kind: "sync", text: sync.join(" ") });
   return parts;
 }
@@ -49,7 +60,7 @@ export function headerParts(place: PaneDir | undefined): Part[] {
 /** The branch a tab shows after its title. */
 export function branchOf(place: PaneDir | undefined): string | null {
   const g = place?.git;
-  return g ? (g.branch ?? g.detached ?? null) : null;
+  return g ? g.branch ?? g.detached ?? null : null;
 }
 
 const COLORS: Record<PartKind, string> = {
@@ -99,7 +110,10 @@ export class PaneHeader {
     });
     this.el.append(this.text, dot);
     this.el.addEventListener("mousedown", (e) => {
-      if ((e.target as HTMLElement).classList.contains("pane-changed") && onDiff) {
+      if (
+        (e.target as HTMLElement).classList.contains("pane-changed") &&
+        onDiff
+      ) {
         e.preventDefault();
         e.stopPropagation();
         onDiff();
@@ -122,7 +136,12 @@ export class PaneHeader {
         s.className = `pane-${p.kind}`;
         s.textContent = p.text;
         // The branch gives way first when narrow, then the place.
-        const shrink = p.kind === "branch" ? "1" : p.kind === "place" || p.kind === "worktree" ? "0.5" : "0";
+        const shrink =
+          p.kind === "branch"
+            ? "1"
+            : p.kind === "place" || p.kind === "worktree"
+            ? "0.5"
+            : "0";
         Object.assign(s.style, {
           flex: `0 ${shrink} auto`,
           minWidth: shrink === "0" ? "auto" : "2em",

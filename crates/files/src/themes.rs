@@ -15,7 +15,9 @@ use crate::config::{config_dir, config_file};
 /// `### NAME` then the theme's lines, for every bundled theme.
 const BUNDLE: &str = include_str!("../themes/themes.txt");
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// A theme in the list the picker shows.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, rename = "ThemeEntry")]
 pub struct Entry {
     pub name: String,
     pub dark: bool,

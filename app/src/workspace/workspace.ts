@@ -9,23 +9,52 @@
 // hidden, so their terminals keep their state and frames.
 
 import { detectPlatform, type Platform } from "../input/keyboard";
-import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack, setFontFamilies } from "../metrics";
+import {
+  DEFAULT_FONT_SIZE,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  fontStack,
+  setFontFamilies,
+} from "../metrics";
 import { TerminalView, type TerminalOptions } from "../terminal";
 import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
-import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
+import {
+  actionFor,
+  keyFor,
+  menuKeys,
+  setKeybinds,
+  type Action,
+} from "./keymap";
 import { HEADER_H, PaneHeader, branchOf, paneName, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
 import { WorkspacePicker, type WorkspaceApi } from "./workspaces";
-import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
+import {
+  SettingsModal,
+  type ConfigInfo,
+  type SettingsApi,
+  type SettingsTab,
+  type UpdateStatus,
+} from "./settings";
 import { ShortcutSheet, keyText } from "./shortcuts";
 import { tooltip } from "./tooltip";
 import { FindBar } from "./find";
-import { applyChrome, chromeFor, isDark, KIBANN_DARK, type ThemeApi } from "./theme";
+import {
+  applyChrome,
+  chromeFor,
+  isDark,
+  KIBANN_DARK,
+  type ThemeApi,
+} from "./theme";
 import type { ScreenNow, Theme } from "../proto";
 import { ScreenView, type BlockSlot } from "../screen/engine";
-import { PartHost, type PartState, type PartTheme, type AgentStateName } from "../screen/parts";
+import {
+  PartHost,
+  type PartState,
+  type PartTheme,
+  type AgentStateName,
+} from "../screen/parts";
 import { ScreenPicker, type ScreenApi } from "../screen/picker";
 import { DEFAULT_SCREEN } from "../screen/default";
 import { Sidebar } from "./sidebar";
@@ -170,7 +199,8 @@ export class Workspace {
   readonly panes = new Map<PaneId, Pane>();
   active: Tab | null = null;
   private readonly platform: Platform;
-  private lastRun: { action: string; from: "key" | "menu"; at: number } | null = null;
+  private lastRun: { action: string; from: "key" | "menu"; at: number } | null =
+    null;
   private readonly cleanups: Array<() => void> = [];
   /** Agent status by pane, from the daemon. */
   status: StatusMap = {};
@@ -223,9 +253,14 @@ export class Workspace {
       onResize: () => {},
       onShortcuts: () => this.shortcuts.toggle(),
       onThemes: opts.themes ? () => this.run({ kind: "themes" }) : undefined,
-      onSettings: opts.settings ? () => this.run({ kind: "settings" }) : undefined,
+      onSettings: opts.settings
+        ? () => this.run({ kind: "settings" })
+        : undefined,
       onUpdate: opts.settings
-        ? () => void opts.settings?.installUpdate().catch((e) => this.notice(`Couldn't update: ${e}`))
+        ? () =>
+            void opts.settings
+              ?.installUpdate()
+              .catch((e) => this.notice(`Couldn't update: ${e}`))
         : undefined,
       settingsKey: () => keyFor({ kind: "settings" }, this.platform),
       shortcutKey: sheetKey,
@@ -243,7 +278,13 @@ export class Workspace {
     });
     this.stage = document.createElement("div");
     this.stage.className = "stage";
-    Object.assign(this.stage.style, { position: "relative", flex: "1 1 auto", overflow: "hidden", minWidth: "0", minHeight: "0" });
+    Object.assign(this.stage.style, {
+      position: "relative",
+      flex: "1 1 auto",
+      overflow: "hidden",
+      minWidth: "0",
+      minHeight: "0",
+    });
     this.help = document.createElement("div");
     this.help.className = "tab-help";
     this.help.textContent = "?";
@@ -316,9 +357,12 @@ export class Workspace {
     container.append(this.root);
 
     // Pulsing dots don't animate in a hidden window.
-    const onVisible = () => this.root.classList.toggle("kibann-hidden", document.hidden);
+    const onVisible = () =>
+      this.root.classList.toggle("kibann-hidden", document.hidden);
     document.addEventListener("visibilitychange", onVisible);
-    this.cleanups.push(() => document.removeEventListener("visibilitychange", onVisible));
+    this.cleanups.push(() =>
+      document.removeEventListener("visibilitychange", onVisible),
+    );
 
     // What the user looks at changes with the window's focus too. After
     // the event: focus moving into a part's frame blurs the window first.
@@ -330,7 +374,9 @@ export class Workspace {
       () => window.removeEventListener("blur", onWindowFocus),
     );
 
-    const ro = new ResizeObserver(() => this.active && this.layout(this.active));
+    const ro = new ResizeObserver(
+      () => this.active && this.layout(this.active),
+    );
     ro.observe(this.stage);
     const onKey = (e: KeyboardEvent) => this.onKeyDown(e);
     window.addEventListener("keydown", onKey, { capture: true });
@@ -341,7 +387,7 @@ export class Workspace {
   }
 
   get focusedPane(): Pane | null {
-    return this.active ? (this.panes.get(this.active.focused) ?? null) : null;
+    return this.active ? this.panes.get(this.active.focused) ?? null : null;
   }
 
   // ---- actions ----
@@ -354,14 +400,19 @@ export class Workspace {
         this.send({ t: "new_tab", near: on?.id, focus: true });
         return;
       case "goToTab": {
-        const t = action.index < 0 ? this.tabs[this.tabs.length - 1] : this.tabs[action.index];
+        const t =
+          action.index < 0
+            ? this.tabs[this.tabs.length - 1]
+            : this.tabs[action.index];
         if (t) this.activate(t);
         return;
       }
       case "tabCycle":
         if (this.active && this.tabs.length > 1) {
           const i = this.tabs.indexOf(this.active);
-          this.activate(this.tabs[(i + action.step + this.tabs.length) % this.tabs.length]);
+          this.activate(
+            this.tabs[(i + action.step + this.tabs.length) % this.tabs.length],
+          );
         }
         return;
     }
@@ -377,7 +428,10 @@ export class Workspace {
     if (action.kind === "workspaces" || action.kind === "saveWorkspace") {
       this.shortcuts.hide();
       this.settings?.hide();
-      void this.workspacePicker?.open(action.kind === "workspaces" ? "open" : "save", on?.id ?? null);
+      void this.workspacePicker?.open(
+        action.kind === "workspaces" ? "open" : "save",
+        on?.id ?? null,
+      );
       return;
     }
     if (action.kind === "screens") {
@@ -391,8 +445,13 @@ export class Workspace {
       return;
     }
     if (action.kind === "screenReset") {
-      this.notice("Back to the default screen (View → Screen… to pick another).");
-      if (this.opts.screens) void this.opts.screens.choose("default").catch((e) => this.notice(String(e)));
+      this.notice(
+        "Back to the default screen (View → Screen… to pick another).",
+      );
+      if (this.opts.screens)
+        void this.opts.screens
+          .choose("default")
+          .catch((e) => this.notice(String(e)));
       else this.showScreen(DEFAULT_SCREEN);
       return;
     }
@@ -403,8 +462,12 @@ export class Workspace {
       return;
     }
     if (action.kind === "fontSize") {
-      const next = action.step === 0 ? this.baseFont : this.fontSize + action.step;
-      this.useFont(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, next)), false);
+      const next =
+        action.step === 0 ? this.baseFont : this.fontSize + action.step;
+      this.useFont(
+        Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, next)),
+        false,
+      );
       return;
     }
     if (action.kind === "find" && on) {
@@ -413,7 +476,8 @@ export class Workspace {
     }
     if (action.kind === "findStep" && on) {
       const bar = on.find;
-      if (bar?.visible) on.transport.input({ kind: "find_step", older: action.older });
+      if (bar?.visible)
+        on.transport.input({ kind: "find_step", older: action.older });
       else this.findBar(on).open();
       return;
     }
@@ -439,8 +503,20 @@ export class Workspace {
         return;
       }
       case "resize": {
-        const r = resizeTarget(tab.tree, this.box(), on.id, action.toward, RESIZE_STEP);
-        if (r) this.send({ t: "set_ratio", tab: tab.id, path: r.path, ratio: r.ratio });
+        const r = resizeTarget(
+          tab.tree,
+          this.box(),
+          on.id,
+          action.toward,
+          RESIZE_STEP,
+        );
+        if (r)
+          this.send({
+            t: "set_ratio",
+            tab: tab.id,
+            path: r.path,
+            ratio: r.ratio,
+          });
         return;
       }
       case "equalize":
@@ -504,7 +580,9 @@ export class Workspace {
         panes(t.tree).flatMap((id) => {
           const p = this.panes.get(id);
           if (!p) return [];
-          const bg = p.view ? `#${p.view.grid.defaultBg.toString(16).padStart(6, "0")}` : "var(--k-bg)";
+          const bg = p.view
+            ? `#${p.view.grid.defaultBg.toString(16).padStart(6, "0")}`
+            : "var(--k-bg)";
           return [
             {
               id,
@@ -527,7 +605,9 @@ export class Workspace {
   }
 
   private send(a: LayoutAction): void {
-    this.opts.backend.act(a).catch((e) => console.warn(`kibann: ${a.t} failed:`, e));
+    this.opts.backend
+      .act(a)
+      .catch((e) => console.warn(`kibann: ${a.t} failed:`, e));
   }
 
   /** A menu item fired. */
@@ -537,7 +617,12 @@ export class Workspace {
 
   private onKeyDown(e: KeyboardEvent): void {
     // The theme picker's search field takes the keys while it's open.
-    if (this.picker?.visible || this.workspacePicker?.visible || this.screenPicker?.visible) return;
+    if (
+      this.picker?.visible ||
+      this.workspacePicker?.visible ||
+      this.screenPicker?.visible
+    )
+      return;
     const action = actionFor(e, this.platform);
     // Settings takes the keys while open (its fields): Esc closes it, and
     // so does its own shortcut. Nothing reaches the panes.
@@ -552,7 +637,10 @@ export class Workspace {
     }
     // While the shortcut sheet is open, a key closes it and goes nowhere
     // else (modifiers alone don't, so a shortcut can be pressed to try it).
-    if (this.shortcuts.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+    if (
+      this.shortcuts.visible &&
+      !["Shift", "Control", "Alt", "Meta"].includes(e.key)
+    ) {
       e.preventDefault();
       e.stopPropagation();
       // Its own shortcut toggles it closed through runOnce, so the menu
@@ -575,7 +663,12 @@ export class Workspace {
   private runOnce(action: Action, from: "key" | "menu"): void {
     const key = JSON.stringify(action);
     const last = this.lastRun;
-    if (last && last.action === key && last.from !== from && performance.now() - last.at < MENU_ECHO_MS) {
+    if (
+      last &&
+      last.action === key &&
+      last.from !== from &&
+      performance.now() - last.at < MENU_ECHO_MS
+    ) {
       this.lastRun = null;
       return;
     }
@@ -592,7 +685,9 @@ export class Workspace {
    */
   apply(layout: Layout): void {
     const hadTabs = this.tabs.length > 0;
-    const before = this.active ? { tab: this.active.id, pane: this.active.focused } : null;
+    const before = this.active
+      ? { tab: this.active.id, pane: this.active.focused }
+      : null;
     const byId = new Map(this.tabs.map((t) => [t.id, t]));
     const next: Tab[] = layout.tabs.map((lt) => {
       const tab = byId.get(lt.id) ?? this.makeTab(lt.id, lt.tree, lt.focused);
@@ -623,7 +718,8 @@ export class Workspace {
     }
 
     const active = next.find((t) => t.id === layout.active) ?? next[0] ?? null;
-    if (this.active && this.active !== active) this.active.el.style.display = "none";
+    if (this.active && this.active !== active)
+      this.active.el.style.display = "none";
     this.active = active;
     for (const t of next) {
       if (t === active) {
@@ -632,7 +728,10 @@ export class Workspace {
       } else this.place(t);
       for (const id of panes(t.tree)) this.setPaneActive(id, id === t.focused);
     }
-    if (active && (before?.tab !== active.id || before.pane !== active.focused)) {
+    if (
+      active &&
+      (before?.tab !== active.id || before.pane !== active.focused)
+    ) {
       this.panes.get(active.focused)?.view?.focus();
     }
     this.updateBar();
@@ -649,7 +748,7 @@ export class Workspace {
   private reportLooking(): void {
     const focused = this.opts.windowFocused?.() ?? document.hasFocus();
     const tab = this.active;
-    const pane = focused && tab ? (tab.zoomed ?? tab.focused) : null;
+    const pane = focused && tab ? tab.zoomed ?? tab.focused : null;
     if (pane === this.lookingSent) return;
     this.lookingSent = pane;
     this.opts.backend.looking?.(pane);
@@ -661,7 +760,7 @@ export class Workspace {
     this.status = map;
     if (this.statusSeen && this.notifyOn && this.opts.onNotify) {
       const focused = this.opts.windowFocused?.() ?? document.hasFocus();
-      const looking = focused ? (this.focusedPane?.id ?? null) : null;
+      const looking = focused ? this.focusedPane?.id ?? null : null;
       for (const a of arrivals(prev, map, looking)) this.notify(a);
     }
     this.statusSeen = true;
@@ -678,9 +777,12 @@ export class Workspace {
     const p = this.panes.get(a.pane);
     if (!p) return;
     const who = agentName(a.agent);
-    const title = a.state === "blocked" ? `${who} is waiting for you` : `${who} finished`;
+    const title =
+      a.state === "blocked" ? `${who} is waiting for you` : `${who} finished`;
     const place = this.git[String(a.pane)];
-    const where = place?.git ? [place.git.repo, place.git.branch].filter(Boolean).join(" · ") : place?.shown;
+    const where = place?.git
+      ? [place.git.repo, place.git.branch].filter(Boolean).join(" · ")
+      : place?.shown;
     const body = [where, p.title].filter(Boolean).join(" — ");
     this.opts.onNotify?.({ pane: a.pane, title, body });
   }
@@ -693,7 +795,8 @@ export class Workspace {
     const keys = JSON.stringify(s.keybind);
     if (keys !== this.keybinds) {
       this.keybinds = keys;
-      for (const e of setKeybinds(this.platform, s.keybind)) this.notice(`Config: ${e}`, 8000);
+      for (const e of setKeybinds(this.platform, s.keybind))
+        this.notice(`Config: ${e}`, 8000);
       this.shortcuts.rebuild();
       this.opts.onKeys?.(menuKeys(this.platform));
     }
@@ -728,11 +831,24 @@ export class Workspace {
   private makeTab(id: number, tree: Tree, focused: PaneId): Tab {
     const el = document.createElement("div");
     el.className = "tab-stage";
-    Object.assign(el.style, { position: "absolute", inset: "0", display: "none" });
+    Object.assign(el.style, {
+      position: "absolute",
+      inset: "0",
+      display: "none",
+    });
     this.stage.append(el);
     const button = document.createElement("div");
     const dot = makeDot({ marginRight: "6px" });
-    const tab: Tab = { id, title: null, tree, focused, zoomed: null, el, button, dot };
+    const tab: Tab = {
+      id,
+      title: null,
+      tree,
+      focused,
+      zoomed: null,
+      el,
+      button,
+      dot,
+    };
     this.makeTabButton(tab);
     return tab;
   }
@@ -767,15 +883,30 @@ export class Workspace {
     });
     const label = document.createElement("span");
     label.className = "tab-title";
-    Object.assign(label.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+    Object.assign(label.style, {
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    });
     const x = document.createElement("span");
     x.className = "tab-close";
     x.textContent = "×";
-    Object.assign(x.style, { position: "absolute", left: "8px", fontSize: "14px", opacity: "0.6" });
+    Object.assign(x.style, {
+      position: "absolute",
+      left: "8px",
+      fontSize: "14px",
+      opacity: "0.6",
+    });
     // Its number: Cmd+1–8 goes to it (Ctrl elsewhere).
     const n = document.createElement("span");
     n.className = "tab-number";
-    Object.assign(n.style, { position: "absolute", right: "10px", fontSize: "11px", opacity: "0.55", fontVariantNumeric: "tabular-nums" });
+    Object.assign(n.style, {
+      position: "absolute",
+      right: "10px",
+      fontSize: "11px",
+      opacity: "0.55",
+      fontVariantNumeric: "tabular-nums",
+    });
     b.append(x, tab.dot, label, n);
     b.addEventListener("mousedown", (e) => {
       e.preventDefault(); // keep focus in the terminal
@@ -797,9 +928,11 @@ export class Workspace {
       t.button.style.color = on ? COLORS.activeText : COLORS.text;
       const branch = branchOf(this.git[String(t.focused)]);
       const title = this.tabName(t) + (branch ? ` · ${branch}` : "");
-      t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
+      t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent =
+        title;
       t.button.title = title;
-      t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent = String(i + 1);
+      t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent =
+        String(i + 1);
       showDot(t.dot, rollUp(this.status, panes(t.tree)));
     });
   }
@@ -812,7 +945,11 @@ export class Workspace {
   }
 
   /** Show `text` in the corner for a while. */
-  notice(text: string, ms = 8000, action?: { label: string; run(): void }): void {
+  notice(
+    text: string,
+    ms = 8000,
+    action?: { label: string; run(): void },
+  ): void {
     const n = document.createElement("div");
     n.className = "notice";
     n.textContent = text;
@@ -838,7 +975,12 @@ export class Workspace {
       x.className = "notice-close";
       x.textContent = "✕";
       x.setAttribute("aria-label", "Dismiss");
-      Object.assign(x.style, { marginLeft: "6px", border: "0", background: "transparent", color: "var(--k-muted)" });
+      Object.assign(x.style, {
+        marginLeft: "6px",
+        border: "0",
+        background: "transparent",
+        color: "var(--k-muted)",
+      });
       x.addEventListener("click", () => n.remove());
       n.append(b, x);
       n.style.pointerEvents = "auto";
@@ -934,7 +1076,11 @@ export class Workspace {
   private slotProblem(slot: BlockSlot, text: string): void {
     const d = document.createElement("div");
     d.textContent = text;
-    Object.assign(d.style, { padding: "12px", color: "var(--k-muted)", font: "12px -apple-system, system-ui, sans-serif" });
+    Object.assign(d.style, {
+      padding: "12px",
+      color: "var(--k-muted)",
+      font: "12px -apple-system, system-ui, sans-serif",
+    });
     slot.el.append(d);
   }
 
@@ -944,12 +1090,16 @@ export class Workspace {
       theme: () => this.partTheme(),
       run: (part, action, args) => this.partRun(part, action, args),
       exec: (part, program, args, cwd, timeout) => {
-        if (!this.opts.screens) return Promise.reject(new Error("can't run programs here"));
+        if (!this.opts.screens)
+          return Promise.reject(new Error("can't run programs here"));
         return this.opts.screens.exec(part, program, args, cwd, timeout);
       },
       thumbnail: (pane, width, height) => this.thumbnail(pane, width, height),
       key: (k, granted) => {
-        const action = actionFor({ ...k, repeat: false, isComposing: false, keyCode: 0 }, this.platform);
+        const action = actionFor(
+          { ...k, repeat: false, isComposing: false, keyCode: 0 },
+          this.platform,
+        );
         if (!action || (action.kind === "close" && !granted.type)) return;
         this.runOnce(action, "key");
       },
@@ -979,7 +1129,8 @@ export class Workspace {
       focused: t.focused,
       state: rollUp(this.status, panes(t.tree)) as AgentStateName | null,
     }));
-    const hex = (c: number | undefined, or: string) => (c === undefined ? or : `#${c.toString(16).padStart(6, "0")}`);
+    const hex = (c: number | undefined, or: string) =>
+      c === undefined ? or : `#${c.toString(16).padStart(6, "0")}`;
     const all = this.tabs.flatMap((t) =>
       panes(t.tree).flatMap((id) => {
         const p = this.panes.get(id);
@@ -988,7 +1139,10 @@ export class Workspace {
         const g = place?.git ?? null;
         const st = this.status[String(id)];
         const onScreen =
-          t === this.active && (t.zoomed === null ? !this.solo || t.focused === id : t.zoomed === id);
+          t === this.active &&
+          (t.zoomed === null
+            ? !this.solo || t.focused === id
+            : t.zoomed === id);
         return [
           {
             id,
@@ -1023,20 +1177,31 @@ export class Workspace {
 
   private partTheme(): PartTheme {
     const colors: Record<string, string> = {};
-    for (const [k, v] of Object.entries(chromeFor(this.theme))) colors[k.replace(/^--k-/, "")] = v;
-    for (const [k, v] of Object.entries(this.screenView?.screen.chrome.colors ?? {})) colors[k] = v;
+    for (const [k, v] of Object.entries(chromeFor(this.theme)))
+      colors[k.replace(/^--k-/, "")] = v;
+    for (const [k, v] of Object.entries(
+      this.screenView?.screen.chrome.colors ?? {},
+    ))
+      colors[k] = v;
     return {
       colors,
-      font: this.screenView?.screen.chrome.font ?? "-apple-system, system-ui, sans-serif",
+      font:
+        this.screenView?.screen.chrome.font ??
+        "-apple-system, system-ui, sans-serif",
       mono: fontStack(),
       dark: isDark(this.theme),
     };
   }
 
-  private async partRun(part: string, action: string, a: Record<string, unknown>): Promise<unknown> {
+  private async partRun(
+    part: string,
+    action: string,
+    a: Record<string, unknown>,
+  ): Promise<unknown> {
     const num = (k: string): number => {
       const v = a[k];
-      if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${action}: ${k} must be a pane or tab id`);
+      if (typeof v !== "number" || !Number.isInteger(v))
+        throw new Error(`${action}: ${k} must be a pane or tab id`);
       return v;
     };
     const pane = (k = "pane"): Pane => {
@@ -1045,7 +1210,8 @@ export class Workspace {
       return p;
     };
     const str = (k: string): string => {
-      if (typeof a[k] !== "string") throw new Error(`${action}: ${k} must be text`);
+      if (typeof a[k] !== "string")
+        throw new Error(`${action}: ${k} must be text`);
       return a[k] as string;
     };
     switch (action) {
@@ -1059,12 +1225,21 @@ export class Workspace {
         return null;
       }
       case "tab.new":
-        this.send({ t: "new_tab", near: a.near === undefined ? this.focusedPane?.id : pane("near").id, focus: true });
+        this.send({
+          t: "new_tab",
+          near: a.near === undefined ? this.focusedPane?.id : pane("near").id,
+          focus: true,
+        });
         return null;
       case "pane.split": {
         const p = a.pane === undefined ? this.focusedPane : pane();
         if (!p) throw new Error("pane.split: no pane");
-        const dir = a.direction === "down" ? "column" : a.direction === "right" ? "row" : null;
+        const dir =
+          a.direction === "down"
+            ? "column"
+            : a.direction === "right"
+            ? "row"
+            : null;
         if (!dir) throw new Error(`pane.split: direction is "right" or "down"`);
         this.send({ t: "split", pane: p.id, dir, focus: true });
         return null;
@@ -1097,7 +1272,8 @@ export class Workspace {
         return null;
       case "screen.switch": {
         const name = str("name");
-        if (!this.opts.screens) throw new Error("screens can't be switched here");
+        if (!this.opts.screens)
+          throw new Error("screens can't be switched here");
         await this.opts.screens.choose(name);
         return null;
       }
@@ -1106,7 +1282,8 @@ export class Workspace {
       case "node.toggle": {
         const id = str("id");
         const how = action.slice(5) as "show" | "hide" | "toggle";
-        if (!this.screenView?.set(id, how)) throw new Error(`${action}: no node ${id} on this screen`);
+        if (!this.screenView?.set(id, how))
+          throw new Error(`${action}: no node ${id} on this screen`);
         if (this.active) this.layout(this.active);
         return null;
       }
@@ -1130,7 +1307,11 @@ export class Workspace {
   /** Pane `id` scaled to `width` CSS px. With `height`, the box is that
    * tall and shows the rows around the cursor, as the sidebar's preview
    * does; a pane shorter than the box sits at its top. */
-  private async thumbnail(id: number, width: number, height?: number): Promise<ImageBitmap | null> {
+  private async thumbnail(
+    id: number,
+    width: number,
+    height?: number,
+  ): Promise<ImageBitmap | null> {
     const p = this.panes.get(id);
     const view = p?.view;
     const src = view?.gridCanvas;
@@ -1142,11 +1323,14 @@ export class Workspace {
     const scale = Math.max(w / src.width, 0.5);
     const sw = Math.min(src.width, w / scale);
     const full = Math.max(1, Math.round(src.height * scale));
-    const h = height ? Math.max(1, Math.min(1600, Math.round(height * dpr))) : full;
+    const h = height
+      ? Math.max(1, Math.min(1600, Math.round(height * dpr)))
+      : full;
     // Source rows to show: all of them, or a window around the cursor.
     const sh = Math.min(src.height, h / scale);
     const g = view.grid;
-    const cursor = g.rows > 0 ? ((g.cursor.y + 1) / g.rows) * src.height : src.height;
+    const cursor =
+      g.rows > 0 ? ((g.cursor.y + 1) / g.rows) * src.height : src.height;
     const sy = Math.max(0, Math.min(src.height - sh, cursor - sh * 0.7));
     const c = (this.thumbCanvas ??= document.createElement("canvas"));
     c.width = w;
@@ -1185,10 +1369,27 @@ export class Workspace {
     // The terminal fills what the header leaves.
     const body = document.createElement("div");
     body.className = "pane-body";
-    Object.assign(body.style, { position: "absolute", left: "0", right: "0", top: `${HEADER_H}px`, bottom: "0" });
+    Object.assign(body.style, {
+      position: "absolute",
+      left: "0",
+      right: "0",
+      top: `${HEADER_H}px`,
+      bottom: "0",
+    });
     el.append(header.el, body);
     tab.el.append(el);
-    const pane: Pane = { id, tab, el, dot, header, transport, view: null, title: "", closed: false, find: null };
+    const pane: Pane = {
+      id,
+      tab,
+      el,
+      dot,
+      header,
+      transport,
+      view: null,
+      title: "",
+      closed: false,
+      find: null,
+    };
     this.panes.set(id, pane);
     this.showPaneDot(pane);
     const gen = this.fontGen;
@@ -1208,7 +1409,9 @@ export class Workspace {
         if (pane === this.focusedPane) this.emitTitle();
       },
       onFind: (find) => pane.find?.show(find),
-      onContextMenu: this.opts.onContextMenu ? (e) => this.opts.onContextMenu!(pane, e) : undefined,
+      onContextMenu: this.opts.onContextMenu
+        ? (e) => this.opts.onContextMenu!(pane, e)
+        : undefined,
     }).then((view) => {
       if (pane.closed) {
         view.dispose();
@@ -1218,7 +1421,8 @@ export class Workspace {
       if (gen !== this.fontGen) void view.setFont(this.fontSize);
       this.renderSidebar();
       view.setActive(pane.tab.focused === pane.id);
-      if (this.active === pane.tab && pane.tab.focused === pane.id) view.focus();
+      if (this.active === pane.tab && pane.tab.focused === pane.id)
+        view.focus();
     });
     return pane;
   }
@@ -1281,7 +1485,8 @@ export class Workspace {
   }
 
   private updateActive(tab: Tab): void {
-    for (const id of panes(tab.tree)) this.setPaneActive(id, id === tab.focused);
+    for (const id of panes(tab.tree))
+      this.setPaneActive(id, id === tab.focused);
     if (this.solo && tab === this.active) this.layout(tab);
     if (tab === this.active) {
       this.updateBar();
@@ -1293,7 +1498,12 @@ export class Workspace {
   // ---- layout ----
 
   private box(): Rect {
-    return { x: 0, y: 0, w: this.stage.clientWidth, h: this.stage.clientHeight };
+    return {
+      x: 0,
+      y: 0,
+      w: this.stage.clientWidth,
+      h: this.stage.clientHeight,
+    };
   }
 
   /** Position a tab's panes and dividers in the stage. */
@@ -1325,7 +1535,9 @@ export class Workspace {
           tab.tree = setRatio(tab.tree, d.path, ratio);
           this.place(tab);
           // Keep the grab area under the pointer while dragging.
-          const next = dividers(tab.tree, this.box()).find((n) => n.path.join() === d.path.join());
+          const next = dividers(tab.tree, this.box()).find(
+            (n) => n.path.join() === d.path.join(),
+          );
           if (next) {
             el.style.left = `${row ? next.rect.x - grab / 2 : next.rect.x}px`;
             el.style.top = `${row ? next.rect.y : next.rect.y - grab / 2}px`;
@@ -1336,7 +1548,8 @@ export class Workspace {
           el.removeEventListener("pointerup", up);
           this.layout(tab);
           this.focusPane(tab.focused);
-          if (ratio !== null) this.send({ t: "set_ratio", tab: tab.id, path: d.path, ratio });
+          if (ratio !== null)
+            this.send({ t: "set_ratio", tab: tab.id, path: d.path, ratio });
         };
         el.addEventListener("pointermove", move);
         el.addEventListener("pointerup", up);
@@ -1352,8 +1565,8 @@ export class Workspace {
       tab.zoomed !== null
         ? new Map([[tab.zoomed, box]])
         : this.solo
-          ? new Map([[tab.focused, box]])
-          : rects(tab.tree, box);
+        ? new Map([[tab.focused, box]])
+        : rects(tab.tree, box);
     for (const id of panes(tab.tree)) {
       const p = this.panes.get(id);
       if (!p) continue;

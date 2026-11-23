@@ -136,7 +136,7 @@ pub fn poll(app: &AppHandle, last: &mut Vec<(std::path::PathBuf, Option<std::tim
     let renamed = *app.state::<Screens>().shown.lock().unwrap() != configured(app);
     if stamp != *last || renamed {
         *last = stamp;
-        let _ = app.emit("screen", current(app));
+        let _ = app.emit(crate::event::SCREEN, current(app));
     }
 }
 
@@ -167,7 +167,7 @@ pub async fn screen_choose(app: AppHandle, name: String) -> Result<(), String> {
     };
     files::config::save_values("screen", &values)?;
     crate::reload_choice(&app);
-    let _ = app.emit("screen", current(&app));
+    let _ = app.emit(crate::event::SCREEN, current(&app));
     Ok(())
 }
 

@@ -29,7 +29,7 @@ fn focus(app: &AppHandle, pane: u32) {
             let _ = w.set_focus();
         }
     }
-    let _ = app.emit("focus-pane", pane);
+    let _ = app.emit(crate::event::FOCUS_PANE, pane);
 }
 
 /// Through the plugin. Clicks are reported only where [`init`] registered

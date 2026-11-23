@@ -18,32 +18,49 @@ pub mod status;
 pub mod theme;
 pub mod wire;
 
-/// Bits of [`Style::flags`].
-pub mod flags {
-    pub const BOLD: u16 = 1 << 0;
-    pub const ITALIC: u16 = 1 << 1;
-    pub const FAINT: u16 = 1 << 2;
-    pub const INVISIBLE: u16 = 1 << 3;
-    pub const STRIKE: u16 = 1 << 4;
-    pub const OVERLINE: u16 = 1 << 5;
-    /// Underline style lives in bits 8..=10, see [`Underline`](super::Underline).
-    pub const UNDERLINE_SHIFT: u16 = 8;
-    pub const UNDERLINE_MASK: u16 = 0x7 << UNDERLINE_SHIFT;
+/// Declares a module of `u16` bit constants plus `ALL`, every constant by
+/// name, from which the TypeScript copy is generated.
+macro_rules! bits {
+    ($(#[$m:meta])* pub mod $name:ident { $($(#[$d:meta])* $c:ident = $v:expr;)* }) => {
+        $(#[$m])*
+        pub mod $name {
+            $($(#[$d])* pub const $c: u16 = $v;)*
+            /// Every constant by name.
+            pub const ALL: &[(&str, u16)] = &[$((stringify!($c), $c)),*];
+        }
+    };
 }
 
-/// Bits of `mods` on input events. Same layout as libghostty's `GhosttyMods`.
-pub mod mods {
-    pub const SHIFT: u16 = 1 << 0;
-    pub const CTRL: u16 = 1 << 1;
-    pub const ALT: u16 = 1 << 2;
-    pub const SUPER: u16 = 1 << 3;
-    pub const CAPS_LOCK: u16 = 1 << 4;
-    pub const NUM_LOCK: u16 = 1 << 5;
-    /// Set when the right-hand key of that modifier is the one held.
-    pub const SHIFT_RIGHT: u16 = 1 << 6;
-    pub const CTRL_RIGHT: u16 = 1 << 7;
-    pub const ALT_RIGHT: u16 = 1 << 8;
-    pub const SUPER_RIGHT: u16 = 1 << 9;
+bits! {
+    /// Bits of [`Style::flags`].
+    pub mod flags {
+        BOLD = 1 << 0;
+        ITALIC = 1 << 1;
+        FAINT = 1 << 2;
+        INVISIBLE = 1 << 3;
+        STRIKE = 1 << 4;
+        OVERLINE = 1 << 5;
+        /// Underline style lives in bits 8..=10, see [`Underline`](super::Underline).
+        UNDERLINE_SHIFT = 8;
+        UNDERLINE_MASK = 0x7 << UNDERLINE_SHIFT;
+    }
+}
+
+bits! {
+    /// Bits of `mods` on input events. Same layout as libghostty's `GhosttyMods`.
+    pub mod mods {
+        SHIFT = 1 << 0;
+        CTRL = 1 << 1;
+        ALT = 1 << 2;
+        SUPER = 1 << 3;
+        CAPS_LOCK = 1 << 4;
+        NUM_LOCK = 1 << 5;
+        /// Set when the right-hand key of that modifier is the one held.
+        SHIFT_RIGHT = 1 << 6;
+        CTRL_RIGHT = 1 << 7;
+        ALT_RIGHT = 1 << 8;
+        SUPER_RIGHT = 1 << 9;
+    }
 }
 
 /// Underline styles stored in [`Style::flags`]. Values match `GhosttySgrUnderline`.
@@ -56,6 +73,18 @@ pub enum Underline {
     Curly = 3,
     Dotted = 4,
     Dashed = 5,
+}
+
+impl Underline {
+    /// Every style by name.
+    pub const ALL: &[(&str, Underline)] = &[
+        ("NONE", Underline::None),
+        ("SINGLE", Underline::Single),
+        ("DOUBLE", Underline::Double),
+        ("CURLY", Underline::Curly),
+        ("DOTTED", Underline::Dotted),
+        ("DASHED", Underline::Dashed),
+    ];
 }
 
 /// One update of the screen, sent backend → frontend.
@@ -382,6 +411,29 @@ mod tests {
         );
         let back: InputEvent = serde_json::from_str(r#"{"kind":"text","data":"é"}"#).unwrap();
         assert_eq!(back, InputEvent::Text { data: "é".into() });
+    }
+
+    /// The constants ts-rs can't express, written next to its output.
+    #[test]
+    fn export_constants() {
+        let table = |name: &str, all: Vec<(&str, u16)>| {
+            let body: String = all.iter().map(|(k, v)| format!("  {k}: {v},\n")).collect();
+            format!("export const {name} = {{\n{body}}} as const;\n")
+        };
+        let out = [
+            "// Generated from crates/proto/src/lib.rs by `cargo test -p proto`. Do not edit.\n"
+                .to_string(),
+            table("Flag", flags::ALL.to_vec()),
+            table("Mods", mods::ALL.to_vec()),
+            table(
+                "Underline",
+                Underline::ALL.iter().map(|&(k, u)| (k, u as u16)).collect(),
+            ),
+        ]
+        .join("\n");
+        // Set (absolute) by .cargo/config.toml, like ts-rs's own output.
+        let dir = std::env::var("TS_RS_EXPORT_DIR").expect("TS_RS_EXPORT_DIR");
+        std::fs::write(std::path::Path::new(&dir).join("constants.ts"), out).unwrap();
     }
 
     #[test]

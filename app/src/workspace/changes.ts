@@ -10,7 +10,10 @@ export interface Release {
 }
 
 /** A paragraph, a list (each item one string), or a `###` heading. */
-export type Block = { t: "p"; text: string } | { t: "list"; items: string[] } | { t: "h"; text: string };
+export type Block =
+  | { t: "p"; text: string }
+  | { t: "list"; items: string[] }
+  | { t: "h"; text: string };
 
 /** The sections of a Keep a Changelog style file, newest first as written.
  * The file's own introduction (before the first section) is left out. */
@@ -79,7 +82,8 @@ export function inline(text: string): Node[] {
   const re = /`([^`]+)`|\*\*([^*]+)\*\*/g;
   let at = 0;
   for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m.index > at) out.push(document.createTextNode(text.slice(at, m.index)));
+    if (m.index > at)
+      out.push(document.createTextNode(text.slice(at, m.index)));
     const el = document.createElement(m[1] !== undefined ? "code" : "strong");
     el.textContent = m[1] ?? m[2]!;
     if (m[1] !== undefined) {
@@ -101,7 +105,10 @@ export function inline(text: string): Node[] {
 
 /** The release notes, newest first, with the running version marked:
  * Settings → Updates. */
-export function changesView(changelog: string, current: string): HTMLDivElement {
+export function changesView(
+  changelog: string,
+  current: string,
+): HTMLDivElement {
   const box = document.createElement("div");
   box.className = "changes";
   Object.assign(box.style, { lineHeight: "1.5", userSelect: "text" });
@@ -115,12 +122,22 @@ export function changesView(changelog: string, current: string): HTMLDivElement 
     const section = document.createElement("section");
     section.className = "changes-release";
     const h = document.createElement("div");
-    Object.assign(h.style, { display: "flex", gap: "8px", alignItems: "baseline", margin: "14px 0 4px" });
+    Object.assign(h.style, {
+      display: "flex",
+      gap: "8px",
+      alignItems: "baseline",
+      margin: "14px 0 4px",
+    });
     const v = document.createElement("span");
     v.textContent = r.version;
-    Object.assign(v.style, { fontSize: "13px", fontWeight: "600", color: "var(--k-bright)" });
+    Object.assign(v.style, {
+      fontSize: "13px",
+      fontWeight: "600",
+      color: "var(--k-bright)",
+    });
     const when = document.createElement("span");
-    when.textContent = r.version === current ? `${r.when} · this version` : r.when;
+    when.textContent =
+      r.version === current ? `${r.when} · this version` : r.when;
     when.style.color = "var(--k-muted)";
     h.append(v, when);
     section.append(h);
@@ -138,7 +155,8 @@ export function changesView(changelog: string, current: string): HTMLDivElement 
       } else {
         const p = document.createElement(b.t === "h" ? "div" : "p");
         p.append(...inline(b.text));
-        if (b.t === "h") Object.assign(p.style, { fontWeight: "600", margin: "8px 0 2px" });
+        if (b.t === "h")
+          Object.assign(p.style, { fontWeight: "600", margin: "8px 0 2px" });
         else p.style.margin = "4px 0";
         section.append(p);
       }

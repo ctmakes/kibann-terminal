@@ -1,4 +1,5 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "../ipc";
 import type { Frame, InputEvent, Resize } from "../proto";
 import { decodeFrame } from "../proto/decode";
 import type { Transport } from "./types";

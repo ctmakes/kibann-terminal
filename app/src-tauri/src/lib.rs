@@ -5,6 +5,7 @@
 //! channel messages and events.
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+mod event;
 mod fonts;
 mod notify;
 mod open;
@@ -66,32 +67,110 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
             }
         }
         ClientEvent::Layout(layout) => {
-            let _ = app.emit("layout", layout);
+            let _ = app.emit(event::LAYOUT, layout);
         }
         ClientEvent::Status(panes) => {
-            let _ = app.emit("agent-status", panes);
+            let _ = app.emit(event::AGENT_STATUS, panes);
         }
         ClientEvent::Git(panes) => {
-            let _ = app.emit("pane-git", panes);
+            let _ = app.emit(event::PANE_GIT, panes);
         }
         // The daemon went away, and its shells with it: no panes are left.
         ClientEvent::Disconnected => {
-            let _ = app.emit("layout", Layout::default());
+            let _ = app.emit(event::LAYOUT, Layout::default());
             let _ = app.emit(
-                "agent-status",
+                event::AGENT_STATUS,
                 std::collections::BTreeMap::<u32, proto::status::PaneStatus>::new(),
             );
             let _ = app.emit(
-                "pane-git",
+                event::PANE_GIT,
                 std::collections::BTreeMap::<u32, proto::git::PaneDir>::new(),
             );
         }
     }
 }
 
+/// Every command the page can invoke. `cargo test` writes their names to
+/// `app/src/proto/generated/tauri.ts`, so the page calls only commands that
+/// exist.
+macro_rules! commands {
+    ($($c:ident $(:: $d:ident)*),* $(,)?) => {
+        fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+            tauri::generate_handler![$($c $(:: $d)*),*]
+        }
+
+        /// Every command's name.
+        #[cfg(test)]
+        const COMMANDS: &[&str] = &[$(commands!(@last $c $($d)*)),*];
+    };
+    (@last $c:ident) => { stringify!($c) };
+    (@last $c:ident $($d:ident)+) => { commands!(@last $($d)+) };
+}
+
+commands![
+    app_exe,
+    changelog,
+    set_badge,
+    notify,
+    menu_keys,
+    update::update_install,
+    update::update_check,
+    update::update_status,
+    settings_current,
+    settings_set,
+    config_info,
+    config_open,
+    fonts_list,
+    theme_current,
+    theme_list,
+    theme_preview,
+    theme_choose,
+    term_attach,
+    term_release,
+    term_input,
+    term_resize,
+    term_ack,
+    term_request_full,
+    layout_watch,
+    layout_restore,
+    layout_act,
+    layout_looking,
+    workspaces_list,
+    workspace_open,
+    workspace_save,
+    screens::screen_current,
+    screens::screen_list,
+    screens::screen_load,
+    screens::screen_choose,
+    screens::part_exec,
+    app_quit,
+    log,
+    open_link,
+    dev_layout,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The command and event names, for the page.
+    #[test]
+    fn export_names() {
+        let union = |all: &[&str]| {
+            all.iter()
+                .map(|n| format!("\n  | \"{n}\""))
+                .collect::<String>()
+        };
+        let out = format!(
+            "// Generated from app/src-tauri/src (lib.rs `commands!`, event.rs) by `cargo test`. Do not edit.\n\n\
+             /** A command the app handles. */\nexport type Command ={};\n\n\
+             /** An event the app sends. */\nexport type EventName ={};\n",
+            union(COMMANDS),
+            union(event::ALL),
+        );
+        let dir = std::env::var("TS_RS_EXPORT_DIR").expect("TS_RS_EXPORT_DIR");
+        std::fs::write(std::path::Path::new(&dir).join("tauri.ts"), out).unwrap();
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -173,7 +252,9 @@ async fn layout_restore(state: State<'_, Term>) -> Result<u32, String> {
         .map_err(|e| e.to_string())
 }
 
-#[derive(Serialize)]
+/// The pane and tab an action made or acted on.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct Acted {
     pane: Option<PaneId>,
     tab: Option<TabId>,
@@ -386,7 +467,9 @@ struct Looks {
     theme: proto::theme::Theme,
 }
 
-#[derive(Clone, Serialize)]
+/// The theme in use and its name (`theme_current`, the `theme` event).
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 struct ThemeNow {
     name: String,
     theme: proto::theme::Theme,
@@ -412,12 +495,12 @@ fn show_theme(app: &AppHandle) {
     let (name, theme) = match files::themes::load(&name) {
         Ok((t, errors)) => {
             for e in errors {
-                let _ = app.emit("notice", format!("Theme \"{name}\": {e}"));
+                let _ = app.emit(event::NOTICE, format!("Theme \"{name}\": {e}"));
             }
             (name, t)
         }
         Err(e) => {
-            let _ = app.emit("notice", format!("{e}; using the built-in theme"));
+            let _ = app.emit(event::NOTICE, format!("{e}; using the built-in theme"));
             let dark = looks.lock().unwrap().dark;
             let n = if dark {
                 proto::theme::DEFAULT_DARK
@@ -444,7 +527,7 @@ fn show_theme(app: &AppHandle) {
             theme: theme.clone(),
         });
     }
-    let _ = app.emit("theme", ThemeNow { name, theme });
+    let _ = app.emit(event::THEME, ThemeNow { name, theme });
 }
 
 /// The window around the webview in the theme's colors: the title bar's
@@ -492,12 +575,12 @@ pub(crate) fn reload_choice(app: &AppHandle) {
     let (settings, more) = files::config::read_settings();
     let problems: Vec<String> = errors.into_iter().chain(more).collect();
     for e in &problems {
-        let _ = app.emit("notice", format!("Config: {e}"));
+        let _ = app.emit(event::NOTICE, format!("Config: {e}"));
     }
     *app.state::<Problems>().0.lock().unwrap() = problems;
     app.state::<Mutex<Looks>>().lock().unwrap().choice = choice;
     // Settings, if open, shows the file's problems and themes.
-    let _ = app.emit("config-info", config_info(app.clone()));
+    let _ = app.emit(event::CONFIG_INFO, config_info(app.clone()));
     show_theme(app);
     let changed = {
         let state = app.state::<Mutex<proto::config::Settings>>();
@@ -511,7 +594,7 @@ pub(crate) fn reload_choice(app: &AppHandle) {
         tray::set_visible(app, settings.menu_bar_icon);
         #[cfg(target_os = "macos")]
         set_quit_labels(app, settings.menu_bar_icon);
-        let _ = app.emit("settings", settings);
+        let _ = app.emit(event::SETTINGS, settings);
     }
 }
 
@@ -520,7 +603,8 @@ pub(crate) fn reload_choice(app: &AppHandle) {
 struct Problems(Mutex<Vec<String>>);
 
 /// What Settings shows about the config file.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 struct ConfigInfo {
     path: String,
     problems: Vec<String>,
@@ -932,7 +1016,7 @@ pub fn run() {
     let builder = builder.menu(menu_bar).on_menu_event(|app, event| {
         let id = event.id().0.as_str();
         if id.starts_with('{') {
-            let _ = app.emit("menu-action", id);
+            let _ = app.emit(event::MENU_ACTION, id);
         } else if id == QUIT_END_SESSIONS {
             // Asks first when shells are open.
             tray::quit(app);
@@ -945,7 +1029,7 @@ pub fn run() {
         } else if id.starts_with(tray::PREFIX) {
             tray::on_menu(app, id);
         } else if id == WHATS_NEW {
-            let _ = app.emit("whats-new", ());
+            let _ = app.emit(event::WHATS_NEW, ());
         } else if id == CHECK_UPDATES {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { update::check(&app, true).await });
@@ -1054,47 +1138,7 @@ pub fn run() {
                 show_theme(app);
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            app_exe,
-            changelog,
-            set_badge,
-            notify,
-            menu_keys,
-            update::update_install,
-            update::update_check,
-            update::update_status,
-            settings_current,
-            settings_set,
-            config_info,
-            config_open,
-            fonts_list,
-            theme_current,
-            theme_list,
-            theme_preview,
-            theme_choose,
-            term_attach,
-            term_release,
-            term_input,
-            term_resize,
-            term_ack,
-            term_request_full,
-            layout_watch,
-            layout_restore,
-            layout_act,
-            layout_looking,
-            workspaces_list,
-            workspace_open,
-            workspace_save,
-            screens::screen_current,
-            screens::screen_list,
-            screens::screen_load,
-            screens::screen_choose,
-            screens::part_exec,
-            app_quit,
-            log,
-            open_link,
-            dev_layout
-        ])
+        .invoke_handler(handler())
         .build(tauri::generate_context!())
         .expect("failed to start the app")
         .run(|_app, _event| {

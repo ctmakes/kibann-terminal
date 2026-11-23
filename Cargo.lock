@@ -1131,6 +1131,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml 1.2.1+spec-1.1.0",
+ "ts-rs",
 ]
 
 [[package]]
@@ -2250,6 +2251,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "term",
+ "ts-rs",
 ]
 
 [[package]]

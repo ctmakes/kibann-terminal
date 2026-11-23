@@ -22,22 +22,43 @@ const FIRST: Duration = Duration::from_secs(20);
 pub struct Ready(Mutex<Option<(Update, Vec<u8>)>>);
 
 /// Where updating stands, for Settings → Updates.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "UpdateStatus")]
 pub struct Status {
-    /// "idle" (not checked yet), "checking", "downloading", "ready",
-    /// "latest" (none newer), "error", or "dev" (dev builds don't update).
-    state: &'static str,
+    state: State,
     /// The version found (downloading or ready).
     version: Option<String>,
     error: Option<String>,
     /// When the last check ended, in ms since 1970.
+    #[ts(type = "number | null")]
     checked: Option<u64>,
+}
+
+/// What updating is doing.
+#[derive(Clone, Copy, Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, rename = "UpdateState")]
+pub enum State {
+    /// Not checked yet.
+    Idle,
+    Checking,
+    Downloading,
+    Ready,
+    /// None newer.
+    Latest,
+    Error,
+    /// Dev builds don't update.
+    Dev,
 }
 
 impl Default for Status {
     fn default() -> Self {
         Self {
-            state: if tauri::is_dev() { "dev" } else { "idle" },
+            state: if tauri::is_dev() {
+                State::Dev
+            } else {
+                State::Idle
+            },
             version: None,
             error: None,
             checked: None,
@@ -56,7 +77,7 @@ fn set(app: &AppHandle, change: impl FnOnce(&mut Status)) {
         change(&mut s);
         s.clone()
     };
-    let _ = app.emit("update-status", s);
+    let _ = app.emit(crate::event::UPDATE_STATUS, s);
 }
 
 fn now_ms() -> Option<u64> {
@@ -66,7 +87,9 @@ fn now_ms() -> Option<u64> {
         .and_then(|d| u64::try_from(d.as_millis()).ok())
 }
 
-#[derive(Clone, Serialize)]
+/// A downloaded update (the `update-ready` event).
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 struct UpdateReady {
     version: String,
     notes: String,
@@ -96,7 +119,7 @@ pub fn start(app: &AppHandle) {
 pub async fn check(app: &AppHandle, asked: bool) {
     let say = |text: String| {
         if asked {
-            let _ = app.emit("notice", text);
+            let _ = app.emit(crate::event::NOTICE, text);
         }
     };
     if tauri::is_dev() {
@@ -111,7 +134,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
         return;
     }
     set(app, |s| {
-        s.state = "checking";
+        s.state = State::Checking;
         s.error = None;
     });
     let found = match app.updater() {
@@ -122,7 +145,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
         Ok(Some(u)) => u,
         Ok(None) => {
             set(app, |s| {
-                s.state = "latest";
+                s.state = State::Latest;
                 s.checked = now_ms();
             });
             let v = app.package_info().version.to_string();
@@ -131,7 +154,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
         }
         Err(e) => {
             set(app, |s| {
-                s.state = "error";
+                s.state = State::Error;
                 s.error = Some(e.to_string());
                 s.checked = now_ms();
             });
@@ -141,13 +164,13 @@ pub async fn check(app: &AppHandle, asked: bool) {
         }
     };
     set(app, |s| {
-        s.state = "downloading";
+        s.state = State::Downloading;
         s.version = Some(update.version.clone());
         s.checked = now_ms();
     });
     match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
-            set(app, |s| s.state = "ready");
+            set(app, |s| s.state = State::Ready);
             ready(app, &update);
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             crate::tray::set_update(app, update.version.clone());
@@ -155,7 +178,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
         }
         Err(e) => {
             set(app, |s| {
-                s.state = "error";
+                s.state = State::Error;
                 s.error = Some(format!("couldn't download {}: {e}", update.version));
             });
             eprintln!("kibann: update download: {e}");
@@ -166,7 +189,7 @@ pub async fn check(app: &AppHandle, asked: bool) {
 
 fn ready(app: &AppHandle, u: &Update) {
     let _ = app.emit(
-        "update-ready",
+        crate::event::UPDATE_READY,
         UpdateReady {
             version: u.version.clone(),
             notes: u.body.clone().unwrap_or_default(),

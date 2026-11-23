@@ -30,8 +30,9 @@ pub const BUILTINS: &[(&str, &str)] = &[
 pub const PROJECT_FILE: &str = ".kibann/workspace.toml";
 
 /// Where a workspace came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, rename = "WorkspaceOrigin")]
 pub enum Origin {
     /// Comes with Kibann.
     Builtin,
@@ -172,14 +173,17 @@ pub fn parse(f: &Found, cwd: &Path) -> Result<Template, Problems> {
 }
 
 /// A workspace `kibann workspace list` shows.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "WorkspaceEntry")]
 pub struct Listed {
     pub name: String,
     pub origin: Origin,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "string")]
     pub path: Option<PathBuf>,
     /// The first comment line of the file, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub about: Option<String>,
 }
 

@@ -1,5 +1,4 @@
-// Re-exports of the generated protocol types plus the bit constants that ts-rs
-// can't express. Keep the constants in sync with `crates/proto/src/lib.rs`.
+// Re-exports of the generated protocol types and constants.
 
 export type { Frame } from "./generated/Frame";
 export type { Style } from "./generated/Style";
@@ -24,6 +23,9 @@ export type { LayoutAction } from "./generated/LayoutAction";
 export type { Template } from "./generated/Template";
 export type { TabTemplate } from "./generated/TabTemplate";
 export type { TemplateTree } from "./generated/TemplateTree";
+export type { Tree } from "./generated/Tree";
+export type { Dir } from "./generated/Dir";
+export type { Step } from "./generated/Step";
 export type { TemplateRun } from "./generated/TemplateRun";
 export type { AgentState } from "./generated/AgentState";
 export type { PaneStatus } from "./generated/PaneStatus";
@@ -42,26 +44,16 @@ export type { ScreenNow } from "./generated/ScreenNow";
 export type { PartNow } from "./generated/PartNow";
 export type { PartManifest } from "./generated/PartManifest";
 export type { Permissions } from "./generated/Permissions";
+export type { Acted } from "./generated/Acted";
+export type { ConfigInfo } from "./generated/ConfigInfo";
+export type { ThemeEntry } from "./generated/ThemeEntry";
+export type { ThemeNow } from "./generated/ThemeNow";
+export type { UpdateReady } from "./generated/UpdateReady";
+export type { UpdateStatus } from "./generated/UpdateStatus";
+export type { WorkspaceEntry } from "./generated/WorkspaceEntry";
 
-export const Flag = {
-  BOLD: 1 << 0,
-  ITALIC: 1 << 1,
-  FAINT: 1 << 2,
-  INVISIBLE: 1 << 3,
-  STRIKE: 1 << 4,
-  OVERLINE: 1 << 5,
-  UNDERLINE_SHIFT: 8,
-  UNDERLINE_MASK: 0x7 << 8,
-} as const;
-
-export const Underline = {
-  NONE: 0,
-  SINGLE: 1,
-  DOUBLE: 2,
-  CURLY: 3,
-  DOTTED: 4,
-  DASHED: 5,
-} as const;
+export { Flag, Mods, Underline } from "./generated/constants";
+import { Flag } from "./generated/constants";
 
 export function underlineOf(flags: number): number {
   return (flags & Flag.UNDERLINE_MASK) >> Flag.UNDERLINE_SHIFT;
@@ -70,16 +62,3 @@ export function underlineOf(flags: number): number {
 export function withUnderline(flags: number, ul: number): number {
   return (flags & ~Flag.UNDERLINE_MASK) | (ul << Flag.UNDERLINE_SHIFT);
 }
-
-export const Mods = {
-  SHIFT: 1 << 0,
-  CTRL: 1 << 1,
-  ALT: 1 << 2,
-  SUPER: 1 << 3,
-  CAPS_LOCK: 1 << 4,
-  NUM_LOCK: 1 << 5,
-  SHIFT_RIGHT: 1 << 6,
-  CTRL_RIGHT: 1 << 7,
-  ALT_RIGHT: 1 << 8,
-  SUPER_RIGHT: 1 << 9,
-} as const;

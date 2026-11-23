@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { sheetFor } from "./shortcuts";
 
 const rows = (p: "mac" | "other") =>
-  Object.fromEntries(sheetFor(p).flatMap((g) => g.rows.map((r) => [r.label, r.keys])));
+  Object.fromEntries(
+    sheetFor(p).flatMap((g) => g.rows.map((r) => [r.label, r.keys])),
+  );
 
 describe("shortcut sheet", () => {
   it("shows macOS keys from the keymap, collapsing arrows and digits", () => {
@@ -26,13 +28,18 @@ describe("shortcut sheet", () => {
     expect(r["Keyboard shortcuts"]).toEqual(["Ctrl+Shift+/"]);
     expect(r["Pane in a direction"]).toEqual(["Ctrl+Alt+Arrows"]);
     expect(r["Tab 1–8"]).toEqual(["Alt+1–8"]);
-    expect(r["Previous / next tab"]).toEqual(["Ctrl+PgUp / Ctrl+PgDn", "Ctrl+Shift+Tab / Ctrl+Tab"]);
+    expect(r["Previous / next tab"]).toEqual([
+      "Ctrl+PgUp / Ctrl+PgDn",
+      "Ctrl+Shift+Tab / Ctrl+Tab",
+    ]);
     expect(r["Delete the line"]).toBeUndefined();
   });
 
   it("lists every workspace shortcut", () => {
     for (const p of ["mac", "other"] as const) {
-      for (const g of sheetFor(p)) for (const r of g.rows) expect(r.keys.length, r.label).toBeGreaterThan(0);
+      for (const g of sheetFor(p))
+        for (const r of g.rows)
+          expect(r.keys.length, r.label).toBeGreaterThan(0);
     }
   });
 });

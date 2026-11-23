@@ -1,19 +1,29 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Layout, LayoutAction, Settings, Theme } from "./proto";
+import type {
+  Layout,
+  LayoutAction,
+  ScreenEntry,
+  ScreenNow,
+  Settings,
+  ThemeNow,
+  UpdateReady,
+} from "./proto";
 import { TauriTransport, inTauri } from "./transport/tauri";
 import type { Acted, LayoutBackend } from "./workspace/backend";
 import type { Action } from "./workspace/keymap";
 import type { GitMap } from "./workspace/pane";
 import type { StatusMap } from "./workspace/status";
-import type { ConfigInfo, SettingsApi, UpdateStatus } from "./workspace/settings";
+import type {
+  ConfigInfo,
+  SettingsApi,
+  UpdateStatus,
+} from "./workspace/settings";
 import type { ThemeApi, ThemeEntry } from "./workspace/theme";
 import type { WorkspaceApi, WorkspaceEntry } from "./workspace/workspaces";
 import type { ScreenApi } from "./screen/picker";
-import type { ScreenEntry, ScreenNow } from "./proto";
 import { Workspace, type Pane } from "./workspace/workspace";
+import { invoke, listen } from "./ipc";
 
 const el = document.getElementById("term")!;
 
@@ -22,12 +32,19 @@ const el = document.getElementById("term")!;
 async function showContextMenu(ws: Workspace, pane: Pane): Promise<void> {
   const run = (action: Action) => () => ws.run(action, pane);
   const items = [];
-  if (pane.view?.selectionText) items.push(await PredefinedMenuItem.new({ item: "Copy" }));
+  if (pane.view?.selectionText)
+    items.push(await PredefinedMenuItem.new({ item: "Copy" }));
   items.push(
     await PredefinedMenuItem.new({ item: "Paste" }),
     await PredefinedMenuItem.new({ item: "Separator" }),
-    await MenuItem.new({ text: "Split Right", action: run({ kind: "split", dir: "row" }) }),
-    await MenuItem.new({ text: "Split Down", action: run({ kind: "split", dir: "column" }) }),
+    await MenuItem.new({
+      text: "Split Right",
+      action: run({ kind: "split", dir: "row" }),
+    }),
+    await MenuItem.new({
+      text: "Split Down",
+      action: run({ kind: "split", dir: "column" }),
+    }),
     await PredefinedMenuItem.new({ item: "Separator" }),
     await MenuItem.new({ text: "Close", action: run({ kind: "close" }) }),
   );
@@ -60,7 +77,7 @@ async function start(): Promise<void> {
   };
   // Themes: the app keeps the choice (config file, system appearance) and
   // colors the terminals through the daemon; the window follows here.
-  const now = await invoke<{ name: string; theme: Theme }>("theme_current");
+  const now = await invoke<ThemeNow>("theme_current");
   let themeName = now.name;
   const themes: ThemeApi = {
     list: () => invoke<ThemeEntry[]>("theme_list"),
@@ -83,7 +100,12 @@ async function start(): Promise<void> {
   // Workspace files: read, checked and written by the app's backend.
   const workspaces: WorkspaceApi = {
     list: (pane) => invoke<WorkspaceEntry[]>("workspaces_list", { pane }),
-    open: (entry, pane) => invoke<boolean>("workspace_open", { name: entry.name, path: entry.path ?? null, pane }),
+    open: (entry, pane) =>
+      invoke<boolean>("workspace_open", {
+        name: entry.name,
+        path: entry.path ?? null,
+        pane,
+      }),
     save: (name, force) => invoke<string>("workspace_save", { name, force }),
   };
   // Screens: what the window shows where (screens/, parts/).
@@ -92,7 +114,8 @@ async function start(): Promise<void> {
     list: () => invoke<ScreenEntry[]>("screen_list"),
     load: (name) => invoke<ScreenNow>("screen_load", { name }),
     choose: (name) => invoke("screen_choose", { name }),
-    exec: (part, program, args, cwd, timeout) => invoke("part_exec", { part, program, args, cwd, timeout }),
+    exec: (part, program, args, cwd, timeout) =>
+      invoke("part_exec", { part, program, args, cwd, timeout }),
   };
   const ws = new Workspace(el, {
     settings: settingsApi,
@@ -107,8 +130,10 @@ async function start(): Promise<void> {
     onContextMenu: (pane) => void showContextMenu(ws, pane),
     // The Dock icon shows how many agents wait for the user (macOS).
     onBlocked: (count) => void invoke("set_badge", { count }),
-    onDiff: (pane) => void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
-    onNotify: ({ pane, title, body }) => void invoke("notify", { pane, title, body }),
+    onDiff: (pane) =>
+      void openDiff(pane).catch((e) => console.warn("kibann: diff:", e)),
+    onNotify: ({ pane, title, body }) =>
+      void invoke("notify", { pane, title, body }),
     windowFocused: () => document.hasFocus(),
     onKeys: (keys) => void invoke("menu_keys", { keys }),
     view: { onOpenLink: (target) => void invoke("open_link", { target }) },
@@ -118,7 +143,7 @@ async function start(): Promise<void> {
   // Fonts and notifications, from the same config file; edits apply live.
   ws.setSettings(await invoke<Settings>("settings_current"));
   await listen<Settings>("settings", (e) => ws.setSettings(e.payload));
-  await listen<{ name: string; theme: Theme }>("theme", (e) => {
+  await listen<ThemeNow>("theme", (e) => {
     themeName = e.payload.name;
     ws.setTheme(e.payload.theme);
   });
@@ -128,15 +153,20 @@ async function start(): Promise<void> {
   void screens.current().then((now) => ws.useScreen(now));
   // A new version is downloaded: offer to restart into it (shells keep
   // running in the daemon).
-  await listen<{ version: string }>("update-ready", (e) =>
+  await listen<UpdateReady>("update-ready", (e) =>
     ws.notice(`Kibann Terminal ${e.payload.version} is ready.`, 0, {
       label: "Restart to update",
-      run: () => void invoke("update_install").catch((err) => ws.notice(`Couldn't update: ${err}`)),
+      run: () =>
+        void invoke("update_install").catch((err) =>
+          ws.notice(`Couldn't update: ${err}`),
+        ),
     }),
   );
   // A notification was clicked: show the pane it's about.
   await listen<number>("focus-pane", (e) => ws.show(e.payload));
-  await listen<UpdateStatus>("update-status", (e) => ws.setUpdateStatus(e.payload));
+  await listen<UpdateStatus>("update-status", (e) =>
+    ws.setUpdateStatus(e.payload),
+  );
   await listen<ConfigInfo>("config-info", (e) => ws.setConfigInfo(e.payload));
   // What's New (Help menu, the menu-bar icon, or the notice after an
   // update): the release notes in Settings → Updates.
@@ -153,7 +183,10 @@ async function start(): Promise<void> {
     // Storage unavailable: no notice.
   }
   if (seen && seen !== version) {
-    ws.notice(`Updated to Kibann Terminal ${version}.`, 15000, { label: "What's New", run: whatsNew });
+    ws.notice(`Updated to Kibann Terminal ${version}.`, 15000, {
+      label: "What's New",
+      run: whatsNew,
+    });
   }
   // The menu-bar icon: "N agents are waiting" shows one.
   await listen("show-waiting", () => ws.showWaiting());
@@ -164,7 +197,9 @@ async function start(): Promise<void> {
   });
 
   // Menu bar items (macOS) carry the action as JSON in their id.
-  await listen<string>("menu-action", (e) => ws.runFromMenu(JSON.parse(e.payload) as Action));
+  await listen<string>("menu-action", (e) =>
+    ws.runFromMenu(JSON.parse(e.payload) as Action),
+  );
 
   // The daemon owns the layout and sends it now and whenever it changes (an
   // agent split a pane, a shell exited), all as "layout" events, in order.
@@ -180,25 +215,40 @@ async function start(): Promise<void> {
   // Sessions): the saved tabs and splits come back, with fresh shells.
   const settings = await invoke<Settings>("settings_current");
   const restored =
-    layout.tabs.length === 0 && settings.restore_layout && !(await invoke<string | null>("dev_layout"))
+    layout.tabs.length === 0 &&
+    settings.restore_layout &&
+    !(await invoke<string | null>("dev_layout"))
       ? await invoke<number>("layout_restore").catch((e) => {
           console.warn("kibann: restore:", e);
           return 0;
         })
       : 0;
-  if (restored > 0) ws.notice(`Reopened ${restored === 1 ? "1 pane" : `${restored} panes`} where you left off.`, 6000);
+  if (restored > 0)
+    ws.notice(
+      `Reopened ${
+        restored === 1 ? "1 pane" : `${restored} panes`
+      } where you left off.`,
+      6000,
+    );
   if (layout.tabs.length === 0 && restored === 0) {
     const first = await backend.act({ t: "new_tab", focus: true });
     // KIBANN_LAYOUT: splits and tabs to start with.
     let last = first.pane;
-    for (const s of ((await invoke<string | null>("dev_layout")) ?? "").split(",").map((s) => s.trim())) {
+    for (const s of ((await invoke<string | null>("dev_layout")) ?? "")
+      .split(",")
+      .map((s) => s.trim())) {
       if (last === null) break;
       const a: LayoutAction | null =
         s === "right" || s === "down"
-          ? { t: "split", pane: last, dir: s === "right" ? "row" : "column", focus: true }
+          ? {
+              t: "split",
+              pane: last,
+              dir: s === "right" ? "row" : "column",
+              focus: true,
+            }
           : s === "tab"
-            ? { t: "new_tab", near: last, focus: true }
-            : null;
+          ? { t: "new_tab", near: last, focus: true }
+          : null;
       if (a) last = (await backend.act(a)).pane;
     }
   }

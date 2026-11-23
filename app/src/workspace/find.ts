@@ -71,7 +71,12 @@ export class FindBar {
     this.input.type = "text";
     this.input.placeholder = "Find";
     this.input.setAttribute("aria-label", "Find");
-    for (const [k, v] of Object.entries({ autocapitalize: "off", autocomplete: "off", autocorrect: "off", spellcheck: "false" })) {
+    for (const [k, v] of Object.entries({
+      autocapitalize: "off",
+      autocomplete: "off",
+      autocorrect: "off",
+      spellcheck: "false",
+    })) {
       this.input.setAttribute(k, v);
     }
     Object.assign(this.input.style, {
@@ -108,7 +113,12 @@ export class FindBar {
       whiteSpace: "nowrap",
     });
 
-    const button = (cls: string, text: string, label: string, run: () => void) => {
+    const button = (
+      cls: string,
+      text: string,
+      label: string,
+      run: () => void,
+    ) => {
       const b = document.createElement("button");
       b.className = cls;
       b.textContent = text;
@@ -124,8 +134,12 @@ export class FindBar {
     this.el.append(
       this.input,
       this.count,
-      button("find-older", "↑", "Next match (older)", () => this.opts.onStep(true)),
-      button("find-newer", "↓", "Previous match (newer)", () => this.opts.onStep(false)),
+      button("find-older", "↑", "Next match (older)", () =>
+        this.opts.onStep(true),
+      ),
+      button("find-newer", "↓", "Previous match (newer)", () =>
+        this.opts.onStep(false),
+      ),
       button("find-close", "✕", "Close", () => this.close()),
     );
   }

@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 proto = { path = "../../crates/proto" }
+ts-rs = "12"
 daemon = { path = "../../crates/daemon" }
 client = { path = "../../crates/client" }
 files = { path = "../../crates/files" }
