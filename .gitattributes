@@ -2,6 +2,7 @@
 # byte: keep their line endings as they are on every platform (Windows
 # checkouts would turn LF into CRLF).
 crates/term/recordings/** -text
-crates/term/tests/fixtures/** -text
+crates/agent/tests/fixtures/** -text
 app/src/dev/recordings/** -text
 fixtures/paint/** -text
+fixtures/layout/** -text

@@ -229,11 +229,10 @@ pub(crate) fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri
         .build()
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn the_quits_say_what_they_do() {
         assert_eq!(quit_labels(true)[0], (QUIT_KEY, "Close to Menu Bar"));

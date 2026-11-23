@@ -23,7 +23,9 @@ mod update;
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+use tauri::{AppHandle, Manager};
 
 use config::{Problems, reload_config, watch_config};
 use link::{Term, events};
