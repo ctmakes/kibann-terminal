@@ -15,9 +15,33 @@ struct Pane {
     report: Option<(String, AgentState)>,
     seq: Option<u64>,
     done: bool,
+    /// The state last shown, and since when (ms since 1970).
+    shown: Option<AgentState>,
+    since: u64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 impl Pane {
+    /// The state as shown: done, or what it says.
+    fn state(&self) -> Option<AgentState> {
+        self.current()
+            .map(|(_, s)| if self.done { AgentState::Done } else { s })
+    }
+
+    /// Note when the shown state changed.
+    fn touch(&mut self) {
+        let now = self.state();
+        if now != self.shown {
+            self.shown = now;
+            self.since = now_ms();
+        }
+    }
+
     fn current(&self) -> Option<(&str, AgentState)> {
         self.report
             .as_ref()
@@ -48,6 +72,7 @@ impl Statuses {
             }
             _ => p.done = false,
         }
+        p.touch();
         if p.current().is_none() && p.seq.is_none() {
             self.panes.remove(&pane);
         }
@@ -107,6 +132,7 @@ impl Statuses {
     pub fn seen(&mut self, pane: PaneId) {
         if let Some(p) = self.panes.get_mut(&pane) {
             p.done = false;
+            p.touch();
         }
     }
 
@@ -116,10 +142,11 @@ impl Statuses {
 
     pub fn get(&self, pane: PaneId) -> Option<PaneStatus> {
         let p = self.panes.get(&pane)?;
-        let (agent, state) = p.current()?;
+        let (agent, _) = p.current()?;
         Some(PaneStatus {
             agent: agent.to_owned(),
-            state: if p.done { AgentState::Done } else { state },
+            state: p.state()?,
+            since: p.since,
         })
     }
 

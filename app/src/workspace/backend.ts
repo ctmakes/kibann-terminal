@@ -74,7 +74,9 @@ export class FakeBackend implements LayoutBackend {
     if (state === null) delete this.status[key];
     else {
       const done = state === "idle" && (before === "working" || before === "done") && !this.seen(pane);
-      this.status[key] = { agent, state: done ? "done" : state };
+      const now = done ? "done" : state;
+      const since = now === before ? (this.status[key]?.since ?? Date.now()) : Date.now();
+      this.status[key] = { agent, state: now, since };
     }
     this.deliverStatus();
   }
@@ -95,7 +97,7 @@ export class FakeBackend implements LayoutBackend {
   private clearSeen(): void {
     for (const [key, s] of Object.entries(this.status)) {
       if (s.state === "done" && this.seen(Number(key))) {
-        this.status[key] = { ...s, state: "idle" };
+        this.status[key] = { ...s, state: "idle", since: Date.now() };
         this.deliverStatus();
       }
     }

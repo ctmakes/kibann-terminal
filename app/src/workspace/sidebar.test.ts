@@ -51,12 +51,12 @@ describe("sidebar groups", () => {
 
   it("puts groups needing attention first, keeping pane order", () => {
     const g = groupPanes(panes, git, {
-      "3": { agent: "claude", state: "working" },
-      "2": { agent: "claude", state: "done" },
-      "4": { agent: "claude", state: "blocked" },
+      "3": { agent: "claude", state: "working", since: 0 },
+      "2": { agent: "claude", state: "done", since: 0 },
+      "4": { agent: "claude", state: "blocked", since: 0 },
     });
     expect(g.map((x) => x.label)).toEqual(["alpha", "~", "beta", "…"]);
-    const g2 = groupPanes(panes, git, { "3": { agent: "claude", state: "blocked" } });
+    const g2 = groupPanes(panes, git, { "3": { agent: "claude", state: "blocked", since: 0 } });
     expect(g2.map((x) => x.label)).toEqual(["beta", "alpha", "~", "…"]);
   });
 });

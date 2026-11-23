@@ -45,4 +45,8 @@ pub struct PaneStatus {
     /// Which agent (`claude`), detected or reported.
     pub agent: String,
     pub state: AgentState,
+    /// When `state` began, in ms since 1970 (the daemon's clock).
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub since: u64,
 }

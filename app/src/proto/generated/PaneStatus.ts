@@ -8,4 +8,8 @@ export type PaneStatus = {
 /**
  * Which agent (`claude`), detected or reported.
  */
-agent: string, state: AgentState, };
+agent: string, state: AgentState, 
+/**
+ * When `state` began, in ms since 1970 (the daemon's clock).
+ */
+since: number, };

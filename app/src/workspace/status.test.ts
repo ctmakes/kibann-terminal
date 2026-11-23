@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { agentName, arrivals, blockedCount, dotFor, rollUp, type StatusMap } from "./status";
 
 const map: StatusMap = {
-  "1": { agent: "claude", state: "working" },
-  "2": { agent: "claude", state: "done" },
-  "3": { agent: "claude", state: "blocked" },
-  "4": { agent: "claude", state: "idle" },
+  "1": { agent: "claude", state: "working", since: 0 },
+  "2": { agent: "claude", state: "done", since: 0 },
+  "3": { agent: "claude", state: "blocked", since: 0 },
+  "4": { agent: "claude", state: "idle", since: 0 },
 };
 
 describe("agent status", () => {

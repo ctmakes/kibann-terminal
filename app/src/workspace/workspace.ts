@@ -158,8 +158,6 @@ export class Workspace {
   private chromeVars: string[] = [];
   /** The terminals block shows only the focused pane. */
   private solo = false;
-  /** When each pane's agent state last changed, as seen here. */
-  private readonly since = new Map<PaneId, { state: string; at: number }>();
   private theme: Theme = KIBANN_DARK;
   /** Part errors already shown, so a part failing every second says it once. */
   private readonly partErrors = new Set<string>();
@@ -661,12 +659,6 @@ export class Workspace {
   setStatus(map: StatusMap): void {
     const prev = this.status;
     this.status = map;
-    const now = Date.now();
-    for (const [id, st] of Object.entries(map)) {
-      const was = this.since.get(Number(id));
-      if (!was || was.state !== st.state) this.since.set(Number(id), { state: st.state, at: now });
-    }
-    for (const id of this.since.keys()) if (!map[String(id)]) this.since.delete(id);
     if (this.statusSeen && this.notifyOn && this.opts.onNotify) {
       const focused = this.opts.windowFocused?.() ?? document.hasFocus();
       const looking = focused ? (this.focusedPane?.id ?? null) : null;
@@ -1007,7 +999,7 @@ export class Workspace {
             behind: g?.behind ?? 0,
             agent: st ? agentName(st.agent) : null,
             state: (st?.state ?? null) as AgentStateName | null,
-            since: st ? (this.since.get(id)?.at ?? null) : null,
+            since: st?.since ?? null,
             bg: hex(p.view?.grid.defaultBg, "#000000"),
             fg: hex(p.view?.grid.defaultFg, "#ffffff"),
           },
