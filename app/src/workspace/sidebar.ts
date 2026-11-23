@@ -7,6 +7,7 @@
 // (agent dot and first letter), which still click and preview.
 
 import type { AgentState, PaneDir } from "../proto";
+import { drawThumbnail } from "../painter/thumbnail";
 import type { PaneId } from "./layout";
 import { headerParts, paneName, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
@@ -626,9 +627,8 @@ export class Sidebar {
     }, PREVIEW_MS);
   }
 
-  /** Draw the previewed pane at half size beside its row; a pane bigger
-   * than the preview shows its left part, around the cursor vertically
-   * (where the activity is: a prompt, an agent's input box). */
+  /** Draw the previewed pane at half size beside its row, cropped as
+   * `crop` says when it's bigger than the preview. */
   private paintPreview(): void {
     const id = this.previewing;
     const p = id === null ? undefined : this.pane(id);
@@ -658,12 +658,7 @@ export class Sidebar {
     const ctx = c.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, c.width, c.height);
-    const sw = Math.min(src.width, c.width / PREVIEW_SCALE);
-    const sh = Math.min(src.height, c.height / PREVIEW_SCALE);
-    const cursor = p.cursor();
-    const sy = Math.max(0, Math.min(src.height - sh, cursor * src.height - sh * 0.7));
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * PREVIEW_SCALE, sh * PREVIEW_SCALE);
+    drawThumbnail(ctx, src, PREVIEW_SCALE, p.cursor());
   }
 
   dispose(): void {

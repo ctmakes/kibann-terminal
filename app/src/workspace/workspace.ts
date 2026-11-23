@@ -11,6 +11,7 @@
 import { detectPlatform, type Platform } from "../input/keyboard";
 import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack, setFontFamilies } from "../metrics";
 import { TerminalView, type TerminalOptions } from "../terminal";
+import { cursorAt, drawThumbnail } from "../painter/thumbnail";
 import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
@@ -514,10 +515,7 @@ export class Workspace {
               focused: t.focused === id,
               canvas: p.view?.gridCanvas ?? null,
               bg,
-              cursor: () => {
-                const g = p.view?.grid;
-                return g && g.rows > 0 ? (g.cursor.y + 1) / g.rows : 1;
-              },
+              cursor: () => (p.view ? cursorAt(p.view.grid) : 1),
             },
           ];
         }),
@@ -1142,14 +1140,9 @@ export class Workspace {
     // Fill the width, but no smaller than half size, so a wide pane stays
     // readable (its left side shows).
     const scale = Math.max(w / src.width, 0.5);
-    const sw = Math.min(src.width, w / scale);
     const full = Math.max(1, Math.round(src.height * scale));
     const h = height ? Math.max(1, Math.min(1600, Math.round(height * dpr))) : full;
-    // Source rows to show: all of them, or a window around the cursor.
-    const sh = Math.min(src.height, h / scale);
     const g = view.grid;
-    const cursor = g.rows > 0 ? ((g.cursor.y + 1) / g.rows) * src.height : src.height;
-    const sy = Math.max(0, Math.min(src.height - sh, cursor - sh * 0.7));
     const c = (this.thumbCanvas ??= document.createElement("canvas"));
     c.width = w;
     c.height = h;
@@ -1157,8 +1150,7 @@ export class Workspace {
     if (!ctx) return null;
     ctx.fillStyle = `#${g.defaultBg.toString(16).padStart(6, "0")}`;
     ctx.fillRect(0, 0, w, h);
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * scale, sh * scale);
+    drawThumbnail(ctx, src, scale, cursorAt(g));
     return createImageBitmap(c);
   }
 
