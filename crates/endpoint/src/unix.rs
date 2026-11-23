@@ -64,10 +64,26 @@ pub fn lock_held(path: &Path) -> bool {
 pub struct Listener(UnixListener);
 
 impl Listener {
+    /// Made as `<path>.n` and renamed into place once it listens, private:
+    /// a client never finds a socket at `path` that refuses it (binding
+    /// creates the file before listening starts). In place when the longer
+    /// name doesn't fit in a socket address.
     pub fn bind(path: &Path) -> io::Result<Self> {
-        let _ = std::fs::remove_file(path);
-        let listener = UnixListener::bind(path)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let mut new = path.as_os_str().to_owned();
+        new.push(".n");
+        let new = std::path::PathBuf::from(new);
+        let _ = std::fs::remove_file(&new);
+        let (listener, made) = match UnixListener::bind(&new) {
+            Ok(l) => (l, new.as_path()),
+            Err(_) => {
+                let _ = std::fs::remove_file(path);
+                (UnixListener::bind(path)?, path)
+            }
+        };
+        std::fs::set_permissions(made, std::fs::Permissions::from_mode(0o600))?;
+        if made != path {
+            std::fs::rename(made, path)?;
+        }
         listener.set_nonblocking(true)?;
         Ok(Self(listener))
     }
