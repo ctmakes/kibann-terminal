@@ -1016,6 +1016,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "proto",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

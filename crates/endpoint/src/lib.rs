@@ -1,5 +1,5 @@
 //! Where the daemon and its clients meet, named by a path: a Unix socket
-//! there (a named pipe on Windows, to come), and beside it the lock the
+//! there (a named pipe on Windows), and beside it the lock the
 //! daemon holds for as long as its process runs (`<path>.lock`).
 //!
 //! Nothing above this module knows which: a connection is a reader, a
@@ -30,10 +30,10 @@ mod unix;
 #[cfg(unix)]
 use unix as os;
 
-#[cfg(not(unix))]
-mod unsupported;
-#[cfg(not(unix))]
-use unsupported as os;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as os;
 
 /// Connect to the daemon at `path`.
 pub fn connect(path: &Path) -> io::Result<Conn> {
