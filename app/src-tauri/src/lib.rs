@@ -563,14 +563,12 @@ fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<boo
 
 /// Read the config file again (it changed, or at start).
 pub(crate) fn reload_choice(app: &AppHandle) {
-    let (choice, errors) = files::config::read_choice();
-    let (settings, more) = files::config::read_settings();
-    let problems: Vec<String> = errors.into_iter().chain(more).collect();
+    let (settings, problems) = files::config::read_settings();
     for e in &problems {
         let _ = app.emit(event::NOTICE, format!("Config: {e}"));
     }
     *app.state::<Problems>().0.lock().unwrap() = problems;
-    app.state::<Mutex<Looks>>().lock().unwrap().choice = choice;
+    app.state::<Mutex<Looks>>().lock().unwrap().choice = settings.theme.clone();
     // Settings, if open, shows the file's problems and themes.
     let _ = app.emit(event::CONFIG_INFO, config_info(app.clone()));
     show_theme(app);

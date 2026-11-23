@@ -1,7 +1,7 @@
-//! The config file's settings besides the theme (see [`crate::theme`] for
-//! `theme`), in Ghostty's syntax:
+//! The config file's settings, in Ghostty's syntax:
 //!
 //! ```text
+//! theme = light:Kibann Light,dark:Nord   # or one name for both
 //! font-family = Berkeley Mono
 //! font-family = Symbols Nerd Font   # repeated: fallbacks, in order
 //! font-size = 13
@@ -14,6 +14,8 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+use crate::theme::ThemeChoice;
 
 /// The smallest and largest font size (CSS px), for the file and for zoom.
 pub const FONT_SIZE_MIN: f64 = 6.0;
@@ -44,6 +46,11 @@ pub struct Settings {
     pub sidebar_preview: bool,
     /// The screen the window shows (`screens/NAME/`).
     pub screen: String,
+    /// The theme for each appearance. The app resolves and sends the
+    /// theme itself, so the web view doesn't get the choice.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub theme: ThemeChoice,
 }
 
 /// The screen shown when the config names none.
@@ -71,6 +78,7 @@ impl Default for Settings {
             menu_bar_icon: true,
             sidebar_preview: true,
             screen: DEFAULT_SCREEN.to_owned(),
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -121,6 +129,11 @@ impl Settings {
                 },
                 "screen" if valid_name(v) => s.screen = v.to_owned(),
                 "screen" => errors.push(bad("screen (a name: lowercase letters, digits, dashes)")),
+                // The last valid line wins, as in Ghostty.
+                "theme" => match ThemeChoice::parse(v) {
+                    Some(c) => s.theme = c,
+                    None => errors.push(bad("theme")),
+                },
                 _ => {}
             }
         }
@@ -301,5 +314,23 @@ mod tests {
         );
         assert_eq!(e.len(), 4, "{e:?}");
         assert!(e[0].starts_with("line 1: bad font-size"));
+    }
+
+    #[test]
+    fn the_theme() {
+        let text = "# mine\nfont-size = 13\ntheme = Nord\n# theme = old\ntheme = dark:Dracula\n";
+        let (s, e) = Settings::parse(text);
+        assert_eq!(
+            (s.theme.light.as_str(), s.theme.dark.as_str()),
+            ("Kibann Light", "Dracula")
+        );
+        assert!(e.is_empty());
+        let (s, e) = Settings::parse("theme = Nord\ntheme = dark:X,purple:Y\n");
+        assert_eq!(s.theme.dark, "Nord", "a bad line keeps the last good one");
+        assert_eq!(e, ["line 2: bad theme: dark:X,purple:Y"]);
+        // Read as every other key is: quotes and a comment after the value.
+        let (s, e) = Settings::parse("theme = \"Nord\" # cold\n");
+        assert_eq!(s.theme.dark, "Nord");
+        assert!(e.is_empty());
     }
 }

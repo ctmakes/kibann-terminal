@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use proto::theme::{ThemeChoice, config_theme, set_config_theme};
+use proto::theme::{ThemeChoice, set_config_theme};
 
 /// Where the config file and the user's themes live.
 pub fn config_dir() -> Option<PathBuf> {
@@ -22,14 +22,7 @@ fn text() -> String {
         .unwrap_or_default()
 }
 
-/// The config file's theme choice (the defaults without a file or a
-/// `theme` line), and its problems.
-pub fn read_choice() -> (ThemeChoice, Vec<String>) {
-    let (choice, errors) = config_theme(&text());
-    (choice.unwrap_or_default(), errors)
-}
-
-/// The config file's other settings (fonts, notifications), and their
+/// The config file's settings (the defaults without a file), and its
 /// problems.
 pub fn read_settings() -> (proto::config::Settings, Vec<String>) {
     proto::config::Settings::parse(&text())

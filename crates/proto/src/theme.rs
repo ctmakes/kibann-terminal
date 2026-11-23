@@ -295,22 +295,6 @@ impl ThemeChoice {
     }
 }
 
-/// The `theme` from a config file's text, if a valid line sets it (the last
-/// one wins, as in Ghostty), and an error for a `theme` line it can't read.
-pub fn config_theme(text: &str) -> (Option<ThemeChoice>, Vec<String>) {
-    let mut choice = None;
-    let mut errors = Vec::new();
-    for (n, k, v) in crate::config::entries(text).flatten() {
-        if k == "theme" {
-            match ThemeChoice::parse(v) {
-                Some(c) => choice = Some(c),
-                None => errors.push(format!("line {n}: bad theme: {v}")),
-            }
-        }
-    }
-    (choice, errors)
-}
-
 /// `text` with its `theme` line set to `choice`, keeping every other line
 /// and comment; the line is added at the end if there is none.
 pub fn set_config_theme(text: &str, choice: &ThemeChoice) -> String {
@@ -374,16 +358,6 @@ mod tests {
     #[test]
     fn config_lines() {
         let text = "# mine\nfont-size = 13\ntheme = Nord\n# theme = old\ntheme = dark:Dracula\n";
-        let (c, e) = config_theme(text);
-        assert_eq!(c.unwrap().dark, "Dracula");
-        assert!(e.is_empty());
-        let (_, e) = config_theme("theme = dark:X,purple:Y\n");
-        assert_eq!(e.len(), 1);
-        // Read as every other key is: quotes and a comment after the value.
-        let (c, e) = config_theme("theme = \"Nord\" # cold\n");
-        assert_eq!(c.unwrap().dark, "Nord");
-        assert!(e.is_empty());
-
         let choice = ThemeChoice {
             light: "A".into(),
             dark: "B".into(),
