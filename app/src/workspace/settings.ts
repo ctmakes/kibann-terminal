@@ -8,12 +8,7 @@ import iconUrl from "../../src-tauri/icons/128x128@2x.png";
 import { changesView } from "./changes";
 import { sheetGrid } from "./shortcuts";
 
-export type SettingsTab =
-  | "general"
-  | "appearance"
-  | "shortcuts"
-  | "about"
-  | "updates";
+export type SettingsTab = "general" | "appearance" | "shortcuts" | "about" | "updates";
 
 import type { ConfigInfo, UpdateStatus } from "../proto";
 export type { ConfigInfo, UpdateStatus };
@@ -56,10 +51,7 @@ export const GEAR_ICON = svg(
   `<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.15 1.15M11.45 11.45l1.15 1.15M3.4 12.6l1.15-1.15M11.45 4.55l1.15-1.15"/><circle cx="8" cy="8" r="4.6"/>`,
 );
 
-const TABS: Array<{
-  group: string;
-  tabs: Array<{ id: SettingsTab; label: string; icon: string }>;
-}> = [
+const TABS: Array<{ group: string; tabs: Array<{ id: SettingsTab; label: string; icon: string }> }> = [
   {
     group: "General",
     tabs: [
@@ -67,42 +59,29 @@ const TABS: Array<{
       {
         id: "appearance",
         label: "Appearance",
-        icon: svg(
-          `<circle cx="8" cy="8" r="5.75"/><path d="M8 2.25a5.75 5.75 0 0 1 0 11.5z" fill="currentColor" stroke="none"/>`,
-        ),
+        icon: svg(`<circle cx="8" cy="8" r="5.75"/><path d="M8 2.25a5.75 5.75 0 0 1 0 11.5z" fill="currentColor" stroke="none"/>`),
       },
       {
         id: "shortcuts",
         label: "Shortcuts",
-        icon: svg(
-          `<rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/><path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6"/>`,
-        ),
+        icon: svg(`<rect x="1.5" y="4" width="13" height="8.5" rx="1.75"/><path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.75h6"/>`),
       },
     ],
   },
   {
     group: "Help & Info",
     tabs: [
-      {
-        id: "about",
-        label: "About",
-        icon: svg(
-          `<circle cx="8" cy="8" r="6"/><path d="M8 7.25v4M8 4.9h.01"/>`,
-        ),
-      },
+      { id: "about", label: "About", icon: svg(`<circle cx="8" cy="8" r="6"/><path d="M8 7.25v4M8 4.9h.01"/>`) },
       {
         id: "updates",
         label: "Updates",
-        icon: svg(
-          `<path d="M13.5 8a5.5 5.5 0 0 1-9.6 3.65M2.5 8a5.5 5.5 0 0 1 9.6-3.65"/><path d="M12.4 1.9v2.6H9.8M3.6 14.1v-2.6h2.6"/>`,
-        ),
+        icon: svg(`<path d="M13.5 8a5.5 5.5 0 0 1-9.6 3.65M2.5 8a5.5 5.5 0 0 1 9.6-3.65"/><path d="M12.4 1.9v2.6H9.8M3.6 14.1v-2.6h2.6"/>`),
       },
     ],
   },
 ];
 
-const css = (el: HTMLElement, style: Partial<CSSStyleDeclaration>) =>
-  Object.assign(el.style, style);
+const css = (el: HTMLElement, style: Partial<CSSStyleDeclaration>) => Object.assign(el.style, style);
 
 function div(cls?: string, text?: string): HTMLDivElement {
   const d = document.createElement("div");
@@ -113,15 +92,9 @@ function div(cls?: string, text?: string): HTMLDivElement {
 
 /** A button: `primary` is the tab's main action, solid in the accent
  * blue; the others are outlined. */
-function button(
-  text: string,
-  run: () => void,
-  primary = false,
-): HTMLButtonElement {
+function button(text: string, run: () => void, primary = false): HTMLButtonElement {
   const b = document.createElement("button");
-  b.className = primary
-    ? "settings-button settings-primary"
-    : "settings-button";
+  b.className = primary ? "settings-button settings-primary" : "settings-button";
   b.textContent = text;
   const rest = primary ? "var(--k-accent)" : "transparent";
   css(b, {
@@ -151,11 +124,7 @@ function link(text: string, run: () => void): HTMLAnchorElement {
   const a = document.createElement("a");
   a.textContent = text;
   a.href = "#";
-  css(a, {
-    color: "var(--k-accent)",
-    textDecoration: "none",
-    cursor: "pointer",
-  });
+  css(a, { color: "var(--k-accent)", textDecoration: "none", cursor: "pointer" });
   a.addEventListener("click", (e) => {
     e.preventDefault();
     run();
@@ -173,10 +142,7 @@ export function ago(ms: number, now = Date.now()): string {
 }
 
 /** What the Updates tab says for `u` (and whether Check is offered). */
-export function updateText(
-  u: UpdateStatus,
-  version: string,
-): { text: string; canCheck: boolean } {
+export function updateText(u: UpdateStatus, version: string): { text: string; canCheck: boolean } {
   const when = u.checked ? `, checked ${ago(u.checked)}` : "";
   switch (u.state) {
     case "dev":
@@ -184,25 +150,13 @@ export function updateText(
     case "checking":
       return { text: "Checking…", canCheck: false };
     case "downloading":
-      return {
-        text: `Downloading ${u.version ?? "an update"}…`,
-        canCheck: false,
-      };
+      return { text: `Downloading ${u.version ?? "an update"}…`, canCheck: false };
     case "ready":
-      return {
-        text: `${u.version} is ready. The shells keep running through the restart.`,
-        canCheck: false,
-      };
+      return { text: `${u.version} is ready. The shells keep running through the restart.`, canCheck: false };
     case "latest":
-      return {
-        text: `${version} is the newest version${when}.`,
-        canCheck: true,
-      };
+      return { text: `${version} is the newest version${when}.`, canCheck: true };
     case "error":
-      return {
-        text: `Couldn't check: ${u.error ?? "unknown error"}${when}.`,
-        canCheck: true,
-      };
+      return { text: `Couldn't check: ${u.error ?? "unknown error"}${when}.`, canCheck: true };
     default:
       return { text: "Checks every hour.", canCheck: true };
   }
@@ -275,12 +229,7 @@ export class SettingsModal {
       overflowY: "auto",
     });
     const main = div();
-    css(main, {
-      flex: "1 1 auto",
-      minWidth: "0",
-      display: "flex",
-      flexDirection: "column",
-    });
+    css(main, { flex: "1 1 auto", minWidth: "0", display: "flex", flexDirection: "column" });
     const head = div();
     css(head, {
       display: "flex",
@@ -289,30 +238,15 @@ export class SettingsModal {
       borderBottom: "1px solid var(--k-divider)",
     });
     this.title = div("settings-title");
-    css(this.title, {
-      flex: "1",
-      fontSize: "14px",
-      fontWeight: "600",
-      color: "var(--k-bright)",
-    });
+    css(this.title, { flex: "1", fontSize: "14px", fontWeight: "600", color: "var(--k-bright)" });
     const close = div("settings-close");
     close.innerHTML = svg(`<path d="M4 4l8 8M12 4l-8 8"/>`);
     close.setAttribute("aria-label", "Close");
-    css(close, {
-      display: "flex",
-      padding: "3px",
-      borderRadius: "5px",
-      color: "var(--k-muted)",
-    });
+    css(close, { display: "flex", padding: "3px", borderRadius: "5px", color: "var(--k-muted)" });
     close.addEventListener("click", () => this.hide());
     head.append(this.title, close);
     this.body = div("settings-body");
-    css(this.body, {
-      flex: "1 1 auto",
-      overflowY: "auto",
-      padding: "14px 18px 18px",
-      lineHeight: "1.45",
-    });
+    css(this.body, { flex: "1 1 auto", overflowY: "auto", padding: "14px 18px 18px", lineHeight: "1.45" });
     // A redraw put off while typing happens when the field is left.
     this.body.addEventListener("focusout", () => {
       queueMicrotask(() => {
@@ -394,11 +328,7 @@ export class SettingsModal {
 
   private typing(): boolean {
     const a = document.activeElement;
-    return (
-      !!a &&
-      this.body.contains(a) &&
-      (a.tagName === "INPUT" || a.tagName === "SELECT")
-    );
+    return !!a && this.body.contains(a) && (a.tagName === "INPUT" || a.tagName === "SELECT");
   }
 
   /** Draw again, unless that would take the field being typed in away. */
@@ -428,12 +358,7 @@ export class SettingsModal {
 
   private renderNav(): void {
     const title = div(undefined, "Settings");
-    css(title, {
-      fontSize: "14px",
-      fontWeight: "600",
-      color: "var(--k-bright)",
-      padding: "0 8px 10px",
-    });
+    css(title, { fontSize: "14px", fontWeight: "600", color: "var(--k-bright)", padding: "0 8px 10px" });
     const items: HTMLElement[] = [title];
     for (const g of TABS) {
       const h = div(undefined, g.group);
@@ -474,12 +399,7 @@ export class SettingsModal {
         if (t.id === "updates" && this.update?.state === "ready") {
           const dot = document.createElement("span");
           dot.className = "settings-update-dot";
-          css(dot, {
-            width: "7px",
-            height: "7px",
-            borderRadius: "50%",
-            background: "var(--k-accent)",
-          });
+          css(dot, { width: "7px", height: "7px", borderRadius: "50%", background: "var(--k-accent)" });
           b.append(dot);
         }
         b.addEventListener("mousedown", (e) => {
@@ -497,12 +417,7 @@ export class SettingsModal {
     const box = div("settings-section");
     css(box, { marginBottom: "18px" });
     const h = div(undefined, title);
-    css(h, {
-      fontSize: "11px",
-      fontWeight: "600",
-      color: "var(--k-muted)",
-      marginBottom: "6px",
-    });
+    css(h, { fontSize: "11px", fontWeight: "600", color: "var(--k-muted)", marginBottom: "6px" });
     box.append(h, ...rows);
     return box;
   }
@@ -532,11 +447,7 @@ export class SettingsModal {
   }
 
   /** An on/off switch for a `true`/`false` config key. */
-  private switch(
-    key: string,
-    on: boolean,
-    change: (s: Settings, on: boolean) => void,
-  ): HTMLElement {
+  private switch(key: string, on: boolean, change: (s: Settings, on: boolean) => void): HTMLElement {
     const b = document.createElement("button");
     b.className = "settings-switch";
     b.dataset.key = key;
@@ -575,9 +486,7 @@ export class SettingsModal {
   }
 
   private openConfig(reveal: boolean): void {
-    this.api
-      .openConfig(reveal)
-      .catch((e) => this.flash(`Couldn't open the config file: ${e}`));
+    this.api.openConfig(reveal).catch((e) => this.flash(`Couldn't open the config file: ${e}`));
   }
 
   private async save(key: string, values: string[]): Promise<void> {
@@ -603,11 +512,7 @@ export class SettingsModal {
         this.row(
           "Notify when an agent needs you",
           "A system notification when an agent in a pane you aren't looking at waits for you or finishes.",
-          this.switch(
-            "agent-notifications",
-            s.agent_notifications,
-            (x, on) => (x.agent_notifications = on),
-          ),
+          this.switch("agent-notifications", s.agent_notifications, (x, on) => (x.agent_notifications = on)),
         ),
       ];
       const mac = this.hooks.platform === "mac";
@@ -617,78 +522,43 @@ export class SettingsModal {
           mac
             ? "Closing the window or Cmd+Q hides it, so agents can still notify you. Quit Kibann Terminal… ends everything."
             : "Closing the window hides it to the tray icon, so agents can still notify you; its Quit ends everything. Needs a desktop with a tray (on GNOME, the AppIndicator extension); without one, closing quits.",
-          this.switch(
-            "menu-bar-icon",
-            s.menu_bar_icon,
-            (x, on) => (x.menu_bar_icon = on),
-          ),
+          this.switch("menu-bar-icon", s.menu_bar_icon, (x, on) => (x.menu_bar_icon = on)),
         ),
       );
       rows.push(
         this.row(
           "Preview panes in the sidebar",
           "Hovering a pane in the sidebar shows it, live, beside the sidebar.",
-          this.switch(
-            "sidebar-preview",
-            s.sidebar_preview,
-            (x, on) => (x.sidebar_preview = on),
-          ),
+          this.switch("sidebar-preview", s.sidebar_preview, (x, on) => (x.sidebar_preview = on)),
         ),
         this.row(
           "Reopen tabs and splits",
           "After a restart, the tabs and splits come back with fresh shells in the same directories.",
-          this.switch(
-            "restore-layout",
-            s.restore_layout,
-            (x, on) => (x.restore_layout = on),
-          ),
+          this.switch("restore-layout", s.restore_layout, (x, on) => (x.restore_layout = on)),
         ),
       );
       out.push(this.section("Behavior", ...rows));
     }
     const file = div("settings-path", this.info?.path ?? "");
-    css(file, {
-      font: "11px ui-monospace, SFMono-Regular, Menlo, monospace",
-      color: "var(--k-text)",
-      userSelect: "text",
-      wordBreak: "break-all",
-    });
+    css(file, { font: "11px ui-monospace, SFMono-Regular, Menlo, monospace", color: "var(--k-text)", userSelect: "text", wordBreak: "break-all" });
     const buttons = div();
     css(buttons, { display: "flex", gap: "8px", marginTop: "8px" });
     buttons.append(
       button("Open in Editor", () => this.openConfig(false)),
-      button(
-        this.hooks.platform === "mac" ? "Show in Finder" : "Show in Folder",
-        () => this.openConfig(true),
-      ),
+      button(this.hooks.platform === "mac" ? "Show in Finder" : "Show in Folder", () => this.openConfig(true)),
     );
-    const note = div(
-      undefined,
-      "Every setting lives in this file, in Ghostty's syntax. Edits apply when you save it.",
-    );
-    css(note, {
-      color: "var(--k-muted)",
-      fontSize: "11px",
-      marginBottom: "6px",
-    });
+    const note = div(undefined, "Every setting lives in this file, in Ghostty's syntax. Edits apply when you save it.");
+    css(note, { color: "var(--k-muted)", fontSize: "11px", marginBottom: "6px" });
     const rows: HTMLElement[] = [note, file, buttons];
     const problems = this.info?.problems ?? [];
     if (problems.length) {
       const list = div("settings-problems");
       css(list, { marginTop: "10px", color: "var(--k-conflicts)" });
-      const h = div(
-        undefined,
-        problems.length === 1
-          ? "1 line can't be used:"
-          : `${problems.length} lines can't be used:`,
-      );
+      const h = div(undefined, problems.length === 1 ? "1 line can't be used:" : `${problems.length} lines can't be used:`);
       list.append(h);
       for (const p of problems) {
         const l = div(undefined, p);
-        css(l, {
-          font: "11px ui-monospace, SFMono-Regular, Menlo, monospace",
-          marginTop: "2px",
-        });
+        css(l, { font: "11px ui-monospace, SFMono-Regular, Menlo, monospace", marginTop: "2px" });
         list.append(l);
       }
       rows.push(list);
@@ -702,11 +572,7 @@ export class SettingsModal {
     const info = this.info;
     const theme = div("settings-theme");
     theme.style.color = "var(--k-text)";
-    if (info)
-      theme.textContent =
-        info.light === info.dark
-          ? info.light
-          : `Light: ${info.light} · Dark: ${info.dark}`;
+    if (info) theme.textContent = info.light === info.dark ? info.light : `Light: ${info.light} · Dark: ${info.dark}`;
     const themeBox = div();
     css(themeBox, { display: "flex", alignItems: "center", gap: "12px" });
     themeBox.append(
@@ -723,19 +589,14 @@ export class SettingsModal {
     const out = [
       this.section(
         "Colors",
-        this.row(
-          "Theme",
-          "Colors the terminals and the window. Choosing shows each theme live on your panes.",
-          themeBox,
-        ),
+        this.row("Theme", "Colors the terminals and the window. Choosing shows each theme live on your panes.", themeBox),
       ),
     ];
     if (!s) return out;
     const families = s.font_family;
     const fallbacks = families.slice(1);
     // The first family is chosen here; fallbacks from the file stay after it.
-    const setFamily = (name: string) =>
-      void this.save("font-family", name ? [name, ...fallbacks] : []);
+    const setFamily = (name: string) => void this.save("font-family", name ? [name, ...fallbacks] : []);
     let family: HTMLElement;
     const current = families[0] ?? "";
     if (this.fonts) {
@@ -748,8 +609,7 @@ export class SettingsModal {
         return o;
       };
       sel.append(opt("", "JetBrains Mono (built in)"));
-      if (current && !this.fonts.includes(current))
-        sel.append(opt(current, `${current} (not installed)`));
+      if (current && !this.fonts.includes(current)) sel.append(opt(current, `${current} (not installed)`));
       for (const f of this.fonts) sel.append(opt(f, f));
       sel.value = current;
       sel.addEventListener("change", () => setFamily(sel.value));
@@ -763,10 +623,7 @@ export class SettingsModal {
         if (input.value.trim() !== current) setFamily(input.value.trim());
       };
       input.addEventListener("change", commit);
-      input.addEventListener(
-        "keydown",
-        (e) => e.key === "Enter" && input.blur(),
-      );
+      input.addEventListener("keydown", (e) => e.key === "Enter" && input.blur());
       family = input;
     }
     css(family, {
@@ -780,12 +637,7 @@ export class SettingsModal {
     });
     const size = s.font_size ?? this.hooks.defaultFontSize;
     const setSize = (n: number | null) =>
-      void this.save(
-        "font-size",
-        n === null
-          ? []
-          : [String(Math.round(Math.min(72, Math.max(6, n)) * 2) / 2)],
-      );
+      void this.save("font-size", n === null ? [] : [String(Math.round(Math.min(72, Math.max(6, n)) * 2) / 2)]);
     const sizeBox = div("settings-size");
     css(sizeBox, { display: "flex", alignItems: "center", gap: "6px" });
     const num = document.createElement("input");
@@ -808,17 +660,10 @@ export class SettingsModal {
       if (Number.isFinite(n) && n > 0) setSize(n);
     });
     num.addEventListener("keydown", (e) => e.key === "Enter" && num.blur());
-    sizeBox.append(
-      button("−", () => setSize(size - 1)),
-      num,
-      button("+", () => setSize(size + 1)),
-    );
-    if (s.font_size !== null)
-      sizeBox.append(link("Default", () => setSize(null)));
+    sizeBox.append(button("−", () => setSize(size - 1)), num, button("+", () => setSize(size + 1)));
+    if (s.font_size !== null) sizeBox.append(link("Default", () => setSize(null)));
     const help = fallbacks.length
-      ? `Then ${fallbacks.join(
-          ", ",
-        )} (from the config file), the built-in font, and the system's.`
+      ? `Then ${fallbacks.join(", ")} (from the config file), the built-in font, and the system's.`
       : "Tried first; then the built-in font and the system's, for CJK and emoji.";
     out.push(
       this.section(
@@ -826,11 +671,7 @@ export class SettingsModal {
         this.row("Family", help, family),
         this.row(
           "Size",
-          `${
-            this.hooks.platform === "mac"
-              ? "Cmd+= and Cmd+-"
-              : "Ctrl+= and Ctrl+-"
-          } change it for now; this is where they return.`,
+          `${this.hooks.platform === "mac" ? "Cmd+= and Cmd+-" : "Ctrl+= and Ctrl+-"} change it for now; this is where they return.`,
           sizeBox,
         ),
       ),
@@ -843,9 +684,7 @@ export class SettingsModal {
     css(note, { color: "var(--k-muted)", marginBottom: "12px" });
     note.append(
       "Ghostty's shortcuts. To change one, add a ",
-      Object.assign(document.createElement("code"), {
-        textContent: "keybind = …",
-      }),
+      Object.assign(document.createElement("code"), { textContent: "keybind = …" }),
       " line to the config file (",
       link("open it", () => this.openConfig(false)),
       ").",
@@ -856,48 +695,20 @@ export class SettingsModal {
   private about(): HTMLElement[] {
     const version = this.changelog?.[1] ?? "";
     const top = div("settings-about");
-    css(top, {
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      gap: "4px",
-      padding: "6px 0 14px",
-    });
+    css(top, { display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "6px 0 14px" });
     const img = document.createElement("img");
     img.src = iconUrl;
     img.alt = "";
     css(img, { width: "72px", height: "72px" });
     const name = div(undefined, "Kibann Terminal");
-    css(name, {
-      fontSize: "16px",
-      fontWeight: "600",
-      color: "var(--k-bright)",
-    });
+    css(name, { fontSize: "16px", fontWeight: "600", color: "var(--k-bright)" });
     const v = div("settings-version", version ? `Version ${version}` : "");
     v.style.color = "var(--k-muted)";
-    top.append(
-      img,
-      name,
-      v,
-      link("GitHub", () => this.api.openUrl(REPO)),
-    );
-    const desc = div(
-      undefined,
-      "A terminal for working alongside coding agents, built on libghostty.",
-    );
-    css(desc, {
-      background: "var(--k-tab)",
-      borderRadius: "8px",
-      padding: "10px 12px",
-      color: "var(--k-text)",
-      marginBottom: "14px",
-    });
+    top.append(img, name, v, link("GitHub", () => this.api.openUrl(REPO)));
+    const desc = div(undefined, "A terminal for working alongside coding agents, built on libghostty.");
+    css(desc, { background: "var(--k-tab)", borderRadius: "8px", padding: "10px 12px", color: "var(--k-text)", marginBottom: "14px" });
     const features = document.createElement("ul");
-    css(features, {
-      margin: "0 0 14px",
-      paddingLeft: "18px",
-      color: "var(--k-text)",
-    });
+    css(features, { margin: "0 0 14px", paddingLeft: "18px", color: "var(--k-text)" });
     for (const f of [
       "Agents open panes beside you, run commands and wait on them",
       "Every agent's state at a glance, with a notification when one needs you",
@@ -909,24 +720,11 @@ export class SettingsModal {
       features.append(li);
     }
     const credits = div();
-    css(credits, {
-      color: "var(--k-muted)",
-      fontSize: "11px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "4px",
-    });
+    css(credits, { color: "var(--k-muted)", fontSize: "11px", display: "flex", flexDirection: "column", gap: "4px" });
     const by = div();
-    const heart = Object.assign(document.createElement("span"), {
-      textContent: "♥",
-    });
+    const heart = Object.assign(document.createElement("span"), { textContent: "♥" });
     heart.style.color = "#ef4444";
-    by.append(
-      "Built with ",
-      heart,
-      " by ",
-      link("@ctmakes", () => this.api.openUrl("https://ctmakes.com")),
-    );
+    by.append("Built with ", heart, " by ", link("@ctmakes", () => this.api.openUrl("https://ctmakes.com")));
     const more = div();
     more.append(
       "If you like it, try ",
@@ -947,54 +745,30 @@ export class SettingsModal {
 
   private updates(): HTMLElement[] {
     const [text, version] = this.changelog ?? ["", ""];
-    const u = this.update ?? {
-      state: "idle",
-      version: null,
-      error: null,
-      checked: null,
-    };
+    const u = this.update ?? { state: "idle", version: null, error: null, checked: null };
     const card = div("settings-update");
-    css(card, {
-      display: "flex",
-      alignItems: "center",
-      gap: "12px",
-      background: "var(--k-tab)",
-      borderRadius: "8px",
-      padding: "12px",
-    });
+    css(card, { display: "flex", alignItems: "center", gap: "12px", background: "var(--k-tab)", borderRadius: "8px", padding: "12px" });
     const left = div();
     left.style.flex = "1";
-    const v = div(
-      undefined,
-      version ? `Kibann Terminal ${version}` : "Kibann Terminal",
-    );
+    const v = div(undefined, version ? `Kibann Terminal ${version}` : "Kibann Terminal");
     css(v, { fontWeight: "600", color: "var(--k-bright)" });
     const said = updateText(u as UpdateStatus, version);
     const state = div("settings-update-state", said.text);
-    css(state, {
-      color: u.state === "error" ? "var(--k-conflicts)" : "var(--k-muted)",
-      marginTop: "2px",
-    });
+    css(state, { color: u.state === "error" ? "var(--k-conflicts)" : "var(--k-muted)", marginTop: "2px" });
     left.append(v, state);
     card.append(left);
     if (u.state === "ready") {
       card.append(
         button(
           `Restart to Update`,
-          () =>
-            void this.api
-              .installUpdate()
-              .catch((e) => this.flash(`Couldn't update: ${e}`)),
+          () => void this.api.installUpdate().catch((e) => this.flash(`Couldn't update: ${e}`)),
           true,
         ),
       );
     } else if (u.state !== "dev") {
       const b = button(
         "Check for Updates",
-        () =>
-          void this.api
-            .checkUpdates()
-            .catch((e) => this.flash(`Couldn't check: ${e}`)),
+        () => void this.api.checkUpdates().catch((e) => this.flash(`Couldn't check: ${e}`)),
         true,
       );
       b.disabled = !said.canCheck;

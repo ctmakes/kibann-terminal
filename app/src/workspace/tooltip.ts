@@ -59,10 +59,7 @@ export function tooltip(
       t.style.display = "flex";
       const r = el.getBoundingClientRect();
       const w = t.offsetWidth;
-      t.style.left = `${Math.max(
-        4,
-        Math.min(window.innerWidth - w - 4, r.left),
-      )}px`;
+      t.style.left = `${Math.max(4, Math.min(window.innerWidth - w - 4, r.left))}px`;
       const h = t.offsetHeight;
       const up = above || r.bottom + 6 + h > window.innerHeight - 4;
       t.style.top = `${up ? r.top - h - 6 : r.bottom + 6}px`;

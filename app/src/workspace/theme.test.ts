@@ -10,16 +10,8 @@ const LIGHT: Theme = {
   background: 0xffffff,
   foreground: 0x1f2328,
 };
-const SOLARIZED: Theme = {
-  ...KIBANN_DARK,
-  background: 0xfdf6e3,
-  foreground: 0x657b83,
-};
-const DRACULA: Theme = {
-  ...KIBANN_DARK,
-  background: 0x282a36,
-  foreground: 0xf8f8f2,
-};
+const SOLARIZED: Theme = { ...KIBANN_DARK, background: 0xfdf6e3, foreground: 0x657b83 };
+const DRACULA: Theme = { ...KIBANN_DARK, background: 0x282a36, foreground: 0xf8f8f2 };
 
 describe("chromeFor", () => {
   it("gives back the old greys on the built-in dark theme", () => {
@@ -43,72 +35,26 @@ describe("chromeFor", () => {
   ] as const) {
     it(`keeps text readable on ${name}`, () => {
       const v = chromeFor(t);
-      for (const surface of [
-        "--k-sidebar",
-        "--k-bar",
-        "--k-header",
-        "--k-panel",
-      ]) {
-        for (const text of [
-          "--k-text",
-          "--k-strong",
-          "--k-title",
-          "--k-bright",
-        ]) {
-          expect(
-            contrast(num(v[text]), num(v[surface])),
-            `${text} on ${surface}`,
-          ).toBeGreaterThanOrEqual(4.5);
+      for (const surface of ["--k-sidebar", "--k-bar", "--k-header", "--k-panel"]) {
+        for (const text of ["--k-text", "--k-strong", "--k-title", "--k-bright"]) {
+          expect(contrast(num(v[text]), num(v[surface])), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
         }
       }
-      expect(
-        contrast(num(v["--k-current-text"]), num(v["--k-current"])),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        contrast(num(v["--k-accent"]), num(v["--k-panel"])),
-        "accent on panel",
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        contrast(num(v["--k-accent-text"]), num(v["--k-accent"])),
-        "text on accent",
-      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-current-text"]), num(v["--k-current"]))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent"]), num(v["--k-panel"])), "accent on panel").toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent-text"]), num(v["--k-accent"])), "text on accent").toBeGreaterThanOrEqual(4.5);
     });
   }
 
   it("takes the accent from the theme's blue, and fixes one that wouldn't read", () => {
-    const cyan = {
-      ...DRACULA,
-      palette: [
-        ...DRACULA.palette.slice(0, 4),
-        0x8be9fd,
-        ...DRACULA.palette.slice(5),
-      ],
-    };
+    const cyan = { ...DRACULA, palette: [...DRACULA.palette.slice(0, 4), 0x8be9fd, ...DRACULA.palette.slice(5)] };
     expect(chromeFor(cyan)["--k-accent"]).toBe("#8be9fd");
     // A pale blue on white, and a navy on black, are moved until they read.
-    const pale = chromeFor({
-      ...LIGHT,
-      palette: [
-        ...LIGHT.palette.slice(0, 4),
-        0xa0c8ff,
-        ...LIGHT.palette.slice(5),
-      ],
-    });
-    const navy = chromeFor({
-      ...KIBANN_DARK,
-      palette: [
-        ...KIBANN_DARK.palette.slice(0, 4),
-        0x000060,
-        ...KIBANN_DARK.palette.slice(5),
-      ],
-    });
+    const pale = chromeFor({ ...LIGHT, palette: [...LIGHT.palette.slice(0, 4), 0xa0c8ff, ...LIGHT.palette.slice(5)] });
+    const navy = chromeFor({ ...KIBANN_DARK, palette: [...KIBANN_DARK.palette.slice(0, 4), 0x000060, ...KIBANN_DARK.palette.slice(5)] });
     for (const v of [pale, navy]) {
-      expect(
-        contrast(num(v["--k-accent"]), num(v["--k-panel"])),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        contrast(num(v["--k-accent-text"]), num(v["--k-accent"])),
-      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent"]), num(v["--k-panel"]))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(num(v["--k-accent-text"]), num(v["--k-accent"]))).toBeGreaterThanOrEqual(4.5);
     }
   });
 

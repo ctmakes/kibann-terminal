@@ -3,18 +3,7 @@
 // step; `model.test.ts` mirrors the Rust tests.
 
 import type { Layout, LayoutTab } from "../proto";
-import {
-  equalize,
-  leaf,
-  panes,
-  pathOf,
-  remove,
-  setRatio,
-  split,
-  type Dir,
-  type Path,
-  type PaneId,
-} from "./layout";
+import { equalize, leaf, panes, pathOf, remove, setRatio, split, type Dir, type Path, type PaneId } from "./layout";
 
 export type TabId = number;
 
@@ -37,23 +26,13 @@ export class Model {
 
   newTab(pane: PaneId, focus: boolean): TabId {
     const id = ++this.nextTab;
-    this.layout.tabs.push({
-      id,
-      tree: leaf(pane),
-      focused: pane,
-      zoomed: null,
-    });
+    this.layout.tabs.push({ id, tree: leaf(pane), focused: pane, zoomed: null });
     if (focus || this.layout.active === null) this.layout.active = id;
     return id;
   }
 
   /** A new tab holding `tree`, after the others (a workspace file's). */
-  addTab(
-    tree: LayoutTab["tree"],
-    focused: PaneId,
-    title: string | null,
-    show: boolean,
-  ): TabId {
+  addTab(tree: LayoutTab["tree"], focused: PaneId, title: string | null, show: boolean): TabId {
     const id = ++this.nextTab;
     const tab: LayoutTab = { id, tree, focused, zoomed: null };
     if (title) tab.title = title;
@@ -84,8 +63,7 @@ export class Model {
       const left = panes(tree);
       tab.tree = tree;
       if (tab.zoomed === pane || left.length < 2) tab.zoomed = null;
-      if (tab.focused === pane)
-        tab.focused = left[Math.min(Math.max(0, at - 1), left.length - 1)];
+      if (tab.focused === pane) tab.focused = left[Math.min(Math.max(0, at - 1), left.length - 1)];
     } else {
       this.layout.tabs.splice(i, 1);
       if (this.layout.active === tab.id) {

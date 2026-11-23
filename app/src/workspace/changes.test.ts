@@ -34,19 +34,14 @@ describe("parseChangelog", () => {
     expect(r[0]!.blocks).toEqual([
       { t: "p", text: "One paragraph, wrapped." },
       { t: "h", text: "Fixed" },
-      {
-        t: "list",
-        items: ["First item continues here.", "Second with `code`"],
-      },
+      { t: "list", items: ["First item continues here.", "Second with `code`"] },
     ]);
     expect(r[1]!.blocks).toEqual([{ t: "list", items: ["Small fix"] }]);
     expect(r[2]!.blocks).toEqual([{ t: "p", text: "Plain." }]);
   });
 
   it("reads the real CHANGELOG.md", () => {
-    const r = parseChangelog(
-      readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf8"),
-    );
+    const r = parseChangelog(readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf8"));
     expect(r.length).toBeGreaterThan(0);
     expect(r[0]!.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(r[0]!.blocks.length).toBeGreaterThan(0);

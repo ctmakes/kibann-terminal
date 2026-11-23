@@ -33,8 +33,7 @@ const hex = (c: number) => `#${(c & 0xffffff).toString(16).padStart(6, "0")}`;
 
 /** `a` moved toward `b` by `t` (0..1), per channel (as proto's `mix`). */
 export function mix(a: number, b: number, t: number): number {
-  const ch = (s: number) =>
-    Math.round(((a >> s) & 0xff) * (1 - t) + ((b >> s) & 0xff) * t);
+  const ch = (s: number) => Math.round(((a >> s) & 0xff) * (1 - t) + ((b >> s) & 0xff) * t);
   return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
@@ -59,41 +58,33 @@ export const isDark = (t: Theme) => luminance(t.background) < DARK_BELOW;
 export function chromeFor(t: Theme): Record<string, string> {
   const { background: bg, foreground: fg } = t;
   const v: Record<string, string> = {};
-  for (const [name, at] of Object.entries(MIX))
-    v[`--k-${name}`] = hex(mix(bg, fg, at));
+  for (const [name, at] of Object.entries(MIX)) v[`--k-${name}`] = hex(mix(bg, fg, at));
   // A low-contrast theme would leave secondary text too faint: move each
   // text color toward the foreground until it reads (4.5:1) on every
   // surface it sits on.
   const surfaces = SURFACES.map((s) => mix(bg, fg, MIX[s]));
   for (const name of TEXT) {
     let at: number = MIX[name];
-    const reads = () =>
-      surfaces.every((s) => contrast(mix(bg, fg, at), s) >= 4.5);
+    const reads = () => surfaces.every((s) => contrast(mix(bg, fg, at), s) >= 4.5);
     while (at < 1 && !reads()) at = Math.min(1, at + 0.02);
     v[`--k-${name}`] = hex(mix(bg, fg, at));
   }
   const dark = isDark(t);
-  for (const [name, c] of Object.entries(dark ? DARK : LIGHT))
-    v[`--k-${name}`] = c;
+  for (const [name, c] of Object.entries(dark ? DARK : LIGHT)) v[`--k-${name}`] = c;
   v["--k-bg"] = hex(bg);
   v["--k-fg"] = hex(fg);
   // The focused row in the sidebar: a tint of the theme's blue.
   v["--k-current"] = hex(mix(bg, t.palette[4] ?? 0x58a6ff, dark ? 0.32 : 0.22));
-  v["--k-current-text"] = hex(
-    dark ? mix(fg, 0xffffff, 0.5) : mix(fg, 0x000000, 0.3),
-  );
+  v["--k-current-text"] = hex(dark ? mix(fg, 0xffffff, 0.5) : mix(fg, 0x000000, 0.3));
   // Buttons, switches and links (Settings): the theme's blue, moved toward
   // the foreground until it reads on the panel, with whichever text reads
   // on it.
   const panel = mix(bg, fg, MIX.panel);
   let accent = t.palette[4] ?? (dark ? 0x58a6ff : 0x0969da);
-  for (let i = 0; i < 30 && contrast(accent, panel) < 4.5; i++)
-    accent = mix(accent, dark ? 0xffffff : 0x000000, 0.08);
+  for (let i = 0; i < 30 && contrast(accent, panel) < 4.5; i++) accent = mix(accent, dark ? 0xffffff : 0x000000, 0.08);
   const onAccent =
     [bg, fg].find((c) => contrast(c, accent) >= 4.5) ??
-    (contrast(0x000000, accent) > contrast(0xffffff, accent)
-      ? 0x000000
-      : 0xffffff);
+    (contrast(0x000000, accent) > contrast(0xffffff, accent) ? 0x000000 : 0xffffff);
   v["--k-accent"] = hex(accent);
   v["--k-accent-text"] = hex(onAccent);
   v["--k-scrim"] = dark ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.25)";
@@ -102,21 +93,16 @@ export function chromeFor(t: Theme): Record<string, string> {
 }
 
 /** Put `theme`'s variables on `el` (the document by default). */
-export function applyChrome(
-  t: Theme,
-  el: HTMLElement = document.documentElement,
-): void {
-  for (const [k, val] of Object.entries(chromeFor(t)))
-    el.style.setProperty(k, val);
+export function applyChrome(t: Theme, el: HTMLElement = document.documentElement): void {
+  for (const [k, val] of Object.entries(chromeFor(t))) el.style.setProperty(k, val);
   el.style.colorScheme = isDark(t) ? "dark" : "light";
 }
 
 /** The built-in dark theme, used until the app sends one (and in tests). */
 export const KIBANN_DARK: Theme = {
   palette: [
-    0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7,
-    0xc5c8c6, 0x666666, 0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8,
-    0x70c0b1, 0xeaeaea,
+    0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6, 0x666666, 0xd54e53, 0xb9ca4a,
+    0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
   ],
   background: 0x000000,
   foreground: 0xffffff,

@@ -70,9 +70,7 @@ describe("resizing", () => {
     // 1 | 2 | 3 made by splitting right twice from the left pane's side.
     let t = split(split(leaf(1), 1, "row", 2), 2, "row", 3);
     t = equalize(t);
-    const w = [1, 2, 3].map(
-      (p) => rects(t, { x: 0, y: 0, w: 902, h: 100 }).get(p)!.w,
-    );
+    const w = [1, 2, 3].map((p) => rects(t, { x: 0, y: 0, w: 902, h: 100 }).get(p)!.w);
     expect(w).toEqual([300, 300, 300]);
   });
 

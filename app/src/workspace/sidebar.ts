@@ -83,40 +83,23 @@ export interface Group {
   panes: CardPane[];
 }
 
-const URGENCY: Partial<Record<AgentState, number>> = {
-  blocked: 0,
-  done: 1,
-  working: 2,
-};
+const URGENCY: Partial<Record<AgentState, number>> = { blocked: 0, done: 1, working: 2 };
 
 /** Panes grouped by repository (or directory), the groups with the most
  * urgent agent first, then in the order their first pane appears. Panes
  * keep their own order within a group. */
-export function groupPanes(
-  panes: CardPane[],
-  git: GitMap,
-  status: StatusMap,
-): Group[] {
+export function groupPanes(panes: CardPane[], git: GitMap, status: StatusMap): Group[] {
   const groups = new Map<string, Group>();
   for (const p of panes) {
     const place: PaneDir | undefined = git[String(p.id)];
-    const key = place?.git
-      ? `repo:${place.git.repo}`
-      : place
-      ? `dir:${place.shown}`
-      : "unknown";
+    const key = place?.git ? `repo:${place.git.repo}` : place ? `dir:${place.shown}` : "unknown";
     const label = place?.git ? place.git.repo : place ? place.shown : "…";
     let g = groups.get(key);
     if (!g) groups.set(key, (g = { key, label, panes: [] }));
     g.panes.push(p);
   }
   const rank = (g: Group) =>
-    Math.min(
-      3,
-      ...g.panes.map(
-        (p) => URGENCY[status[String(p.id)]?.state ?? "idle"] ?? 3,
-      ),
-    );
+    Math.min(3, ...g.panes.map((p) => URGENCY[status[String(p.id)]?.state ?? "idle"] ?? 3));
   const order = [...groups.values()];
   return order
     .map((g, i) => ({ g, i, r: rank(g) }))
@@ -126,20 +109,7 @@ export function groupPanes(
 
 /** Titles that only name the shell: a pane showing one is told apart by
  * its directory instead. */
-const SHELLS = new Set([
-  "shell",
-  "sh",
-  "bash",
-  "zsh",
-  "fish",
-  "nu",
-  "dash",
-  "ksh",
-  "tcsh",
-  "pwsh",
-  "powershell",
-  "cmd",
-]);
+const SHELLS = new Set(["shell", "sh", "bash", "zsh", "fish", "nu", "dash", "ksh", "tcsh", "pwsh", "powershell", "cmd"]);
 
 /** What a pane's rail badge is made from: the program it runs, else its
  * directory's name. */
@@ -154,13 +124,10 @@ export function badgeSource(title: string, place: PaneDir | undefined): string {
 /** The rail badges for panes in order (as their sources): one letter each,
  * two where a pane would read the same as the one before or after it. */
 export function badgeTexts(sources: string[]): string[] {
-  const chars = sources.map((s) => [
-    ...(s.replace(/^[^\p{L}\p{N}~/]+/u, "") || s),
-  ]);
+  const chars = sources.map((s) => [...s.replace(/^[^\p{L}\p{N}~/]+/u, "") || s]);
   const one = chars.map((c) => (c[0] ?? "·").toUpperCase());
   return one.map((b, i) => {
-    const clash = (j: number) =>
-      j >= 0 && j < one.length && one[j] === b && sources[j] !== sources[i];
+    const clash = (j: number) => j >= 0 && j < one.length && one[j] === b && sources[j] !== sources[i];
     if (!clash(i - 1) && !clash(i + 1)) return b;
     const rest = chars[i].slice(1).find((ch) => /[\p{L}\p{N}]/u.test(ch));
     return rest ? b + rest.toLowerCase() : b;
@@ -271,9 +238,7 @@ export class Sidebar {
         const x = ev.clientX - left;
         if (x < COLLAPSE_AT) this.setExpanded(false);
         else {
-          this.width = Math.round(
-            Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, x)),
-          );
+          this.width = Math.round(Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, x)));
           if (this.expanded) this.apply();
           else this.setExpanded(true);
         }
@@ -359,11 +324,7 @@ export class Sidebar {
     spacer.style.flex = "1";
     this.extras.push(spacer);
     // A downloaded update: a button that stays (the notice can be dismissed).
-    this.updateBtn = icon(
-      "sidebar-update",
-      UPDATE_ICON,
-      () => opts.onUpdate?.(),
-    );
+    this.updateBtn = icon("sidebar-update", UPDATE_ICON, () => opts.onUpdate?.());
     Object.assign(this.updateBtn.style, {
       position: "relative",
       alignItems: "center",
@@ -372,19 +333,11 @@ export class Sidebar {
       color: "var(--k-strong)",
       border: "1px solid var(--k-divider)",
     });
-    this.updateBtn.addEventListener(
-      "mouseleave",
-      () => (this.updateBtn.style.color = "var(--k-strong)"),
-    );
+    this.updateBtn.addEventListener("mouseleave", () => (this.updateBtn.style.color = "var(--k-strong)"));
     this.updateWord = document.createElement("span");
     this.updateWord.textContent = "Update";
     this.updateBtn.append(this.updateWord, redDot());
-    tooltip(
-      this.updateBtn,
-      () => `Kibann Terminal ${this.updateVersion} is ready: restart to update`,
-      "",
-      true,
-    );
+    tooltip(this.updateBtn, () => `Kibann Terminal ${this.updateVersion} is ready: restart to update`, "", true);
     const fold = icon("sidebar-fold", ICON, () => this.toggle());
     fold.style.position = "relative";
     this.foldDot = redDot();
@@ -395,8 +348,8 @@ export class Sidebar {
         this.expanded
           ? "Collapse sidebar"
           : this.updateVersion
-          ? `Expand sidebar (Kibann Terminal ${this.updateVersion} is ready)`
-          : "Expand sidebar",
+            ? `Expand sidebar (Kibann Terminal ${this.updateVersion} is ready)`
+            : "Expand sidebar",
       opts.sidebarKey,
       true,
     );
@@ -431,8 +384,7 @@ export class Sidebar {
     this.el.style.width = `${this.expanded ? this.width : RAIL}px`;
     this.el.dataset.expanded = String(this.expanded);
     // The rail has room for one button.
-    for (const e of this.extras)
-      e.style.display = this.expanded ? "flex" : "none";
+    for (const e of this.extras) e.style.display = this.expanded ? "flex" : "none";
     const update = this.updateVersion !== null;
     this.updateBtn.style.display = update && this.expanded ? "flex" : "none";
     this.updateWord.style.display = this.width >= UPDATE_WORD_MIN ? "" : "none";
@@ -456,8 +408,7 @@ export class Sidebar {
       if (s && typeof s === "object") {
         // `visible` is the older name, from when it could be hidden.
         this.expanded = (s.expanded ?? s.visible) === true;
-        if (typeof s.width === "number")
-          this.width = Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, s.width));
+        if (typeof s.width === "number") this.width = Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, s.width));
       }
     } catch {
       // Storage may be unavailable; the defaults stand.
@@ -466,10 +417,7 @@ export class Sidebar {
 
   private save(): void {
     try {
-      localStorage.setItem(
-        STORE,
-        JSON.stringify({ expanded: this.expanded, width: this.width }),
-      );
+      localStorage.setItem(STORE, JSON.stringify({ expanded: this.expanded, width: this.width }));
     } catch {
       // Not remembered this time.
     }
@@ -490,8 +438,7 @@ export class Sidebar {
       r.el.remove();
       this.rows.delete(id);
     }
-    if (this.previewing !== null && !keep.has(this.previewing))
-      this.hidePreview();
+    if (this.previewing !== null && !keep.has(this.previewing)) this.hidePreview();
     const nodes: HTMLElement[] = [];
     for (const g of groups) {
       const h = document.createElement("div");
@@ -520,9 +467,7 @@ export class Sidebar {
             },
       );
       nodes.push(h);
-      const badges = badgeTexts(
-        g.panes.map((p) => badgeSource(p.title, git[String(p.id)])),
-      );
+      const badges = badgeTexts(g.panes.map((p) => badgeSource(p.title, git[String(p.id)])));
       g.panes.forEach((p, i) => {
         const r = this.rows.get(p.id) ?? this.makeRow(p.id);
         this.fillRow(r, p, git[String(p.id)], status, badges[i], tabbed);
@@ -549,11 +494,7 @@ export class Sidebar {
     });
     // The dot's slot keeps titles aligned whether or not there's an agent.
     const slot = document.createElement("span");
-    Object.assign(slot.style, {
-      flex: "0 0 8px",
-      display: "flex",
-      justifyContent: "center",
-    });
+    Object.assign(slot.style, { flex: "0 0 8px", display: "flex", justifyContent: "center" });
     const dot = makeDot();
     slot.append(dot);
     const title = document.createElement("span");
@@ -607,14 +548,7 @@ export class Sidebar {
     return r;
   }
 
-  private fillRow(
-    r: Row,
-    p: CardPane,
-    place: PaneDir | undefined,
-    status: StatusMap,
-    badge: string,
-    tabbed: boolean,
-  ): void {
+  private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap, badge: string, tabbed: boolean): void {
     const name = paneName(p.title);
     r.title.textContent = name;
     r.badge.textContent = badge;
@@ -624,7 +558,7 @@ export class Sidebar {
     const full = this.expanded;
     r.num.style.display = full && tabbed ? "" : "none";
     r.el.title = full
-      ? place?.dir ?? ""
+      ? (place?.dir ?? "")
       : [name, place?.shown, tabbed ? tab : ""].filter(Boolean).join(" — ");
     r.badge.style.display = full ? "none" : "";
     r.title.style.display = full ? "" : "none";
@@ -633,11 +567,7 @@ export class Sidebar {
     r.el.style.gap = full ? "6px" : "3px";
     const current = p.focused && p.shown;
     r.el.style.background = current ? "var(--k-current)" : "";
-    const color = current
-      ? "var(--k-current-text)"
-      : p.shown
-      ? "var(--k-title)"
-      : "var(--k-label)";
+    const color = current ? "var(--k-current-text)" : p.shown ? "var(--k-title)" : "var(--k-label)";
     r.title.style.color = color;
     r.badge.style.color = color;
     const s = status[String(p.id)];
@@ -654,12 +584,7 @@ export class Sidebar {
           textOverflow: "ellipsis",
           flex: x.kind === "branch" ? "0 1 auto" : "0 0 auto",
           minWidth: x.kind === "branch" ? "0" : "",
-          color:
-            x.kind === "changed"
-              ? "var(--k-changed)"
-              : x.kind === "conflicts"
-              ? "var(--k-conflicts)"
-              : "var(--k-muted)",
+          color: x.kind === "changed" ? "var(--k-changed)" : x.kind === "conflicts" ? "var(--k-conflicts)" : "var(--k-muted)",
           cursor: x.kind === "changed" ? "pointer" : "",
         });
         return span;
@@ -714,14 +639,8 @@ export class Sidebar {
       return;
     }
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.min(
-      PREVIEW_MAX.w,
-      Math.round((src.width / dpr) * PREVIEW_SCALE),
-    );
-    const h = Math.min(
-      PREVIEW_MAX.h,
-      Math.round((src.height / dpr) * PREVIEW_SCALE),
-    );
+    const w = Math.min(PREVIEW_MAX.w, Math.round((src.width / dpr) * PREVIEW_SCALE));
+    const h = Math.min(PREVIEW_MAX.h, Math.round((src.height / dpr) * PREVIEW_SCALE));
     const c = this.preview;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
       c.width = Math.round(w * dpr);
@@ -731,10 +650,7 @@ export class Sidebar {
     }
     const side = this.el.getBoundingClientRect();
     const at = row.el.getBoundingClientRect();
-    const top = Math.max(
-      4,
-      Math.min(window.innerHeight - h - 6, at.top + at.height / 2 - h / 2),
-    );
+    const top = Math.max(4, Math.min(window.innerHeight - h - 6, at.top + at.height / 2 - h / 2));
     c.style.left = `${side.right + 6}px`;
     c.style.top = `${top}px`;
     c.style.background = p.bg;
@@ -745,22 +661,9 @@ export class Sidebar {
     const sw = Math.min(src.width, c.width / PREVIEW_SCALE);
     const sh = Math.min(src.height, c.height / PREVIEW_SCALE);
     const cursor = p.cursor();
-    const sy = Math.max(
-      0,
-      Math.min(src.height - sh, cursor * src.height - sh * 0.7),
-    );
+    const sy = Math.max(0, Math.min(src.height - sh, cursor * src.height - sh * 0.7));
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(
-      src,
-      0,
-      sy,
-      sw,
-      sh,
-      0,
-      0,
-      sw * PREVIEW_SCALE,
-      sh * PREVIEW_SCALE,
-    );
+    ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * PREVIEW_SCALE, sh * PREVIEW_SCALE);
   }
 
   dispose(): void {

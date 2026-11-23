@@ -3,21 +3,13 @@
 // TypeScript. Either way the workspace changes only when a layout comes back
 // (`Workspace.apply`), except for focus, which it moves at once.
 
-import type {
-  Acted,
-  AgentState,
-  Layout,
-  LayoutAction,
-  PaneDir,
-  TemplateTree,
-  Tree,
-} from "../proto";
+import type { Acted, AgentState, Layout, LayoutAction, PaneDir, TemplateTree, Tree } from "../proto";
 import { panes, type PaneId } from "./layout";
 import { Model, type TabId } from "./model";
 import type { GitMap } from "./pane";
 import type { StatusMap } from "./status";
 
-export type { Acted } from "../proto";
+export type { Acted };
 
 export interface LayoutBackend {
   act(action: LayoutAction): Promise<Acted>;
@@ -77,13 +69,9 @@ export class FakeBackend implements LayoutBackend {
     const before = this.status[key]?.state;
     if (state === null) delete this.status[key];
     else {
-      const done =
-        state === "idle" &&
-        (before === "working" || before === "done") &&
-        !this.seen(pane);
+      const done = state === "idle" && (before === "working" || before === "done") && !this.seen(pane);
       const now = done ? "done" : state;
-      const since =
-        now === before ? this.status[key]?.since ?? Date.now() : Date.now();
+      const since = now === before ? (this.status[key]?.since ?? Date.now()) : Date.now();
       this.status[key] = { agent, state: now, since };
     }
     this.deliverStatus();
@@ -156,15 +144,13 @@ export class FakeBackend implements LayoutBackend {
         if (m.activate(a.tab)) acted = { pane: null, tab: a.tab };
         break;
       case "set_ratio":
-        if (m.setRatio(a.tab, a.path, a.ratio))
-          acted = { pane: null, tab: a.tab };
+        if (m.setRatio(a.tab, a.path, a.ratio)) acted = { pane: null, tab: a.tab };
         break;
       case "equalize":
         if (m.equalize(a.tab)) acted = { pane: null, tab: a.tab };
         break;
       case "zoom":
-        if (m.zoom(a.tab, a.pane ?? null))
-          acted = { pane: a.pane ?? null, tab: a.tab };
+        if (m.zoom(a.tab, a.pane ?? null)) acted = { pane: a.pane ?? null, tab: a.tab };
         break;
       case "open_workspace": {
         const t = a.template;
@@ -172,13 +158,7 @@ export class FakeBackend implements LayoutBackend {
           const build = (n: TemplateTree): Tree =>
             n.kind === "leaf"
               ? { kind: "leaf", pane: ++this.nextPane }
-              : {
-                  kind: "split",
-                  dir: n.dir,
-                  ratio: n.ratio,
-                  a: build(n.a),
-                  b: build(n.b),
-                };
+              : { kind: "split", dir: n.dir, ratio: n.ratio, a: build(n.a), b: build(n.b) };
           const tree = build(tab.tree);
           const order = panes(tree);
           const focused = order[tab.focused] ?? order[0];
@@ -188,8 +168,7 @@ export class FakeBackend implements LayoutBackend {
         break;
       }
     }
-    if (!acted)
-      return Promise.reject(new Error(`can't ${a.t}: no such pane or tab`));
+    if (!acted) return Promise.reject(new Error(`can't ${a.t}: no such pane or tab`));
     if (deliver) this.deliver();
     if (a.t === "close") {
       delete this.status[String(a.pane)];

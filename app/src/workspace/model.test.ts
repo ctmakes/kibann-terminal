@@ -65,12 +65,7 @@ describe("layout model", () => {
   });
 
   it("starts after the ids of a given layout", () => {
-    const m = new Model({
-      tabs: [
-        { id: 7, tree: { kind: "leaf", pane: 1 }, focused: 1, zoomed: null },
-      ],
-      active: 7,
-    });
+    const m = new Model({ tabs: [{ id: 7, tree: { kind: "leaf", pane: 1 }, focused: 1, zoomed: null }], active: 7 });
     expect(m.newTab(2, false)).toBe(8);
   });
 });

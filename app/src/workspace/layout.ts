@@ -55,13 +55,7 @@ function replace(t: Tree, path: Path, f: (n: Tree) => Tree): Tree {
 export function split(t: Tree, target: PaneId, dir: Dir, pane: PaneId): Tree {
   const path = pathOf(t, target);
   if (!path) return t;
-  return replace(t, path, (n) => ({
-    kind: "split",
-    dir,
-    ratio: 0.5,
-    a: n,
-    b: leaf(pane),
-  }));
+  return replace(t, path, (n) => ({ kind: "split", dir, ratio: 0.5, a: n, b: leaf(pane) }));
 }
 
 /** Remove `pane`; its sibling takes the space. Null when it was the last pane. */
@@ -74,14 +68,11 @@ export function remove(t: Tree, pane: PaneId): Tree | null {
   return replace(t, parent, (n) => (n.kind === "split" ? n[sibling] : n));
 }
 
-const clampRatio = (r: number) =>
-  Math.min(1 - MIN_RATIO, Math.max(MIN_RATIO, r));
+const clampRatio = (r: number) => Math.min(1 - MIN_RATIO, Math.max(MIN_RATIO, r));
 
 /** Set the ratio of the split at `path`. */
 export function setRatio(t: Tree, path: Path, ratio: number): Tree {
-  return replace(t, path, (n) =>
-    n.kind === "split" ? { ...n, ratio: clampRatio(ratio) } : n,
-  );
+  return replace(t, path, (n) => (n.kind === "split" ? { ...n, ratio: clampRatio(ratio) } : n));
 }
 
 /**
@@ -89,13 +80,7 @@ export function setRatio(t: Tree, path: Path, ratio: number): Tree {
  * `box`. Moving it right or down makes the left or top side bigger. Returns
  * the tree unchanged when there is no divider that way.
  */
-export function resize(
-  t: Tree,
-  box: Rect,
-  pane: PaneId,
-  toward: Direction,
-  delta: number,
-): Tree {
+export function resize(t: Tree, box: Rect, pane: PaneId, toward: Direction, delta: number): Tree {
   const r = resizeTarget(t, box, pane, toward, delta);
   return r ? setRatio(t, r.path, r.ratio) : t;
 }
@@ -130,9 +115,7 @@ export function resizeTarget(
 export function equalize(t: Tree): Tree {
   if (t.kind === "leaf") return t;
   const weight = (n: Tree, dir: Dir): number =>
-    n.kind === "split" && n.dir === dir
-      ? weight(n.a, dir) + weight(n.b, dir)
-      : 1;
+    n.kind === "split" && n.dir === dir ? weight(n.a, dir) + weight(n.b, dir) : 1;
   const wa = weight(t.a, t.dir);
   const wb = weight(t.b, t.dir);
   return { ...t, ratio: wa / (wa + wb), a: equalize(t.a), b: equalize(t.b) };
@@ -144,23 +127,13 @@ export function halves(box: Rect, dir: Dir, ratio: number): [Rect, Rect, Rect] {
     const aw = Math.round((box.w - DIVIDER) * ratio);
     const a = { x: box.x, y: box.y, w: aw, h: box.h };
     const d = { x: box.x + aw, y: box.y, w: DIVIDER, h: box.h };
-    const b = {
-      x: box.x + aw + DIVIDER,
-      y: box.y,
-      w: box.w - aw - DIVIDER,
-      h: box.h,
-    };
+    const b = { x: box.x + aw + DIVIDER, y: box.y, w: box.w - aw - DIVIDER, h: box.h };
     return [a, d, b];
   }
   const ah = Math.round((box.h - DIVIDER) * ratio);
   const a = { x: box.x, y: box.y, w: box.w, h: ah };
   const d = { x: box.x, y: box.y + ah, w: box.w, h: DIVIDER };
-  const b = {
-    x: box.x,
-    y: box.y + ah + DIVIDER,
-    w: box.w,
-    h: box.h - ah - DIVIDER,
-  };
+  const b = { x: box.x, y: box.y + ah + DIVIDER, w: box.w, h: box.h - ah - DIVIDER };
   return [a, d, b];
 }
 
@@ -178,11 +151,7 @@ export function boxOf(t: Tree, box: Rect, path: Path): Rect {
 }
 
 /** Where each pane goes inside `box`. */
-export function rects(
-  t: Tree,
-  box: Rect,
-  out = new Map<PaneId, Rect>(),
-): Map<PaneId, Rect> {
+export function rects(t: Tree, box: Rect, out = new Map<PaneId, Rect>()): Map<PaneId, Rect> {
   if (t.kind === "leaf") {
     out.set(t.pane, box);
     return out;
@@ -202,12 +171,7 @@ export interface DividerInfo {
   box: Rect;
 }
 
-export function dividers(
-  t: Tree,
-  box: Rect,
-  path: Path = [],
-  out: DividerInfo[] = [],
-): DividerInfo[] {
+export function dividers(t: Tree, box: Rect, path: Path = [], out: DividerInfo[] = []): DividerInfo[] {
   if (t.kind === "leaf") return out;
   const [a, d, b] = halves(box, t.dir, t.ratio);
   out.push({ path, dir: t.dir, rect: d, box });
@@ -227,12 +191,7 @@ export function ratioAt(d: DividerInfo, x: number, y: number): number {
  * The pane next to `from` in `toward`: among panes entirely on that side
  * that overlap it across, the nearest, then the one overlapping most.
  */
-export function neighbor(
-  t: Tree,
-  box: Rect,
-  from: PaneId,
-  toward: Direction,
-): PaneId | null {
+export function neighbor(t: Tree, box: Rect, from: PaneId, toward: Direction): PaneId | null {
   const all = rects(t, box);
   const c = all.get(from);
   if (!c) return null;
@@ -242,8 +201,7 @@ export function neighbor(
     if (pane === from) continue;
     let dist: number;
     let overlap: number;
-    const across = (a0: number, a1: number, b0: number, b1: number) =>
-      Math.min(a1, b1) - Math.max(a0, b0);
+    const across = (a0: number, a1: number, b0: number, b1: number) => Math.min(a1, b1) - Math.max(a0, b0);
     switch (toward) {
       case "right":
         dist = r.x - (c.x + c.w);
@@ -263,11 +221,7 @@ export function neighbor(
         break;
     }
     if (dist < -eps || overlap <= 0) continue;
-    if (
-      !best ||
-      dist < best.dist - eps ||
-      (Math.abs(dist - best.dist) <= eps && overlap > best.overlap)
-    ) {
+    if (!best || dist < best.dist - eps || (Math.abs(dist - best.dist) <= eps && overlap > best.overlap)) {
       best = { pane, dist, overlap };
     }
   }

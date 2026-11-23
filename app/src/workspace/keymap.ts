@@ -57,14 +57,11 @@ const ARROWS: Array<[string, Direction]> = [
   ["ArrowDown", "down"],
 ];
 
-const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
-  (d) => `Digit${d}`,
-);
+const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => `Digit${d}`);
 
 function table(p: Platform): Binding[] {
   const b: Binding[] = [];
-  const add = (mods: Mods, code: string, action: Action) =>
-    b.push({ mods, code, action });
+  const add = (mods: Mods, code: string, action: Action) => b.push({ mods, code, action });
   if (p === "mac") {
     add("m", "KeyT", { kind: "newTab" });
     add("m", "KeyW", { kind: "close" });
@@ -80,9 +77,7 @@ function table(p: Platform): Binding[] {
     add("ms", "Enter", { kind: "zoom" });
     add("ms", "BracketLeft", { kind: "tabCycle", step: -1 });
     add("ms", "BracketRight", { kind: "tabCycle", step: 1 });
-    DIGITS.forEach((code, i) =>
-      add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }),
-    );
+    DIGITS.forEach((code, i) => add("m", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
     add("ms", "KeyB", { kind: "sidebar" });
     add("m", "Slash", { kind: "shortcuts" });
     add("m", "Comma", { kind: "settings" });
@@ -110,9 +105,7 @@ function table(p: Platform): Binding[] {
     add("cs", "Enter", { kind: "zoom" });
     add("c", "PageUp", { kind: "tabCycle", step: -1 });
     add("c", "PageDown", { kind: "tabCycle", step: 1 });
-    DIGITS.forEach((code, i) =>
-      add("a", code, { kind: "goToTab", index: i === 8 ? -1 : i }),
-    );
+    DIGITS.forEach((code, i) => add("a", code, { kind: "goToTab", index: i === 8 ? -1 : i }));
     add("cs", "KeyB", { kind: "sidebar" });
     // Not Ctrl+/: shells and editors take it (undo).
     add("cs", "Slash", { kind: "shortcuts" });
@@ -172,12 +165,7 @@ export function keyFor(action: Action, platform: Platform): string {
 }
 
 function modsOf(e: KeyLike): Mods {
-  return (
-    (e.ctrlKey ? "c" : "") +
-    (e.altKey ? "a" : "") +
-    (e.metaKey ? "m" : "") +
-    (e.shiftKey ? "s" : "")
-  );
+  return (e.ctrlKey ? "c" : "") + (e.altKey ? "a" : "") + (e.metaKey ? "m" : "") + (e.shiftKey ? "s" : "");
 }
 
 /** Sorted letters, so "ms" and "sm" compare equal. */
@@ -207,14 +195,11 @@ const ACCEL_MODS: Array<[string, string, string]> = [
  * without a key, so its menu item shows none. */
 export function menuKeys(platform: Platform): Record<string, string | null> {
   const out: Record<string, string | null> = {};
-  for (const b of defaultBindings(platform))
-    out[JSON.stringify(b.action)] = null;
+  for (const b of defaultBindings(platform)) out[JSON.stringify(b.action)] = null;
   for (const b of bindings(platform)) {
     const id = JSON.stringify(b.action);
     if (out[id]) continue;
-    const mods = ACCEL_MODS.filter(([m]) => b.mods.includes(m)).map(
-      ([, mac, pc]) => (platform === "mac" ? mac : pc),
-    );
+    const mods = ACCEL_MODS.filter(([m]) => b.mods.includes(m)).map(([, mac, pc]) => (platform === "mac" ? mac : pc));
     out[id] = [...mods, b.code].join("+");
   }
   return out;

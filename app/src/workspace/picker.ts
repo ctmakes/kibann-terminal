@@ -76,11 +76,7 @@ export class ThemePicker {
     this.input.addEventListener("keydown", (e) => this.onKey(e));
     this.list = document.createElement("div");
     this.list.className = "theme-picker-list";
-    Object.assign(this.list.style, {
-      maxHeight: `${ROW_H * 12}px`,
-      overflowY: "auto",
-      padding: "4px 0",
-    });
+    Object.assign(this.list.style, { maxHeight: `${ROW_H * 12}px`, overflowY: "auto", padding: "4px 0" });
     const hint = document.createElement("div");
     hint.textContent = "↑↓ preview   ↩ keep   esc cancel";
     Object.assign(hint.style, {
@@ -147,16 +143,9 @@ export class ThemePicker {
       });
       const name = document.createElement("span");
       name.textContent = t.name;
-      Object.assign(name.style, {
-        flex: "1",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-      });
+      Object.assign(name.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
       const tag = document.createElement("span");
-      tag.textContent =
-        (t.name === this.original ? "in use · " : "") +
-        (t.dark ? "dark" : "light");
+      tag.textContent = (t.name === this.original ? "in use · " : "") + (t.dark ? "dark" : "light");
       Object.assign(tag.style, { color: "var(--k-muted)", fontSize: "11px" });
       row.append(name, tag);
       row.addEventListener("mousedown", (e) => {
@@ -169,10 +158,7 @@ export class ThemePicker {
     if (rows.length === 0) {
       const none = document.createElement("div");
       none.textContent = "No theme matches.";
-      Object.assign(none.style, {
-        padding: "6px 12px",
-        color: "var(--k-muted)",
-      });
+      Object.assign(none.style, { padding: "6px 12px", color: "var(--k-muted)" });
       rows.push(none);
     }
     this.list.replaceChildren(...rows);
@@ -215,9 +201,6 @@ export class ThemePicker {
     clearTimeout(this.timer);
     const name = this.shown[this.at]?.name;
     if (!name) return;
-    this.timer = window.setTimeout(
-      () => void this.api.preview(name),
-      PREVIEW_MS,
-    );
+    this.timer = window.setTimeout(() => void this.api.preview(name), PREVIEW_MS);
   }
 }

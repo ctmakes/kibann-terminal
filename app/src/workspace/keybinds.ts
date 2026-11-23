@@ -77,16 +77,12 @@ function codeOf(name: string): string | null {
 }
 
 /** A trigger (`super+shift+d`) as modifiers and code, or an error. */
-export function parseTrigger(
-  t: string,
-): { mods: string; code: string } | string {
+export function parseTrigger(t: string): { mods: string; code: string } | string {
   if (t.includes(">")) return "key sequences aren't supported";
   const prefix = /^(global|all|unconsumed|performable):/.exec(t);
   if (prefix) return `"${prefix[1]}:" isn't supported`;
   // "+" may itself be the key: ctrl++.
-  const parts = t.endsWith("++")
-    ? [...t.slice(0, -2).split("+"), "+"]
-    : t.split("+");
+  const parts = t.endsWith("++") ? [...t.slice(0, -2).split("+"), "+"] : t.split("+");
   const key = parts.pop() ?? "";
   let mods = "";
   for (const p of parts) {
@@ -101,14 +97,7 @@ export function parseTrigger(
   return { mods: [...mods].sort().join(""), code };
 }
 
-const DIRECTIONS: Record<string, Direction> = {
-  left: "left",
-  right: "right",
-  up: "up",
-  down: "down",
-  top: "up",
-  bottom: "down",
-};
+const DIRECTIONS: Record<string, Direction> = { left: "left", right: "right", up: "up", down: "down", top: "up", bottom: "down" };
 
 /** A Ghostty action (`new_split:right`) as ours, `"unbind"`, or an error. */
 export function parseAction(a: string): Action | "unbind" | string {
@@ -125,15 +114,12 @@ export function parseAction(a: string): Action | "unbind" | string {
       if (arg === "down") return { kind: "split", dir: "column" };
       return `new_split:${arg}: only right and down`;
     case "goto_split":
-      if (arg === "previous" || arg === "next")
-        return { kind: "focusCycle", step: arg === "next" ? 1 : -1 };
+      if (arg === "previous" || arg === "next") return { kind: "focusCycle", step: arg === "next" ? 1 : -1 };
       if (DIRECTIONS[arg]) return { kind: "focus", toward: DIRECTIONS[arg] };
       return `goto_split:${arg}: previous, next, left, right, up or down`;
     case "resize_split": {
       const dir = DIRECTIONS[arg.split(",")[0].trim()];
-      return dir
-        ? { kind: "resize", toward: dir }
-        : `resize_split:${arg}: left, right, up or down`;
+      return dir ? { kind: "resize", toward: dir } : `resize_split:${arg}: left, right, up or down`;
     }
     case "equalize_splits":
       return { kind: "equalize" };
@@ -147,9 +133,7 @@ export function parseAction(a: string): Action | "unbind" | string {
       return { kind: "goToTab", index: -1 };
     case "goto_tab": {
       const n = Number(arg);
-      return Number.isInteger(n) && n >= 1
-        ? { kind: "goToTab", index: n - 1 }
-        : `goto_tab:${arg}: a tab number from 1`;
+      return Number.isInteger(n) && n >= 1 ? { kind: "goToTab", index: n - 1 } : `goto_tab:${arg}: a tab number from 1`;
     }
     case "increase_font_size":
       return { kind: "fontSize", step: 1 };
@@ -160,8 +144,7 @@ export function parseAction(a: string): Action | "unbind" | string {
     case "start_search":
       return { kind: "find" };
     case "navigate_search":
-      if (arg === "next" || arg === "previous")
-        return { kind: "findStep", older: arg === "next" };
+      if (arg === "next" || arg === "previous") return { kind: "findStep", older: arg === "next" };
       return `navigate_search:${arg}: next or previous`;
     case "toggle_sidebar":
       return { kind: "sidebar" };
@@ -190,14 +173,8 @@ export function parseAction(a: string): Action | "unbind" | string {
 
 /** The shortcuts after `lines` (the config's `keybind` values, in order)
  * change `defaults`, and a message for each line that couldn't be used. */
-export function applyKeybinds(
-  defaults: Binding[],
-  lines: string[],
-): { table: Binding[]; errors: string[] } {
-  let table = defaults.map((b) => ({
-    ...b,
-    mods: [...b.mods].sort().join(""),
-  }));
+export function applyKeybinds(defaults: Binding[], lines: string[]): { table: Binding[]; errors: string[] } {
+  let table = defaults.map((b) => ({ ...b, mods: [...b.mods].sort().join("") }));
   const errors: string[] = [];
   for (const line of lines) {
     const bad = (why: string) => errors.push(`keybind = ${line}: ${why}`);
@@ -222,9 +199,7 @@ export function applyKeybinds(
       bad(action);
       continue;
     }
-    table = table.filter(
-      (b) => !(b.code === trigger.code && b.mods === trigger.mods),
-    );
+    table = table.filter((b) => !(b.code === trigger.code && b.mods === trigger.mods));
     if (action !== "unbind") table.push({ ...trigger, action });
   }
   return { table, errors };
