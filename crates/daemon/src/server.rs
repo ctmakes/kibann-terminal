@@ -29,7 +29,7 @@ use proto::{Frame, Resize};
 use term::{Event, Foreground, Session, Spawn};
 
 use crate::layout::Model;
-use crate::outbox::Outbox;
+use crate::outbox::{Outbox, Snapshot};
 use crate::status::Statuses;
 
 type ConnId = u64;
@@ -125,7 +125,7 @@ impl State {
         let msg = encode(&ServerMsg::Layout {
             layout: self.model.layout().clone(),
         });
-        self.send_watchers(&msg, skip);
+        self.send_watchers(Snapshot::Layout, &msg, skip);
         self.status_changed();
         self.offer_save();
     }
@@ -153,12 +153,12 @@ impl State {
         }
     }
 
-    fn send_watchers(&self, msg: &[u8], skip: Option<ConnId>) {
+    fn send_watchers(&self, kind: Snapshot, msg: &[u8], skip: Option<ConnId>) {
         for c in &self.watchers {
             if Some(*c) != skip
                 && let Some(out) = self.conns.get(c)
             {
-                out.push(msg.to_vec());
+                out.push_latest(kind, msg.to_vec());
             }
         }
     }
@@ -185,7 +185,11 @@ impl State {
             self.status.seen(p);
         }
         if let Some(panes) = self.status.changed() {
-            self.send_watchers(&encode(&ServerMsg::Status { panes }), None);
+            self.send_watchers(
+                Snapshot::Status,
+                &encode(&ServerMsg::Status { panes }),
+                None,
+            );
         }
     }
 
@@ -207,19 +211,36 @@ impl State {
     fn git_changed(&mut self, git: &git::Watcher) {
         let now = self.git_map(git);
         if now != self.git_sent {
-            self.send_watchers(&encode(&ServerMsg::Git { panes: now.clone() }), None);
+            self.send_watchers(
+                Snapshot::Git,
+                &encode(&ServerMsg::Git { panes: now.clone() }),
+                None,
+            );
             self.git_sent = now;
             // A pane's directory changed.
             self.offer_save();
         }
     }
 
-    /// The pane is gone: stop watching its checkout for it.
-    fn forget_place(&mut self, pane: PaneId, git: &git::Watcher) {
-        if let Some(root) = self.places.remove(&pane).and_then(|p| p.root) {
-            git.remove(&root);
-        }
+    /// The pane is gone. Returns the checkout to stop watching for it,
+    /// which is for the caller to do outside the lock (see
+    /// [`Daemon::git_ops`]).
+    #[must_use]
+    fn forget_place(&mut self, pane: PaneId, git: &git::Watcher) -> Option<PathBuf> {
+        let root = self.places.remove(&pane).and_then(|p| p.root);
         self.git_changed(git);
+        root
+    }
+
+    /// Of panes just placed in the layout, those with no session go again:
+    /// they couldn't start, or their shell ended before they were placed
+    /// (so the exit found no pane to take).
+    fn drop_ended(&mut self, panes: impl IntoIterator<Item = PaneId>) {
+        for p in panes {
+            if !self.sessions.contains_key(&p) {
+                self.model.remove(p);
+            }
+        }
     }
 
     fn note_ended(&mut self, pane: PaneId, code: Option<u32>) {
@@ -236,6 +257,10 @@ pub struct Daemon {
     me: Weak<Daemon>,
     /// Keeps each checkout's git info current.
     git: git::Watcher,
+    /// Held while a pane's checkout changes, from before taking `state`
+    /// until the watch is added or removed after releasing it: watching a
+    /// big tree takes a while, and mustn't stall everyone holding `state`.
+    git_ops: Mutex<()>,
 }
 
 /// One message, framed, ready for an outbox.
@@ -313,6 +338,7 @@ impl Daemon {
                         st.git_changed(&d.git);
                     }
                 }),
+                git_ops: Mutex::new(()),
             }
         })
     }
@@ -325,6 +351,11 @@ impl Daemon {
     /// A panic on one connection's thread mustn't lock everyone out.
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// See [`Daemon::git_ops`]; always taken before `state`.
+    fn git_ops(&self) -> MutexGuard<'_, ()> {
+        self.git_ops.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Serve one client: requests are read from `reader`, replies and frames
@@ -360,6 +391,21 @@ impl Daemon {
                     }
                 })?;
         }
+        // Requests (which get a reply, and can take a while: opening a
+        // workspace starts its panes) run in order on their own thread, so
+        // typing, resizes and acks on the reader thread never wait on them.
+        let (requests, queue) = std::sync::mpsc::channel::<ClientMsg>();
+        let worker = {
+            let me = self.clone();
+            let out = out.clone();
+            thread::Builder::new()
+                .name("daemon-requests".into())
+                .spawn(move || {
+                    for msg in queue {
+                        me.handle(conn, &out, msg);
+                    }
+                })?
+        };
         let me = self.clone();
         let mut reader = reader;
         thread::Builder::new()
@@ -367,6 +413,9 @@ impl Daemon {
             .spawn(move || {
                 while let Ok(Some(body)) = proto::wire::read_raw(&mut reader) {
                     match serde_json::from_slice::<ClientMsg>(&body) {
+                        Ok(msg) if msg.req().is_some() => {
+                            let _ = requests.send(msg);
+                        }
                         Ok(msg) => me.handle(conn, &out, msg),
                         // A request this daemon doesn't know (a newer app or
                         // CLI): answer it with an error and carry on, rather
@@ -391,6 +440,10 @@ impl Daemon {
                         }
                     }
                 }
+                // Its requests finish first, so none acts for it after it's
+                // gone.
+                drop(requests);
+                let _ = worker.join();
                 me.disconnect(conn);
             })?;
         Ok(())
@@ -430,16 +483,25 @@ impl Daemon {
                 let layout = st.model.layout().clone();
                 // Also as the first event, so a client can take every
                 // layout from one ordered stream.
-                out.push(encode(&ServerMsg::Layout {
-                    layout: layout.clone(),
-                }));
+                out.push_latest(
+                    Snapshot::Layout,
+                    encode(&ServerMsg::Layout {
+                        layout: layout.clone(),
+                    }),
+                );
                 st.status_changed();
-                out.push(encode(&ServerMsg::Status {
-                    panes: st.status.map(),
-                }));
-                out.push(encode(&ServerMsg::Git {
-                    panes: st.git_map(&self.git),
-                }));
+                out.push_latest(
+                    Snapshot::Status,
+                    encode(&ServerMsg::Status {
+                        panes: st.status.map(),
+                    }),
+                );
+                out.push_latest(
+                    Snapshot::Git,
+                    encode(&ServerMsg::Git {
+                        panes: st.git_map(&self.git),
+                    }),
+                );
                 Self::reply(out, req, Reply::Layout { layout });
             }
             ClientMsg::GetLayout { req } => {
@@ -619,6 +681,7 @@ impl Daemon {
                 let pane = self.spawn(size, cwd, argv).map_err(spawn_error)?;
                 let mut st = self.lock();
                 let tab = st.model.new_tab(pane, focus);
+                st.drop_ended([pane]);
                 st.broadcast(None);
                 Ok((Some(pane), Some(tab)))
             }
@@ -645,6 +708,7 @@ impl Daemon {
                 let mut st = self.lock();
                 match st.model.split(target, dir, pane, focus) {
                     Some(tab) => {
+                        st.drop_ended([pane]);
                         st.broadcast(None);
                         Ok((Some(pane), Some(tab)))
                     }
@@ -658,17 +722,22 @@ impl Daemon {
                 }
             }
             Action::Close { pane } => {
-                let entry = {
+                let ops = self.git_ops();
+                let (entry, root) = {
                     let mut st = self.lock();
                     if !st.model.remove(pane) {
                         return Err(no_pane(pane));
                     }
                     st.note_ended(pane, None);
                     st.status.remove(pane);
-                    st.forget_place(pane, &self.git);
+                    let root = st.forget_place(pane, &self.git);
                     st.broadcast(None);
-                    st.sessions.remove(&pane)
+                    (st.sessions.remove(&pane), root)
                 };
+                if let Some(root) = root {
+                    self.git.remove(&root);
+                }
+                drop(ops);
                 // Dropping ends the shell and joins its thread: not under the lock.
                 drop(entry);
                 Ok((Some(pane), None))
@@ -824,6 +893,7 @@ impl Daemon {
             .iter()
             .map(|t| build(&t.tree, &mut start))
             .collect();
+        let placed: Vec<PaneId> = trees.iter().flat_map(|t| t.panes()).collect();
         let mut st = self.lock();
         for (i, (tree, t)) in trees.into_iter().zip(&template.tabs).enumerate() {
             let order = tree.panes();
@@ -835,9 +905,7 @@ impl Daemon {
                 i == template.active as usize,
             );
         }
-        for id in &failed {
-            st.model.remove(*id);
-        }
+        st.drop_ended(placed);
         st.broadcast(None);
         let shown = st.model.layout().active;
         let pane = shown
@@ -932,21 +1000,26 @@ impl Daemon {
 
     /// A shell exited: its pane goes.
     fn pane_ended(&self, id: SessionId, code: Option<u32>) {
-        let entry = {
+        let ops = self.git_ops();
+        let (entry, root) = {
             let mut st = self.lock();
             let Some(entry) = st.sessions.remove(&id) else {
                 return; // closed already
             };
             st.note_ended(id, code);
             st.status.remove(id);
-            st.forget_place(id, &self.git);
+            let root = st.forget_place(id, &self.git);
             if st.model.remove(id) {
                 st.broadcast(None);
             } else {
                 st.status_changed();
             }
-            entry
+            (entry, root)
         };
+        if let Some(root) = root {
+            self.git.remove(&root);
+        }
+        drop(ops);
         drop(entry);
     }
 
@@ -1017,24 +1090,28 @@ impl Daemon {
 
     /// `dir`, where pane `id` is, belongs to `checkout`.
     fn pane_checkout(&self, id: PaneId, dir: &std::path::Path, checkout: Option<git::Checkout>) {
-        let mut st = self.lock();
-        let Some(place) = st.places.get_mut(&id) else {
-            return; // closed meanwhile
+        let _ops = self.git_ops();
+        let old = {
+            let mut st = self.lock();
+            let Some(place) = st.places.get_mut(&id) else {
+                return; // closed meanwhile
+            };
+            if place.dir != dir {
+                return; // moved on meanwhile
+            }
+            let root = checkout.as_ref().map(|c| c.root.clone());
+            if place.root == root {
+                return;
+            }
+            std::mem::replace(&mut place.root, root)
         };
-        if place.dir != dir {
-            return; // moved on meanwhile
+        if let Some(old) = old {
+            self.git.remove(&old);
         }
-        let root = checkout.as_ref().map(|c| c.root.clone());
-        if place.root != root {
-            if let Some(old) = place.root.take() {
-                self.git.remove(&old);
-            }
-            if let Some(c) = &checkout {
-                self.git.add(c);
-            }
-            place.root = root;
+        if let Some(c) = &checkout {
+            self.git.add(c);
         }
-        st.git_changed(&self.git);
+        self.lock().git_changed(&self.git);
     }
 
     fn panes(&self) -> Reply {
@@ -1168,10 +1245,9 @@ impl Daemon {
             drop(gone);
             return Reply::Restored { tabs: 0, panes: 0 };
         }
+        let placed: Vec<PaneId> = layout.tabs.iter().flat_map(|t| t.tree.panes()).collect();
         st.model = Model::from_layout(layout);
-        for id in failed {
-            st.model.remove(id);
-        }
+        st.drop_ended(placed);
         let tabs = st.model.layout().tabs.len() as u32;
         let panes = st
             .model

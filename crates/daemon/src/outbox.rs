@@ -2,8 +2,10 @@
 //!
 //! Sessions push frames from their own threads and must never block on a
 //! slow client, so frames beyond [`MAX_FRAMES`] are dropped: the client sees
-//! the gap in `seq` and asks for a full frame. Other messages (replies,
-//! exits) are always kept.
+//! the gap in `seq` and asks for a full frame. A snapshot (the layout,
+//! agent status, git) replaces one of its kind still waiting, so a stalled
+//! client holds at most one of each. Other messages (replies) are always
+//! kept.
 
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
@@ -12,9 +14,25 @@ use std::sync::{Condvar, Mutex};
 /// session, so this only fills when the client stops reading.
 pub const MAX_FRAMES: usize = 64;
 
+/// A message that says all there is to know of its kind: a newer one
+/// makes a waiting one useless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Snapshot {
+    Layout,
+    Status,
+    Git,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Frame,
+    Kept,
+    Latest(Snapshot),
+}
+
 #[derive(Default)]
 struct Queue {
-    items: VecDeque<(Vec<u8>, bool)>,
+    items: VecDeque<(Vec<u8>, Kind)>,
     frames: usize,
     closed: bool,
     dropped: u64,
@@ -42,7 +60,7 @@ impl Outbox {
             return;
         }
         q.frames += 1;
-        q.items.push_back((bytes, true));
+        q.items.push_back((bytes, Kind::Frame));
         self.cv.notify_one();
     }
 
@@ -52,8 +70,25 @@ impl Outbox {
         if q.closed {
             return;
         }
-        q.items.push_back((bytes, false));
+        q.items.push_back((bytes, Kind::Kept));
         self.cv.notify_one();
+    }
+
+    /// Queue a snapshot, in place of one of its kind still waiting (which
+    /// so arrives sooner, and newer).
+    pub fn push_latest(&self, kind: Snapshot, bytes: Vec<u8>) {
+        let mut q = self.q.lock().unwrap();
+        if q.closed {
+            return;
+        }
+        let kind = Kind::Latest(kind);
+        match q.items.iter_mut().find(|(_, k)| *k == kind) {
+            Some(waiting) => waiting.0 = bytes,
+            None => {
+                q.items.push_back((bytes, kind));
+                self.cv.notify_one();
+            }
+        }
     }
 
     /// The next message, waiting for one. `None` once closed.
@@ -63,8 +98,8 @@ impl Outbox {
             if q.closed {
                 return None;
             }
-            if let Some((bytes, frame)) = q.items.pop_front() {
-                if frame {
+            if let Some((bytes, kind)) = q.items.pop_front() {
+                if kind == Kind::Frame {
                     q.frames -= 1;
                 }
                 return Some(bytes);
@@ -108,5 +143,20 @@ mod tests {
         assert_eq!(o.pop(), Some(vec![1]));
         o.close();
         assert_eq!(o.pop(), None);
+    }
+
+    #[test]
+    fn a_snapshot_replaces_a_waiting_one_of_its_kind() {
+        let o = Outbox::new();
+        o.push_latest(Snapshot::Layout, b"layout 1".to_vec());
+        o.push(b"reply".to_vec());
+        o.push_latest(Snapshot::Git, b"git 1".to_vec());
+        o.push_latest(Snapshot::Layout, b"layout 2".to_vec());
+        assert_eq!(o.pop(), Some(b"layout 2".to_vec()));
+        assert_eq!(o.pop(), Some(b"reply".to_vec()));
+        // Once sent, the next one queues again.
+        o.push_latest(Snapshot::Layout, b"layout 3".to_vec());
+        assert_eq!(o.pop(), Some(b"git 1".to_vec()));
+        assert_eq!(o.pop(), Some(b"layout 3".to_vec()));
     }
 }

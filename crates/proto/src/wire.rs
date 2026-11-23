@@ -141,6 +141,34 @@ pub enum ClientMsg {
     Shutdown,
 }
 
+impl ClientMsg {
+    /// The request id, for a message that gets a reply.
+    pub fn req(&self) -> Option<ReqId> {
+        use ClientMsg::*;
+        match self {
+            Hello { req, .. }
+            | Watch { req, .. }
+            | GetLayout { req }
+            | Act { req, .. }
+            | Panes { req }
+            | Read { req, .. }
+            | Status { req, .. }
+            | Report { req, .. }
+            | Diff { req, .. }
+            | Release { req, .. }
+            | SetTheme { req, .. }
+            | Restore { req } => Some(*req),
+            Attach { .. }
+            | Detach { .. }
+            | Input { .. }
+            | Resize { .. }
+            | Ack { .. }
+            | RequestFull { .. }
+            | Shutdown => None,
+        }
+    }
+}
+
 /// What [`ClientMsg::Read`] returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

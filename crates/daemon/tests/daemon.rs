@@ -272,6 +272,27 @@ fn sessions_keep_running_while_detached() {
 }
 
 #[test]
+fn a_program_that_ends_at_once_leaves_no_pane() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, _rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    // However soon it ends, before or after the pane is placed.
+    for _ in 0..5 {
+        c.act(Action::NewTab {
+            near: None,
+            cwd: None,
+            argv: Some(vec!["/usr/bin/true".into()]),
+            focus: true,
+        })
+        .unwrap();
+    }
+    eventually("the panes went", || c.layout().unwrap().panes().is_empty());
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
 fn a_shell_that_exits_takes_its_pane_with_it() {
     let path = socket();
     let (d, h) = start(&path, Duration::from_secs(60));

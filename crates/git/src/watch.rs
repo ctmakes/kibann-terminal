@@ -180,7 +180,10 @@ impl Watcher {
         drop(st);
         if let Some(fs) = fs.as_mut() {
             for p in &new {
-                let _ = fs.watch(p, RecursiveMode::Recursive);
+                // Linux runs out of inotify watches on big trees.
+                if let Err(e) = fs.watch(p, RecursiveMode::Recursive) {
+                    eprintln!("kibann: can't watch {} for changes: {e}", p.display());
+                }
             }
         }
         self.shared.wake.notify_all();
