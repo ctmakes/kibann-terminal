@@ -5,44 +5,11 @@
 // user allowed it (its part.json's permissions); running programs is
 // checked again by the app's backend.
 
-import type { PartNow, Permissions } from "../proto";
+import type { PartNow, PartState, PartTheme, Permissions } from "../proto";
+import { PART_API } from "../proto/generated/constants";
 import type { BlockSlot } from "./engine";
 
-export type AgentStateName = "idle" | "working" | "blocked" | "done";
-
-/** What a part sees of the window (parts/kibann.d.ts: KibannState). */
-export interface PartState {
-  tabs: Array<{ id: number; title: string; active: boolean; panes: number[]; focused: number; state: AgentStateName | null }>;
-  panes: Array<{
-    id: number;
-    tab: number;
-    title: string;
-    focused: boolean;
-    shown: boolean;
-    cwd: string;
-    repo: string | null;
-    branch: string | null;
-    changed: number;
-    ahead: number;
-    behind: number;
-    agent: string | null;
-    state: AgentStateName | null;
-    since: number | null;
-    bg: string;
-    fg: string;
-  }>;
-  focused: number | null;
-  screen: string;
-  blocked: number;
-  windowFocused: boolean;
-}
-
-export interface PartTheme {
-  colors: Record<string, string>;
-  font: string;
-  mono: string;
-  dark: boolean;
-}
+export type { PartState, PartTheme };
 
 export interface ExecResult {
   code: number | null;
@@ -168,6 +135,7 @@ export class PartHost {
         f.last = JSON.stringify(state);
         this.post(f, {
           t: "init",
+          api: PART_API,
           name: f.name,
           props: f.props ?? null,
           granted: f.part.granted,

@@ -25,7 +25,7 @@ import { FindBar } from "./find";
 import { applyChrome, chromeFor, isDark, KIBANN_DARK, type ThemeApi } from "./theme";
 import type { ScreenNow, Theme } from "../proto";
 import { ScreenView, type BlockSlot } from "../screen/engine";
-import { PartHost, type PartState, type PartTheme, type AgentStateName } from "../screen/parts";
+import { PartHost, type PartState, type PartTheme } from "../screen/parts";
 import { ScreenPicker, type ScreenApi } from "../screen/picker";
 import { DEFAULT_SCREEN } from "../screen/default";
 import { Sidebar } from "./sidebar";
@@ -977,7 +977,7 @@ export class Workspace {
       active: t === this.active,
       panes: panes(t.tree),
       focused: t.focused,
-      state: rollUp(this.status, panes(t.tree)) as AgentStateName | null,
+      state: rollUp(this.status, panes(t.tree)),
     }));
     const hex = (c: number | undefined, or: string) => (c === undefined ? or : `#${c.toString(16).padStart(6, "0")}`);
     const all = this.tabs.flatMap((t) =>
@@ -1003,7 +1003,7 @@ export class Workspace {
             ahead: g?.ahead ?? 0,
             behind: g?.behind ?? 0,
             agent: st ? agentName(st.agent) : null,
-            state: (st?.state ?? null) as AgentStateName | null,
+            state: (st?.state ?? null),
             since: st?.since ?? null,
             bg: hex(p.view?.grid.defaultBg, "#000000"),
             fg: hex(p.view?.grid.defaultFg, "#ffffff"),

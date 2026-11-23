@@ -44,6 +44,8 @@ export type { ScreenNow } from "./generated/ScreenNow";
 export type { PartNow } from "./generated/PartNow";
 export type { PartManifest } from "./generated/PartManifest";
 export type { Permissions } from "./generated/Permissions";
+export type { PartState } from "./generated/PartState";
+export type { PartTheme } from "./generated/PartTheme";
 export type { Acted } from "./generated/Acted";
 export type { ConfigInfo } from "./generated/ConfigInfo";
 export type { ThemeEntry } from "./generated/ThemeEntry";

@@ -12,6 +12,7 @@ use ts_rs::TS;
 pub mod config;
 pub mod git;
 pub mod layout;
+pub mod part;
 pub mod paths;
 pub mod screen;
 pub mod status;
@@ -445,6 +446,10 @@ mod tests {
             format!(
                 "/** Luminance below which a theme is dark. */\nexport const DARK_BELOW = {:?};\n",
                 theme::DARK_BELOW
+            ),
+            format!(
+                "/** The parts API's version (`kibann.api`). */\nexport const PART_API = {};\n",
+                part::PART_API
             ),
         ]
         .join("\n");

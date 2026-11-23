@@ -22,11 +22,11 @@ interface KibannPane {
   changed: number;
   ahead: number;
   behind: number;
-  /** The coding agent in it (`claude`, `codex`), if any. */
+  /** The coding agent in it (`claude`, `opencode`), if any. */
   agent: string | null;
   /** That agent's state; null without one. `blocked`: waiting for you. */
   state: AgentState | null;
-  /** When `state` last changed (ms since 1970), as the window saw it. */
+  /** When `state` began (ms since 1970). */
   since: number | null;
   /** The terminal's colors, `#rrggbb`. */
   bg: string;
@@ -110,6 +110,9 @@ interface Kibann {
   readonly props: any;
   readonly state: KibannState | null;
   readonly name: string;
+  /** The version of this API the window speaks (1 now). It goes up when a
+   * part written for an older one might break. */
+  readonly api: number;
   /** What the part may do: its permissions, once the user allowed them. */
   readonly granted: { read: boolean; type: boolean; exec: string[]; net: string[] };
 

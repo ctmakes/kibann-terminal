@@ -61,7 +61,7 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
       - run: npx vitest run
       - run: npx playwright install --with-deps chromium webkit
       # Screenshot baselines are rendered on macOS; check behaviour here.

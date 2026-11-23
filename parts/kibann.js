@@ -53,6 +53,9 @@
     granted: null,
     /** This part's name. */
     name: null,
+    /** The version of this API the window speaks; it goes up when a part
+     * written for an older one might break. */
+    api: null,
 
     /** Call `fn` with the state now (when there is one) and on every
      * change. Returns a function that stops it. Also `"props"`, `"show"`
@@ -126,6 +129,7 @@
     switch (m.t) {
       case "init":
         kibann.name = m.name;
+        kibann.api = m.api;
         kibann.granted = m.granted;
         focusable = !!m.focusable;
         kibann.props = m.props === undefined ? null : m.props;

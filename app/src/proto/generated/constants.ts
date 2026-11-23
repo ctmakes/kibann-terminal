@@ -54,3 +54,6 @@ export const MIX = {
 
 /** Luminance below which a theme is dark. */
 export const DARK_BELOW = 0.4;
+
+/** The parts API's version (`kibann.api`). */
+export const PART_API = 1;
