@@ -14,7 +14,8 @@ use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::InputEvent;
 use proto::Resize;
 use proto::layout::Action;
-use proto::wire::{ClientMsg, ReadSource, Reply, SessionId};
+use proto::layout::PaneId;
+use proto::wire::{ClientMsg, ReadSource, Reply};
 
 fn socket() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
@@ -44,7 +45,7 @@ fn connect(socket: &Path) -> Client {
     }
 }
 
-fn cmd(c: &Client) -> SessionId {
+fn cmd(c: &Client) -> PaneId {
     let (pane, _) = c
         .act(Action::NewTab {
             near: None,
@@ -67,7 +68,7 @@ fn cmd(c: &Client) -> SessionId {
     pane
 }
 
-fn screen(c: &Client, pane: SessionId) -> String {
+fn screen(c: &Client, pane: PaneId) -> String {
     match c
         .request(|req| ClientMsg::Read {
             req,
@@ -82,7 +83,7 @@ fn screen(c: &Client, pane: SessionId) -> String {
     }
 }
 
-fn type_text(c: &Client, session: SessionId, text: &str) {
+fn type_text(c: &Client, session: PaneId, text: &str) {
     c.send(&ClientMsg::Input {
         session,
         event: InputEvent::Text { data: text.into() },

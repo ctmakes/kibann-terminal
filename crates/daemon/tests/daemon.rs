@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 use client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::git::PaneDir;
+use proto::layout::PaneId;
 use proto::layout::{Action, Dir, Layout};
 use proto::status::{AgentState, PaneStatus};
-use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
+use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply};
 use proto::{Frame, InputEvent, Resize};
 
 const SIZE: Resize = Resize {
@@ -52,10 +53,10 @@ fn start(socket: &Path, idle: Duration) -> (Arc<Daemon>, JoinHandle<std::io::Res
 
 #[derive(Debug)]
 enum Ev {
-    Frame(SessionId, Box<Frame>),
+    Frame(PaneId, Box<Frame>),
     Layout(Layout),
-    Status(BTreeMap<SessionId, PaneStatus>),
-    Git(BTreeMap<SessionId, PaneDir>),
+    Status(BTreeMap<PaneId, PaneStatus>),
+    Git(BTreeMap<PaneId, PaneDir>),
     Disconnected,
 }
 
@@ -76,7 +77,7 @@ fn events() -> (impl FnMut(ClientEvent<'_>) + Send + 'static, Receiver<Ev>) {
     (f, rx)
 }
 
-fn sh(c: &Client, script: Option<&str>) -> SessionId {
+fn sh(c: &Client, script: Option<&str>) -> PaneId {
     let argv = match script {
         Some(s) => vec!["/bin/sh".into(), "-c".into(), s.into()],
         None => vec!["/bin/sh".into()],
@@ -111,7 +112,7 @@ fn next_layout(rx: &Receiver<Ev>) -> Layout {
     }
 }
 
-fn read(c: &Client, pane: SessionId, source: ReadSource) -> String {
+fn read(c: &Client, pane: PaneId, source: ReadSource) -> String {
     match c
         .request(|req| ClientMsg::Read {
             req,
@@ -126,7 +127,7 @@ fn read(c: &Client, pane: SessionId, source: ReadSource) -> String {
     }
 }
 
-fn status(c: &Client, pane: SessionId, mark: Option<&str>) -> Reply {
+fn status(c: &Client, pane: PaneId, mark: Option<&str>) -> Reply {
     c.request(|req| ClientMsg::Status {
         req,
         pane,
@@ -144,7 +145,7 @@ fn eventually(what: &str, mut f: impl FnMut() -> bool) {
     }
 }
 
-fn type_text(c: &Client, session: SessionId, text: &str) {
+fn type_text(c: &Client, session: PaneId, text: &str) {
     c.send(&ClientMsg::Input {
         session,
         event: InputEvent::Text { data: text.into() },
@@ -182,7 +183,7 @@ impl Screen {
 
 /// Apply frames for `session` (acking them, as the app does) until the
 /// screen shows `needle`.
-fn wait_for(c: &Client, rx: &Receiver<Ev>, session: SessionId, needle: &str) -> Screen {
+fn wait_for(c: &Client, rx: &Receiver<Ev>, session: PaneId, needle: &str) -> Screen {
     let mut screen = Screen::default();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -556,7 +557,7 @@ fn the_daemon_can_run_in_process() {
 }
 
 /// Median time from a typed character to the frame that shows it.
-fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: SessionId) -> Duration {
+fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     type_text(c, s, "stty -icanon; echo ready\r");
     let mut screen = wait_for(c, rx, s, "ready");
@@ -633,7 +634,7 @@ fn the_socket_adds_little_latency() {
 }
 
 /// The agent state the daemon reports for `pane`.
-fn agent_state(c: &Client, pane: SessionId) -> Option<AgentState> {
+fn agent_state(c: &Client, pane: PaneId) -> Option<AgentState> {
     match status(c, pane, None) {
         Reply::Status { agent, .. } => agent.map(|a| a.state),
         other => panic!("{other:?}"),
@@ -641,7 +642,7 @@ fn agent_state(c: &Client, pane: SessionId) -> Option<AgentState> {
 }
 
 /// Wait for a status event giving `pane` this state.
-fn next_status(rx: &Receiver<Ev>, pane: SessionId, state: Option<AgentState>) {
+fn next_status(rx: &Receiver<Ev>, pane: PaneId, state: Option<AgentState>) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -783,7 +784,7 @@ fn agents_are_detected_and_done_while_unseen() {
 }
 
 /// Wait for a git event in which `pane`'s place satisfies `f`.
-fn next_git(rx: &Receiver<Ev>, pane: SessionId, what: &str, f: impl Fn(&PaneDir) -> bool) {
+fn next_git(rx: &Receiver<Ev>, pane: PaneId, what: &str, f: impl Fn(&PaneDir) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -926,7 +927,7 @@ fn git_init_in_place_shows_up() {
 }
 
 /// The next frame for `session` whose default background is `bg`.
-fn frame_with_bg(c: &Client, rx: &Receiver<Ev>, session: SessionId, bg: u32) {
+fn frame_with_bg(c: &Client, rx: &Receiver<Ev>, session: PaneId, bg: u32) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if let Ok(Ev::Frame(s, f)) = rx.recv_timeout(Duration::from_millis(100))

@@ -24,7 +24,7 @@ use proto::git::PaneDir;
 use proto::layout::{Action, Dir, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{
-    ClientMsg, ErrorCode, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, write_msg,
+    ClientMsg, ErrorCode, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, write_msg,
 };
 use proto::{Frame, Resize};
 use term::{Event, Foreground, Session, Spawn};
@@ -97,8 +97,8 @@ pub struct PaneEnv {
 
 #[derive(Default)]
 struct State {
-    sessions: BTreeMap<SessionId, Entry>,
-    next_session: SessionId,
+    sessions: BTreeMap<PaneId, Entry>,
+    next_session: PaneId,
     conns: HashMap<ConnId, Arc<Outbox>>,
     next_conn: ConnId,
     /// Connections that get every layout change.
@@ -266,7 +266,7 @@ fn encode(msg: &ServerMsg) -> Vec<u8> {
 /// Where a session's events go: to the daemon, which closes the pane when
 /// it exits.
 fn events(
-    id: SessionId,
+    id: PaneId,
     exited: Arc<AtomicBool>,
     daemon: Weak<Daemon>,
 ) -> impl FnMut(Event) + Send + 'static {
@@ -445,13 +445,13 @@ impl Daemon {
         out.push(encode(&ServerMsg::<Frame>::Reply { req, reply }));
     }
 
-    fn session(&self, id: SessionId) -> Option<Arc<Session>> {
+    fn session(&self, id: PaneId) -> Option<Arc<Session>> {
         self.lock().sessions.get(&id).map(|e| e.session.clone())
     }
 
     fn handle(&self, conn: ConnId, out: &Arc<Outbox>, msg: ClientMsg) {
         // Calls on one session, made outside the lock.
-        let with = |id: SessionId, f: &dyn Fn(&Session)| {
+        let with = |id: PaneId, f: &dyn Fn(&Session)| {
             if let Some(s) = self.session(id) {
                 f(&s);
             }
@@ -949,7 +949,7 @@ impl Daemon {
         size: Resize,
         cwd: Option<PathBuf>,
         argv: Option<Vec<String>>,
-    ) -> io::Result<SessionId> {
+    ) -> io::Result<PaneId> {
         let (id, env) = {
             let mut st = self.lock();
             st.next_session += 1;
@@ -998,7 +998,7 @@ impl Daemon {
     }
 
     /// A shell exited: its pane goes.
-    fn pane_ended(&self, id: SessionId, code: Option<u32>) {
+    fn pane_ended(&self, id: PaneId, code: Option<u32>) {
         let ops = self.git_ops();
         let (entry, root) = {
             let mut st = self.lock();
@@ -1023,7 +1023,7 @@ impl Daemon {
     }
 
     /// A session saw its foreground program change (see [`Foreground`]).
-    fn foreground(&self, id: SessionId, fg: Foreground) {
+    fn foreground(&self, id: PaneId, fg: Foreground) {
         let mut st = self.lock();
         if !st.sessions.contains_key(&id) {
             return;

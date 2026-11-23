@@ -103,11 +103,6 @@ impl FrameBuilder {
         })
     }
 
-    /// Seq of the last frame built (0 before the first).
-    pub fn seq(&self) -> u64 {
-        self.seq
-    }
-
     /// Update from the terminal and build a frame of what changed, then mark
     /// the render state clean. `None` when nothing changed and there is
     /// nothing in `extra` to deliver.

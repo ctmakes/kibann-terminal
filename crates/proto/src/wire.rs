@@ -27,8 +27,6 @@ pub const PROTOCOL_VERSION: u32 = 10;
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
 
-/// A session is a pane: the same id.
-pub type SessionId = PaneId;
 /// Matches a reply to its request.
 pub type ReqId = u32;
 
@@ -117,26 +115,26 @@ pub enum ClientMsg {
     /// Send this session's frames to this connection, starting with a full
     /// frame. Takes the session over from another connection.
     Attach {
-        session: SessionId,
+        session: PaneId,
     },
     Detach {
-        session: SessionId,
+        session: PaneId,
     },
     Input {
-        session: SessionId,
+        session: PaneId,
         event: InputEvent,
     },
     Resize {
-        session: SessionId,
+        session: PaneId,
         size: Resize,
     },
     Ack {
-        session: SessionId,
+        session: PaneId,
         #[ts(type = "number")]
         seq: u64,
     },
     RequestFull {
-        session: SessionId,
+        session: PaneId,
     },
     /// With no panes open: reopen the saved layout, a fresh shell in each
     /// pane's directory. Replied with [`Reply::Restored`].
@@ -321,7 +319,7 @@ pub enum ServerMsg<F = Frame> {
         reply: Reply,
     },
     Frame {
-        session: SessionId,
+        session: PaneId,
         frame: F,
     },
     /// The layout changed (to connections that sent [`ClientMsg::Watch`]).

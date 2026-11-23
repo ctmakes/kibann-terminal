@@ -15,9 +15,7 @@ use std::time::{Duration, Instant};
 use proto::git::PaneDir;
 use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::status::PaneStatus;
-use proto::wire::{
-    ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, SessionId, write_msg,
-};
+use proto::wire::{ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, write_msg};
 
 /// How long a request may take. Spawning looks up a directory, which can
 /// take up to half a second on a busy session.
@@ -27,7 +25,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug)]
 pub enum ClientEvent<'a> {
     /// A frame for `session`, as JSON (a [`proto::Frame`]).
-    Frame { session: SessionId, json: &'a str },
+    Frame { session: PaneId, json: &'a str },
     /// The layout changed (after [`Client::watch`]).
     Layout(Layout),
     /// Every pane with an agent, whenever one changes (after

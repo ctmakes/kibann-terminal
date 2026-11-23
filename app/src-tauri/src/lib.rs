@@ -22,14 +22,14 @@ use std::sync::{Arc, Mutex};
 
 use client::{Client, ClientEvent};
 use proto::layout::{Action, Layout, PaneId, TabId};
-use proto::wire::{ClientMsg, SessionId};
+use proto::wire::ClientMsg;
 use proto::{InputEvent, Resize};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Where each attached session's frames go.
-type Channels = Arc<Mutex<HashMap<SessionId, Channel>>>;
+type Channels = Arc<Mutex<HashMap<PaneId, Channel>>>;
 
 /// The connection to the daemon, which owns the sessions. None while there
 /// is no service to use (see [`service`]).
@@ -184,43 +184,35 @@ mod tests {
 
 /// Send `id`'s frames to `channel`, starting with a full frame.
 #[tauri::command]
-async fn term_attach(
-    state: State<'_, Term>,
-    id: SessionId,
-    channel: Channel,
-) -> Result<(), String> {
+async fn term_attach(state: State<'_, Term>, id: PaneId, channel: Channel) -> Result<(), String> {
     state.channels.lock().unwrap().insert(id, channel);
     state.send(ClientMsg::Attach { session: id })
 }
 
 /// The pane left the layout: stop sending its frames.
 #[tauri::command]
-async fn term_release(state: State<'_, Term>, id: SessionId) -> Result<(), String> {
+async fn term_release(state: State<'_, Term>, id: PaneId) -> Result<(), String> {
     state.channels.lock().unwrap().remove(&id);
     state.send(ClientMsg::Detach { session: id })
 }
 
 #[tauri::command]
-async fn term_input(
-    state: State<'_, Term>,
-    id: SessionId,
-    event: InputEvent,
-) -> Result<(), String> {
+async fn term_input(state: State<'_, Term>, id: PaneId, event: InputEvent) -> Result<(), String> {
     state.send(ClientMsg::Input { session: id, event })
 }
 
 #[tauri::command]
-async fn term_resize(state: State<'_, Term>, id: SessionId, size: Resize) -> Result<(), String> {
+async fn term_resize(state: State<'_, Term>, id: PaneId, size: Resize) -> Result<(), String> {
     state.send(ClientMsg::Resize { session: id, size })
 }
 
 #[tauri::command]
-async fn term_ack(state: State<'_, Term>, id: SessionId, seq: u64) -> Result<(), String> {
+async fn term_ack(state: State<'_, Term>, id: PaneId, seq: u64) -> Result<(), String> {
     state.send(ClientMsg::Ack { session: id, seq })
 }
 
 #[tauri::command]
-async fn term_request_full(state: State<'_, Term>, id: SessionId) -> Result<(), String> {
+async fn term_request_full(state: State<'_, Term>, id: PaneId) -> Result<(), String> {
     state.send(ClientMsg::RequestFull { session: id })
 }
 
