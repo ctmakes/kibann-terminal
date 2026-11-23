@@ -4,32 +4,37 @@
 // the workspace changes when a layout comes back (`apply`). Only focus moves
 // at once, so typing never waits on a round trip.
 //
-// Panes are absolutely positioned from `layout.rects`, so a resize is one
-// pass and dividers are plain elements on top. Inactive tabs stay in the DOM,
-// hidden, so their terminals keep their state and frames.
+// Views of their own: the tab bar (tabbar.ts), the stage's panes and
+// dividers (stage.ts), notices (notices.ts), the sidebar, and what parts
+// see and may do (bridge.ts). Inactive tabs stay in the DOM, hidden, so
+// their terminals keep their state and frames.
 
 import { detectPlatform, type Platform } from "../input/keyboard";
-import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, fontStack, setFontFamilies } from "../metrics";
+import { DEFAULT_FONT_SIZE, FONT_SIZE_MAX, FONT_SIZE_MIN, setFontFamilies } from "../metrics";
 import { TerminalView, type TerminalOptions } from "../terminal";
-import { cursorAt, drawThumbnail } from "../painter/thumbnail";
+import { cursorAt } from "../painter/thumbnail";
 import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
-import { HEADER_H, PaneHeader, branchOf, paneName, type GitMap } from "./pane";
+import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
 import { WorkspacePicker, type WorkspaceApi } from "./workspaces";
 import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
 import { ShortcutSheet, keyText } from "./shortcuts";
-import { tooltip } from "./tooltip";
 import { FindBar } from "./find";
-import { applyChrome, chromeFor, isDark, KIBANN_DARK, type ThemeApi } from "./theme";
+import { applyChrome, KIBANN_DARK, type ThemeApi } from "./theme";
 import type { ScreenNow, Theme } from "../proto";
 import { ScreenView, type BlockSlot } from "../screen/engine";
-import { PartHost, type PartAction, type PartState, type PartTheme } from "../screen/parts";
+import { PartHost } from "../screen/parts";
+import { partState, partTheme, runPartAction, tabName, type PartActions } from "./bridge";
+import { paneThumbnail } from "../painter/thumbnail";
 import { ScreenPicker, type ScreenApi } from "../screen/picker";
 import { DEFAULT_SCREEN } from "../screen/default";
 import { Sidebar } from "./sidebar";
+import { makeDividers, paneRects, place } from "./stage";
+import { Notices } from "./notices";
+import { TabBar, type TabButton } from "./tabbar";
 import {
   agentName,
   arrivals,
@@ -43,11 +48,8 @@ import {
 } from "./status";
 import {
   cycle,
-  dividers,
   neighbor,
   panes,
-  ratioAt,
-  rects,
   resizeTarget,
   setRatio,
   type PaneId,
@@ -61,13 +63,6 @@ import "./workspace.css";
 const RESIZE_STEP = 10;
 /** A menu item firing right before or after the same shortcut is that shortcut. */
 const MENU_ECHO_MS = 300;
-
-const COLORS = {
-  tab: "var(--k-tab)",
-  activeTab: "var(--k-tabActive)",
-  text: "var(--k-text)",
-  activeText: "var(--k-bright)",
-};
 
 export interface Pane {
   id: PaneId;
@@ -93,8 +88,7 @@ export interface Tab {
   focused: PaneId;
   zoomed: PaneId | null;
   el: HTMLDivElement;
-  button: HTMLDivElement;
-  dot: HTMLSpanElement;
+  button: TabButton;
 }
 
 export interface WorkspaceOptions {
@@ -136,8 +130,6 @@ export interface WorkspaceOptions {
   onKeys?(keys: Record<string, string | null>): void;
 }
 
-const HINT_KEY = "kibann.hint.shortcuts";
-
 export class Workspace {
   readonly root: HTMLDivElement;
   readonly sidebar: Sidebar;
@@ -158,14 +150,12 @@ export class Workspace {
   /** The screen's variables set on the root (`chrome.colors`). */
   private chromeVars: string[] = [];
   /** The terminals block shows only the focused pane. */
-  private solo = false;
+  solo = false;
   private theme: Theme = KIBANN_DARK;
   /** Part errors already shown, so a part failing every second says it once. */
   private readonly partErrors = new Set<string>();
-  /** The tab bar's "?" (the shortcut sheet), kept last in the bar. */
-  private readonly help: HTMLDivElement;
-  private readonly notices: HTMLDivElement;
-  readonly bar: HTMLDivElement;
+  private readonly notices = new Notices();
+  readonly tabBar: TabBar;
   readonly stage: HTMLDivElement;
   readonly tabs: Tab[] = [];
   readonly panes = new Map<PaneId, Pane>();
@@ -222,24 +212,9 @@ export class Workspace {
       shortcutKey: sheetKey,
       sidebarKey: () => keyFor({ kind: "sidebar" }, this.platform),
     });
-    this.bar = document.createElement("div");
-    this.bar.className = "tab-bar";
-    // Inline, as screen.css's `.screen-block > .tab-bar` would beat a class.
-    Object.assign(this.bar.style, { display: "none", flex: "1 1 auto" });
+    this.tabBar = new TabBar({ onHelp: () => this.shortcuts.toggle(), helpKey: sheetKey });
     this.stage = document.createElement("div");
     this.stage.className = "stage";
-    this.help = document.createElement("div");
-    this.help.className = "tab-help";
-    this.help.textContent = "?";
-    tooltip(this.help, "Keyboard shortcuts", sheetKey);
-    this.help.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // keep focus in the terminal
-      this.shortcuts.toggle();
-    });
-    this.bar.append(this.help);
-    // Notices: the first-run hint, a theme that can't be read.
-    this.notices = document.createElement("div");
-    this.notices.className = "notices";
 
     this.shortcuts = new ShortcutSheet(this.platform);
     this.picker = opts.themes
@@ -253,7 +228,7 @@ export class Workspace {
           onClose: () => this.focusedPane?.view?.focus(),
         })
       : null;
-    this.root.append(this.frame, this.holder, this.notices, this.shortcuts.el);
+    this.root.append(this.frame, this.holder, this.notices.el, this.shortcuts.el);
     if (this.settings) this.root.append(this.settings.el);
     if (this.picker) this.root.append(this.picker.el);
     this.workspacePicker = opts.workspaces
@@ -274,7 +249,7 @@ export class Workspace {
     if (this.screenPicker) this.root.append(this.screenPicker.el);
     this.parts = this.makeParts();
     this.showScreen(this.screenNow);
-    if (opts.firstRunHint) this.firstRunHint(sheetKey());
+    if (opts.firstRunHint) this.notices.hintOnce(sheetKey());
     container.append(this.root);
 
     // Pulsing dots don't animate in a hidden window.
@@ -300,6 +275,11 @@ export class Workspace {
       () => ro.disconnect(),
       () => window.removeEventListener("keydown", onKey, { capture: true }),
     );
+  }
+
+  /** Whether the user is looking at the window. */
+  windowFocused(): boolean {
+    return this.opts.windowFocused?.() ?? document.hasFocus();
   }
 
   get focusedPane(): Pane | null {
@@ -564,10 +544,9 @@ export class Workspace {
     for (const t of this.tabs) {
       if (next.includes(t)) continue;
       t.el.remove();
-      t.button.remove();
+      t.button.el.remove();
     }
     this.tabs.splice(0, this.tabs.length, ...next);
-    for (const t of next) this.bar.append(t.button); // in layout order
 
     const want = new Map<PaneId, Tab>();
     for (const t of next) for (const id of panes(t.tree)) want.set(id, t);
@@ -606,7 +585,7 @@ export class Workspace {
   /** Tell the backend which pane the user looks at, when that changed:
    * the focused one of the shown tab, while the window has focus. */
   private reportLooking(): void {
-    const focused = this.opts.windowFocused?.() ?? document.hasFocus();
+    const focused = this.windowFocused();
     const tab = this.active;
     const pane = focused && tab ? (tab.zoomed ?? tab.focused) : null;
     if (pane === this.lookingSent) return;
@@ -619,7 +598,7 @@ export class Workspace {
     const prev = this.status;
     this.status = map;
     if (this.statusSeen && this.notifyOn && this.opts.onNotify) {
-      const focused = this.opts.windowFocused?.() ?? document.hasFocus();
+      const focused = this.windowFocused();
       const looking = focused ? (this.focusedPane?.id ?? null) : null;
       for (const a of arrivals(prev, map, looking)) this.notify(a);
     }
@@ -689,10 +668,14 @@ export class Workspace {
     el.className = "tab-stage";
     el.style.display = "none";
     this.stage.append(el);
-    const button = document.createElement("div");
-    const dot = makeDot();
-    const tab: Tab = { id, title: null, tree, focused, zoomed: null, el, button, dot };
-    this.makeTabButton(tab);
+    // The handlers run later, once `tab` is made.
+    const button = this.tabBar.button(makeDot(), {
+      activate: () => this.activate(tab),
+      close: () => {
+        for (const id of panes(tab.tree)) this.send({ t: "close", pane: id });
+      },
+    });
+    const tab: Tab = { id, title: null, tree, focused, zoomed: null, el, button };
     return tab;
   }
 
@@ -711,43 +694,16 @@ export class Workspace {
     this.focusPane(tab.focused);
   }
 
-  private makeTabButton(tab: Tab): void {
-    const b = tab.button;
-    b.className = "tab";
-    const label = document.createElement("span");
-    label.className = "tab-title";
-    const x = document.createElement("span");
-    x.className = "tab-close";
-    x.textContent = "×";
-    // Its number: Cmd+1–8 goes to it (Ctrl elsewhere).
-    const n = document.createElement("span");
-    n.className = "tab-number";
-    b.append(x, tab.dot, label, n);
-    b.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // keep focus in the terminal
-      if (e.button === 1 || e.target === x) {
-        for (const id of panes(tab.tree)) this.send({ t: "close", pane: id });
-      } else if (e.button === 0) this.activate(tab);
-    });
-    this.bar.append(b);
-  }
-
   private updateBar(): void {
     this.renderSidebar();
     this.parts.changed();
-    this.bar.style.display = this.tabs.length > 1 ? "flex" : "none";
-    this.bar.append(this.help); // after the tabs, wherever they moved
-    this.tabs.forEach((t, i) => {
-      const on = t === this.active;
-      t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
-      t.button.style.color = on ? COLORS.activeText : COLORS.text;
-      const branch = branchOf(this.git[String(t.focused)]);
-      const title = this.tabName(t) + (branch ? ` · ${branch}` : "");
-      t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
-      t.button.title = title;
-      t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent = String(i + 1);
-      showDot(t.dot, rollUp(this.status, panes(t.tree)));
-    });
+    this.tabBar.render(
+      this.tabs.map((t) => {
+        const branch = branchOf(this.git[String(t.focused)]);
+        return { button: t.button, title: this.tabName(t) + (branch ? ` · ${branch}` : ""), active: t === this.active };
+      }),
+    );
+    for (const t of this.tabs) showDot(t.button.dot, rollUp(this.status, panes(t.tree)));
   }
 
   /** Color the window around the terminals for `theme`. */
@@ -757,40 +713,9 @@ export class Workspace {
     this.parts.themeChanged();
   }
 
-  /** Show `text` in the corner for a while. */
+  /** Show `text` in the corner for a while (see `Notices.show`). */
   notice(text: string, ms = 8000, action?: { label: string; run(): void }): void {
-    const n = document.createElement("div");
-    n.className = "notice";
-    n.textContent = text;
-    if (action) {
-      // A notice with a button stays until it's used or dismissed.
-      const b = document.createElement("button");
-      b.className = "notice-action";
-      b.textContent = action.label;
-      b.addEventListener("click", () => {
-        n.remove();
-        action.run();
-      });
-      const x = document.createElement("button");
-      x.className = "notice-close";
-      x.textContent = "✕";
-      x.setAttribute("aria-label", "Dismiss");
-      x.addEventListener("click", () => n.remove());
-      n.append(b, x);
-      n.style.pointerEvents = "auto";
-    }
-    this.notices.append(n);
-    if (!action) window.setTimeout(() => n.remove(), ms);
-  }
-
-  private firstRunHint(key: string): void {
-    try {
-      if (localStorage.getItem(HINT_KEY)) return;
-      localStorage.setItem(HINT_KEY, "1");
-    } catch {
-      return; // can't remember it was shown: don't show it every time
-    }
-    this.notice(`Press ${key} to see every keyboard shortcut.`, 10000);
+    this.notices.show(text, ms, action);
   }
 
   private emitTitle(): void {
@@ -817,7 +742,7 @@ export class Workspace {
     this.parts.dispose();
     this.parts = this.makeParts();
     this.screenView?.dispose();
-    for (const el of [this.sidebar.el, this.bar, this.stage]) el.remove();
+    for (const el of [this.sidebar.el, this.tabBar.el, this.stage]) el.remove();
     for (const k of this.chromeVars) this.root.style.removeProperty(k);
     this.chromeVars = [];
     const chrome = now.screen.chrome;
@@ -842,7 +767,7 @@ export class Workspace {
           this.sidebar.el.style.flex = "0 0 auto";
           slot.el.append(this.sidebar.el);
         } else if (c.part === "tabs") {
-          slot.el.append(this.bar);
+          slot.el.append(this.tabBar.el);
         } else if (c.part) {
           const part = now.parts[c.part];
           if (part) this.parts.mount(c.part, part, c.props, slot);
@@ -867,14 +792,17 @@ export class Workspace {
 
   private makeParts(): PartHost {
     return new PartHost({
-      state: () => this.partState(),
-      theme: () => this.partTheme(),
-      run: (part, action, args) => this.partRun(part, action, args),
+      state: () => partState(this),
+      theme: () => partTheme(this.theme, this.screenView?.screen.chrome),
+      run: (part, action, args) => runPartAction(this.partActions(), part, action, args),
       exec: (part, program, args, cwd, timeout) => {
         if (!this.opts.screens) return Promise.reject(new Error("can't run programs here"));
         return this.opts.screens.exec(part, program, args, cwd, timeout);
       },
-      thumbnail: (pane, width, height) => this.thumbnail(pane, width, height),
+      thumbnail: async (pane, width, height) => {
+        const view = this.panes.get(pane)?.view;
+        return view ? paneThumbnail(view, width, height) : null;
+      },
       key: (k, granted) => {
         const action = actionFor({ ...k, repeat: false, isComposing: false, keyCode: 0 }, this.platform);
         if (!action || (action.kind === "close" && !granted.type)) return;
@@ -891,196 +819,31 @@ export class Workspace {
     });
   }
 
+  /** What parts' actions may do here. */
+  private partActions(): PartActions {
+    return {
+      pane: (id) => this.panes.get(id),
+      tab: (id) => this.tabs.find((t) => t.id === id),
+      focused: () => this.focusedPane,
+      show: (id) => this.show(id),
+      activate: (t) => this.activate(t),
+      send: (a) => this.send(a),
+      run: (action, p) => this.run(action, p),
+      diff: (p) => this.opts.onDiff?.(p),
+      workspaces: this.opts.workspaces,
+      screens: this.opts.screens,
+      setNode: (id, how) => {
+        if (!this.screenView?.set(id, how)) return false;
+        if (this.active) this.layout(this.active);
+        return true;
+      },
+      notice: (text) => this.notice(text),
+    };
+  }
+
   /** What a tab is called: the name it was given, or its focused pane's. */
   private tabName(t: Tab): string {
-    return t.title || paneName(this.panes.get(t.focused)?.title);
-  }
-
-  /** The window as parts see it. */
-  private partState(): PartState {
-    const tabs = this.tabs.map((t) => ({
-      id: t.id,
-      title: this.tabName(t),
-      active: t === this.active,
-      panes: panes(t.tree),
-      focused: t.focused,
-      state: rollUp(this.status, panes(t.tree)),
-    }));
-    const hex = (c: number | undefined, or: string) => (c === undefined ? or : `#${c.toString(16).padStart(6, "0")}`);
-    const all = this.tabs.flatMap((t) =>
-      panes(t.tree).flatMap((id) => {
-        const p = this.panes.get(id);
-        if (!p) return [];
-        const place = this.git[String(id)];
-        const g = place?.git ?? null;
-        const st = this.status[String(id)];
-        const onScreen =
-          t === this.active && (t.zoomed === null ? !this.solo || t.focused === id : t.zoomed === id);
-        return [
-          {
-            id,
-            tab: t.id,
-            title: paneName(p.title),
-            focused: t.focused === id,
-            shown: onScreen,
-            cwd: place?.shown ?? "",
-            repo: g?.repo ?? null,
-            branch: g?.branch ?? g?.detached ?? null,
-            changed: g?.changed ?? 0,
-            ahead: g?.ahead ?? 0,
-            behind: g?.behind ?? 0,
-            agent: st ? agentName(st.agent) : null,
-            state: (st?.state ?? null),
-            since: st?.since ?? null,
-            bg: hex(p.view?.grid.defaultBg, "#000000"),
-            fg: hex(p.view?.grid.defaultFg, "#ffffff"),
-          },
-        ];
-      }),
-    );
-    return {
-      tabs,
-      panes: all,
-      focused: this.active?.focused ?? null,
-      screen: this.screenName,
-      blocked: blockedCount(this.status),
-      windowFocused: this.opts.windowFocused?.() ?? document.hasFocus(),
-    };
-  }
-
-  private partTheme(): PartTheme {
-    const colors: Record<string, string> = {};
-    for (const [k, v] of Object.entries(chromeFor(this.theme))) colors[k.replace(/^--k-/, "")] = v;
-    for (const [k, v] of Object.entries(this.screenView?.screen.chrome.colors ?? {})) colors[k] = v;
-    return {
-      colors,
-      font: this.screenView?.screen.chrome.font ?? "-apple-system, system-ui, sans-serif",
-      mono: fontStack(),
-      dark: isDark(this.theme),
-    };
-  }
-
-  private async partRun(part: string, action: PartAction, a: Record<string, unknown>): Promise<unknown> {
-    const num = (k: string): number => {
-      const v = a[k];
-      if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${action}: ${k} must be a pane or tab id`);
-      return v;
-    };
-    const pane = (k = "pane"): Pane => {
-      const p = this.panes.get(num(k));
-      if (!p) throw new Error(`${action}: no pane ${String(a[k])}`);
-      return p;
-    };
-    const str = (k: string): string => {
-      if (typeof a[k] !== "string") throw new Error(`${action}: ${k} must be text`);
-      return a[k] as string;
-    };
-    switch (action) {
-      case "pane.focus":
-        this.show(pane().id);
-        return null;
-      case "tab.activate": {
-        const t = this.tabs.find((x) => x.id === num("tab"));
-        if (!t) throw new Error(`tab.activate: no tab ${String(a.tab)}`);
-        this.activate(t);
-        return null;
-      }
-      case "tab.new":
-        this.send({ t: "new_tab", near: a.near === undefined ? this.focusedPane?.id : pane("near").id, focus: true });
-        return null;
-      case "pane.split": {
-        const p = a.pane === undefined ? this.focusedPane : pane();
-        if (!p) throw new Error("pane.split: no pane");
-        const dir = a.direction === "down" ? "column" : a.direction === "right" ? "row" : null;
-        if (!dir) throw new Error(`pane.split: direction is "right" or "down"`);
-        this.send({ t: "split", pane: p.id, dir, focus: true });
-        return null;
-      }
-      case "pane.close":
-        this.send({ t: "close", pane: pane().id });
-        return null;
-      case "pane.zoom": {
-        const p = a.pane === undefined ? this.focusedPane : pane();
-        if (p) this.run({ kind: "zoom" }, p);
-        return null;
-      }
-      case "pane.type": {
-        const p = pane();
-        const text = str("text") + (a.enter ? "\r" : "");
-        p.transport.input({ kind: "text", data: text });
-        return null;
-      }
-      case "workspace.open": {
-        const name = str("name");
-        const api = this.opts.workspaces;
-        if (!api) throw new Error("workspaces can't be opened here");
-        const all = await api.list(this.focusedPane?.id ?? null);
-        const w = all.find((x) => x.name === name);
-        if (!w) throw new Error(`no workspace named ${name}`);
-        return api.open(w, this.focusedPane?.id ?? null);
-      }
-      case "diff":
-        this.opts.onDiff?.(pane());
-        return null;
-      case "screen.switch": {
-        const name = str("name");
-        if (!this.opts.screens) throw new Error("screens can't be switched here");
-        await this.opts.screens.choose(name);
-        return null;
-      }
-      case "node.show":
-      case "node.hide":
-      case "node.toggle": {
-        const id = str("id");
-        const how = action.slice(5) as "show" | "hide" | "toggle";
-        if (!this.screenView?.set(id, how)) throw new Error(`${action}: no node ${id} on this screen`);
-        if (this.active) this.layout(this.active);
-        return null;
-      }
-      case "notify":
-        this.notice(`${part}: ${str("text").slice(0, 200)}`);
-        return null;
-      case "settings":
-      case "themes":
-      case "shortcuts":
-      case "workspaces":
-      case "screens":
-        this.run({ kind: action });
-        return null;
-      default: {
-        const never: never = action;
-        throw new Error(`no action ${String(never)}`);
-      }
-    }
-  }
-
-  /** A picture of pane `id`, `width` CSS px wide. */
-  private thumbCanvas: HTMLCanvasElement | null = null;
-  /** Pane `id` scaled to `width` CSS px. With `height`, the box is that
-   * tall and shows the rows around the cursor, as the sidebar's preview
-   * does; a pane shorter than the box sits at its top. */
-  private async thumbnail(id: number, width: number, height?: number): Promise<ImageBitmap | null> {
-    const p = this.panes.get(id);
-    const view = p?.view;
-    const src = view?.picture();
-    if (!view || !src || src.width === 0 || src.height === 0) return null;
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.min(1600, Math.round(width * dpr)));
-    // Fill the width, but no smaller than half size, so a wide pane stays
-    // readable (its left side shows).
-    const scale = Math.max(w / src.width, 0.5);
-    const full = Math.max(1, Math.round(src.height * scale));
-    const h = height ? Math.max(1, Math.min(1600, Math.round(height * dpr))) : full;
-    const g = view.grid;
-    const c = (this.thumbCanvas ??= document.createElement("canvas"));
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = `#${g.defaultBg.toString(16).padStart(6, "0")}`;
-    ctx.fillRect(0, 0, w, h);
-    drawThumbnail(ctx, src, scale, cursorAt(g));
-    return createImageBitmap(c);
+    return tabName(t, this.panes);
   }
 
   // ---- panes ----
@@ -1222,48 +985,27 @@ export class Workspace {
   /** Position a tab's panes and dividers in the stage. */
   layout(tab: Tab): void {
     this.place(tab);
-    for (const d of tab.el.querySelectorAll(".divider")) d.remove();
-    if (tab.zoomed !== null || this.solo) return;
-    for (const d of dividers(tab.tree, this.box())) {
-      const el = document.createElement("div");
-      el.className = "divider";
-      const grab = 6;
-      const row = d.dir === "row";
-      Object.assign(el.style, {
-        left: `${row ? d.rect.x - grab / 2 : d.rect.x}px`,
-        top: `${row ? d.rect.y : d.rect.y - grab / 2}px`,
-        width: `${row ? d.rect.w + grab : d.rect.w}px`,
-        height: `${row ? d.rect.h : d.rect.h + grab}px`,
-        cursor: row ? "col-resize" : "row-resize",
-      });
-      el.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        el.setPointerCapture(e.pointerId);
-        const origin = this.stage.getBoundingClientRect();
-        let ratio: number | null = null;
-        const move = (ev: PointerEvent) => {
-          ratio = ratioAt(d, ev.clientX - origin.left, ev.clientY - origin.top);
-          tab.tree = setRatio(tab.tree, d.path, ratio);
+    if (tab.zoomed !== null || this.solo) {
+      for (const d of tab.el.querySelectorAll(".divider")) d.remove();
+      return;
+    }
+    makeDividers(
+      tab.el,
+      () => tab.tree,
+      () => this.box(),
+      () => this.stage.getBoundingClientRect(),
+      {
+        drag: (path, ratio) => {
+          tab.tree = setRatio(tab.tree, path, ratio);
           this.place(tab);
-          // Keep the grab area under the pointer while dragging.
-          const next = dividers(tab.tree, this.box()).find((n) => n.path.join() === d.path.join());
-          if (next) {
-            el.style.left = `${row ? next.rect.x - grab / 2 : next.rect.x}px`;
-            el.style.top = `${row ? next.rect.y : next.rect.y - grab / 2}px`;
-          }
-        };
-        const up = () => {
-          el.removeEventListener("pointermove", move);
-          el.removeEventListener("pointerup", up);
+        },
+        drop: (path, ratio) => {
           this.layout(tab);
           this.focusPane(tab.focused);
-          if (ratio !== null) this.send({ t: "set_ratio", tab: tab.id, path: d.path, ratio });
-        };
-        el.addEventListener("pointermove", move);
-        el.addEventListener("pointerup", up);
-      });
-      tab.el.append(el);
-    }
+          if (ratio !== null) this.send({ t: "set_ratio", tab: tab.id, path, ratio });
+        },
+      },
+    );
   }
 
   /** Tell each pane whether it's on screen: hidden ones don't paint. */
@@ -1275,29 +1017,11 @@ export class Workspace {
 
   /** Position the panes only. */
   private place(tab: Tab): void {
-    const box = this.box();
-    const all =
-      tab.zoomed !== null
-        ? new Map([[tab.zoomed, box]])
-        : this.solo
-          ? new Map([[tab.focused, box]])
-          : rects(tab.tree, box);
-    for (const id of panes(tab.tree)) {
+    const els = panes(tab.tree).flatMap((id): Array<[PaneId, HTMLElement]> => {
       const p = this.panes.get(id);
-      if (!p) continue;
-      const r = all.get(id);
-      if (!r) {
-        p.el.style.display = "none";
-        continue;
-      }
-      Object.assign(p.el.style, {
-        display: "block",
-        left: `${r.x}px`,
-        top: `${r.y}px`,
-        width: `${r.w}px`,
-        height: `${r.h}px`,
-      });
-    }
+      return p ? [[id, p.el]] : [];
+    });
+    place(els, paneRects(tab, this.box(), this.solo));
     this.showPanes();
   }
 

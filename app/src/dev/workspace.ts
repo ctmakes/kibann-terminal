@@ -388,7 +388,7 @@ const api = {
       panes: Object.fromEntries(
         [...ws.panes.values()].map((p) => [p.id, [...p.header.el.querySelectorAll(".pane-place > span")].map((s) => s.textContent).join(" ")]),
       ),
-      tabs: ws.tabs.map((t) => t.button.title),
+      tabs: ws.tabs.map((t) => t.button.el.title),
     };
   },
   /** Which dots show: per pane, and per tab in bar order. */
@@ -396,7 +396,7 @@ const api = {
     const pick = (el: Element | null) => (el as HTMLElement | null)?.dataset.state ?? null;
     return {
       panes: Object.fromEntries([...ws.panes.values()].map((p) => [p.id, pick(p.dot)])),
-      tabs: ws.tabs.map((t) => pick(t.dot)),
+      tabs: ws.tabs.map((t) => pick(t.button.dot)),
     };
   },
   /** Pane ids of the active tab in reading order, with the focused one. */

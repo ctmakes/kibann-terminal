@@ -29,3 +29,33 @@ export function drawThumbnail(ctx: CanvasRenderingContext2D, src: HTMLCanvasElem
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(src, 0, sy, sw, sh, 0, 0, sw * scale, sh * scale);
 }
+
+let canvas: HTMLCanvasElement | null = null;
+
+/** A pane's picture `width` CSS px wide: filling the width, but no smaller
+ * than half size, so a wide pane stays readable (its left side shows).
+ * With `height`, the box is that tall and shows the rows around the
+ * cursor, as the sidebar's preview does; a pane shorter than it sits at its
+ * top. */
+export async function paneThumbnail(
+  view: { picture(): HTMLCanvasElement; grid: { rows: number; cursor: { y: number }; defaultBg: number } },
+  width: number,
+  height?: number,
+): Promise<ImageBitmap | null> {
+  const src = view.picture();
+  if (src.width === 0 || src.height === 0) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.min(1600, Math.round(width * dpr)));
+  const scale = Math.max(w / src.width, 0.5);
+  const full = Math.max(1, Math.round(src.height * scale));
+  const h = height ? Math.max(1, Math.min(1600, Math.round(height * dpr))) : full;
+  const c = (canvas ??= document.createElement("canvas"));
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = `#${view.grid.defaultBg.toString(16).padStart(6, "0")}`;
+  ctx.fillRect(0, 0, w, h);
+  drawThumbnail(ctx, src, scale, cursorAt(view.grid));
+  return createImageBitmap(c);
+}

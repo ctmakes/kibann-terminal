@@ -3,14 +3,6 @@
 .workspace { position: absolute; inset: 0; display: flex; background: var(--k-divider); -webkit-user-select: none; user-select: none; }
 .workspace-screen { position: absolute; inset: 0; }
 .workspace-holder { display: none; }
-/* Its flex stays inline: screen.css's `.screen-block > .tab-bar` would win. */
-.tab-bar { height: 30px; background: var(--k-bar); gap: 1px; font: 12px var(--k-ui-font); }
-.tab-help { flex: 0 0 30px; display: flex; align-items: center; justify-content: center; color: var(--k-muted); background: var(--k-tab); cursor: default; font-weight: 600; }
-.tab { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; position: relative; padding: 0 28px; cursor: default; }
-.tab > .agent-dot { margin-right: 6px; }
-.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab-close { position: absolute; left: 8px; font-size: 14px; opacity: 0.6; }
-.tab-number { position: absolute; right: 10px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .stage { position: relative; flex: 1 1 auto; overflow: hidden; min-width: 0; min-height: 0; }
 .tab-stage { position: absolute; inset: 0; }
 .pane { position: absolute; overflow: hidden; }
@@ -18,8 +10,3 @@
 .pane-body { position: absolute; left: 0; right: 0; bottom: 0; }
 .divider { position: absolute; z-index: 2; }
 .slot-problem { padding: 12px; color: var(--k-muted); font: 12px var(--k-ui-font); }
-/* Notices, in the corner. Two classes, to win over index.html's `.notice`. */
-.notices { position: absolute; right: 12px; bottom: 12px; z-index: 25; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; pointer-events: none; font: 12px var(--k-ui-font); }
-.notices > .notice { max-width: 420px; padding: 7px 10px; border-radius: 6px; background: var(--k-panel); border: 1px solid var(--k-divider); color: var(--k-strong); box-shadow: 0 4px 16px var(--k-shadow); }
-.notice-action { margin-left: 10px; padding: 2px 10px; border: 1px solid var(--k-divider); border-radius: 5px; background: var(--k-current); color: var(--k-current-text); font: 12px var(--k-ui-font); }
-.notice-close { margin-left: 6px; border: 0; background: transparent; color: var(--k-muted); }

@@ -37,6 +37,7 @@ export type { PaneDir } from "./generated/PaneDir";
 export type { Theme } from "./generated/Theme";
 export type { Settings } from "./generated/Settings";
 export type { Screen } from "./generated/Screen";
+export type { Chrome } from "./generated/Chrome";
 export type { ScreenNode } from "./generated/ScreenNode";
 export type { ScreenContent } from "./generated/ScreenContent";
 export type { ScreenFloating } from "./generated/ScreenFloating";

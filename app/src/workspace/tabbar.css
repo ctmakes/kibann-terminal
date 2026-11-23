@@ -1,0 +1,10 @@
+/* The tab bar. A file Vite bundles, not a <style> made at run time: the
+   release build's CSP blocks those. */
+/* Its flex stays inline: screen.css's `.screen-block > .tab-bar` would win. */
+.tab-bar { height: 30px; background: var(--k-bar); gap: 1px; font: 12px var(--k-ui-font); }
+.tab-help { flex: 0 0 30px; display: flex; align-items: center; justify-content: center; color: var(--k-muted); background: var(--k-tab); cursor: default; font-weight: 600; }
+.tab { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; position: relative; padding: 0 28px; cursor: default; }
+.tab > .agent-dot { margin-right: 6px; }
+.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-close { position: absolute; left: 8px; font-size: 14px; opacity: 0.6; }
+.tab-number { position: absolute; right: 10px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
