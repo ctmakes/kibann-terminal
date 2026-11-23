@@ -1129,7 +1129,7 @@ fn here() -> Result<PathBuf, Fail> {
 fn workspace_found(
     a: &Args,
     here: &std::path::Path,
-) -> Result<(Found, proto::layout::Template), Fail> {
+) -> Result<(Found, proto::layout::Workspace), Fail> {
     if a.pos.len() > 1 {
         return Err(usage("give one workspace: a name or a file"));
     }
@@ -1175,7 +1175,7 @@ fn workspace_open(a: &Args) -> Out {
     }
     let name = t.name.clone();
     let (p, tab) = connect()?
-        .act(Action::OpenWorkspace { template: t })
+        .act(Action::OpenWorkspace { workspace: t })
         .map_err(|e| error("open", e.to_string()))?;
     Ok(Some(
         json!({"opened": name, "tab": tab.map(tab_id), "pane": made(p, tab)}),
@@ -1184,7 +1184,7 @@ fn workspace_open(a: &Args) -> Out {
 
 /// Ask on the terminal before running a file's commands; without one (an
 /// agent, a script), refuse and say how to agree.
-fn ask_to_run(f: &Found, t: &proto::layout::Template) -> Result<(), Fail> {
+fn ask_to_run(f: &Found, t: &proto::layout::Workspace) -> Result<(), Fail> {
     use std::io::{BufRead, IsTerminal, Write};
     let file = f
         .path

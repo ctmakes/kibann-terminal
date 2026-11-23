@@ -143,20 +143,11 @@ impl State {
         if self.shutdown || self.saver.is_none() {
             return;
         }
-        let mut layout = self.model.layout().clone();
-        for t in &mut layout.tabs {
-            t.zoomed = None;
-        }
-        let dirs = layout
-            .tabs
-            .iter()
-            .flat_map(|t| t.tree.panes())
-            .filter_map(|p| Some((p, self.places.get(&p)?.dir.to_str()?.to_owned())))
-            .filter(|(_, d)| !d.is_empty())
-            .collect();
+        let workspace = proto::layout::Workspace::of(self.model.layout(), |p| {
+            Some(self.places.get(&p)?.dir.to_str()?.to_owned())
+        });
         let saved = crate::saved::Saved {
-            layout,
-            dirs,
+            workspace,
             theme: self.theme.clone(),
         };
         if let Some(s) = &mut self.saver {
@@ -784,7 +775,7 @@ impl Daemon {
                 st.broadcast(None);
                 Ok((None, Some(tab)))
             }
-            Action::OpenWorkspace { template } => self.open_workspace(template),
+            Action::OpenWorkspace { workspace } => self.open_workspace(workspace),
             Action::Zoom { tab, pane } => {
                 let mut st = self.lock();
                 if !st.model.zoom(tab, pane) {
@@ -801,18 +792,18 @@ impl Daemon {
     /// pane that can't start is left out. Returns the shown tab and pane.
     fn open_workspace(
         &self,
-        template: proto::layout::Template,
+        workspace: proto::layout::Workspace,
     ) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
-        use proto::layout::{Run, TemplateTree};
-        if template.tabs.is_empty() {
+        use proto::layout::{Run, WorkspaceTree};
+        if workspace.tabs.is_empty() {
             return Err(err(ErrorCode::Invalid, "the layout has no tabs"));
         }
         // Which programs are installed, for commands with alternatives (or
         // a note for when none is): asked once, before anything starts.
         let mut names = Vec::new();
-        for t in &template.tabs {
+        for t in &workspace.tabs {
             for leaf in t.tree.leaves() {
-                if let TemplateTree::Leaf {
+                if let WorkspaceTree::Leaf {
                     run: Some(Run::Type { commands, missing }),
                     ..
                 } = leaf
@@ -882,12 +873,12 @@ impl Daemon {
             }
         };
         fn build(
-            t: &TemplateTree,
+            t: &WorkspaceTree,
             start: &mut dyn FnMut(&str, &Option<Run>) -> PaneId,
         ) -> proto::layout::Tree {
             match t {
-                TemplateTree::Leaf { cwd, run } => proto::layout::Tree::leaf(start(cwd, run)),
-                TemplateTree::Split { dir, ratio, a, b } => proto::layout::Tree::Split {
+                WorkspaceTree::Leaf { cwd, run } => proto::layout::Tree::leaf(start(cwd, run)),
+                WorkspaceTree::Split { dir, ratio, a, b } => proto::layout::Tree::Split {
                     dir: *dir,
                     ratio: ratio.clamp(0.05, 0.95),
                     a: Box::new(build(a, start)),
@@ -895,21 +886,21 @@ impl Daemon {
                 },
             }
         }
-        let trees: Vec<_> = template
+        let trees: Vec<_> = workspace
             .tabs
             .iter()
             .map(|t| build(&t.tree, &mut start))
             .collect();
         let placed: Vec<PaneId> = trees.iter().flat_map(|t| t.panes()).collect();
         let mut st = self.lock();
-        for (i, (tree, t)) in trees.into_iter().zip(&template.tabs).enumerate() {
+        for (i, (tree, t)) in trees.into_iter().zip(&workspace.tabs).enumerate() {
             let order = tree.panes();
             let focused = order.get(t.focused as usize).copied().unwrap_or(order[0]);
             st.model.add_tab(
                 tree,
                 focused,
                 t.title.clone(),
-                i == template.active as usize,
+                i == workspace.active as usize,
             );
         }
         st.drop_ended(placed);
@@ -927,7 +918,7 @@ impl Daemon {
             })
             .collect();
         drop(st);
-        let opened = template
+        let opened = workspace
             .tabs
             .iter()
             .map(|t| t.tree.leaves().len())
@@ -1197,72 +1188,22 @@ impl Daemon {
     /// in its directory (home when it's gone), the same splits, sizes and
     /// focus. Nothing when panes are open or nothing was saved.
     fn restore(&self) -> Reply {
-        use crate::saved::{load, map_tree};
+        let nothing = Reply::Restored { tabs: 0, panes: 0 };
         let saved = {
             let st = self.lock();
             if !st.model.layout().tabs.is_empty() {
-                return Reply::Restored { tabs: 0, panes: 0 };
+                return nothing;
             }
-            st.saver.as_ref().and_then(|s| load(s.path()))
+            st.saver.as_ref().and_then(|s| crate::saved::load(s.path()))
         };
         let Some(saved) = saved else {
-            return Reply::Restored { tabs: 0, panes: 0 };
+            return nothing;
         };
-        // Panes that couldn't start get ids no session has, then go.
-        let mut failed = Vec::new();
-        let mut start = |old: PaneId| {
-            let dir = saved
-                .dirs
-                .get(&old)
-                .map(PathBuf::from)
-                .filter(|d| d.is_dir());
-            match self.spawn(DEFAULT_SIZE, dir, None) {
-                Ok(id) => id,
-                Err(e) => {
-                    eprintln!("kibannd: restoring a pane: {e}");
-                    let id = PaneId::MAX - failed.len() as PaneId;
-                    failed.push(id);
-                    id
-                }
-            }
-        };
-        let mut layout = proto::layout::Layout::default();
-        for (i, t) in saved.layout.tabs.iter().enumerate() {
-            let mut map = std::collections::HashMap::new();
-            let tree = map_tree(&t.tree, &mut |old| {
-                let new = start(old);
-                map.insert(old, new);
-                new
-            });
-            let id = i as proto::layout::TabId + 1;
-            let first = tree.panes()[0];
-            layout.tabs.push(proto::layout::Tab {
-                id,
-                focused: map.get(&t.focused).copied().unwrap_or(first),
-                tree,
-                zoomed: None,
-                title: t.title.clone(),
-            });
-            if saved.layout.active == Some(t.id) {
-                layout.active = Some(id);
-            }
+        let tabs = saved.workspace.tabs.len() as u32;
+        if self.open_workspace(saved.workspace).is_err() {
+            return nothing;
         }
-        if layout.active.is_none() {
-            layout.active = layout.tabs.first().map(|t| t.id);
-        }
-        let mut st = self.lock();
-        if !st.model.layout().tabs.is_empty() {
-            // Panes opened meanwhile win; the shells just started go.
-            let ids: Vec<_> = layout.tabs.iter().flat_map(|t| t.tree.panes()).collect();
-            let gone: Vec<_> = ids.iter().filter_map(|id| st.sessions.remove(id)).collect();
-            drop(st);
-            drop(gone);
-            return Reply::Restored { tabs: 0, panes: 0 };
-        }
-        let placed: Vec<PaneId> = layout.tabs.iter().flat_map(|t| t.tree.panes()).collect();
-        st.model = Model::from_layout(layout);
-        st.drop_ended(placed);
-        let tabs = st.model.layout().tabs.len() as u32;
+        let st = self.lock();
         let panes = st
             .model
             .layout()
@@ -1270,7 +1211,6 @@ impl Daemon {
             .iter()
             .map(|t| t.tree.panes().len() as u32)
             .sum();
-        st.broadcast(None);
         Reply::Restored { tabs, panes }
     }
 

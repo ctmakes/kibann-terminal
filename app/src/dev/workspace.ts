@@ -159,7 +159,7 @@ const settingsApi: SettingsApi = {
 };
 
 // Workspaces, as the app would list them; opening one sends the daemon's
-// action with a made-up template, and saving records the name.
+// action with a made-up workspace, and saving records the name.
 const workspaceCalls: string[] = [];
 const workspacesApi: WorkspaceApi = {
   list: async () => [
@@ -172,7 +172,7 @@ const workspacesApi: WorkspaceApi = {
     const leaf = { kind: "leaf" as const, cwd: "/src/myapp" };
     await backend.act({
       t: "open_workspace",
-      template: {
+      workspace: {
         name: entry.name,
         tabs: [
           {

@@ -3,4 +3,4 @@
 /**
  * What runs in a pane opened from a workspace file.
  */
-export type TemplateRun = { "t": "type", commands: Array<string>, missing?: string, } | { "t": "exec", argv: Array<string>, };
+export type WorkspaceRun = { "t": "type", commands: Array<string>, missing?: string, } | { "t": "exec", argv: Array<string>, };

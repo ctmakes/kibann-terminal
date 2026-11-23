@@ -1023,7 +1023,10 @@ fn stopping_saves_the_layout_and_says_what_was_running() {
     assert!(!client::lock_held(&path), "gone once stop returns");
     h.join().unwrap().unwrap();
     assert!(d.is_shut_down());
-    assert_eq!(daemon::saved::load(&file).map(|s| s.panes()), Some(1));
+    assert_eq!(
+        daemon::saved::load(&file).map(|s| s.workspace.panes()),
+        Some(1)
+    );
 }
 
 #[test]
@@ -1069,14 +1072,17 @@ fn the_layout_comes_back_after_the_sessions_ended() {
     let want = dir.to_string_lossy().into_owned();
     eventually("the layout saved with the directory", || {
         daemon::saved::load(&file)
-            .is_some_and(|s| s.panes() == 3 && s.dirs.values().any(|d| *d == want))
+            .is_some_and(|s| s.workspace.panes() == 3 && dirs(&s.workspace).contains(&want))
     });
     // Ending everything on purpose keeps the file as it was.
     drop(c);
     d.shutdown();
     h.join().unwrap().unwrap();
     thread::sleep(Duration::from_millis(300));
-    assert_eq!(daemon::saved::load(&file).map(|s| s.panes()), Some(3));
+    assert_eq!(
+        daemon::saved::load(&file).map(|s| s.workspace.panes()),
+        Some(3)
+    );
 
     let (d, h) = start(&path, Duration::from_secs(60));
     d.save_layout_to(file.clone(), Duration::from_millis(100));
@@ -1110,7 +1116,7 @@ fn the_layout_comes_back_after_the_sessions_ended() {
 
 #[test]
 fn a_layout_opens_in_one_go() {
-    use proto::layout::{Run, TabTemplate, Template, TemplateTree};
+    use proto::layout::{Run, Workspace, WorkspaceTab, WorkspaceTree};
     let path = socket();
     let (d, h) = start(&path, Duration::from_secs(60));
     let (f, app_rx) = events();
@@ -1120,22 +1126,22 @@ fn a_layout_opens_in_one_go() {
     next_layout(&app_rx);
     let dir = std::env::temp_dir().canonicalize().unwrap();
     let cwd = dir.to_string_lossy().into_owned();
-    let template = Template {
+    let workspace = Workspace {
         name: Some("t".into()),
         tabs: vec![
-            TabTemplate {
+            WorkspaceTab {
                 title: None,
-                tree: TemplateTree::Split {
+                tree: WorkspaceTree::Split {
                     dir: Dir::Row,
                     ratio: 0.7,
-                    a: Box::new(TemplateTree::Leaf {
+                    a: Box::new(WorkspaceTree::Leaf {
                         cwd: cwd.clone(),
                         run: Some(Run::Type {
                             commands: vec!["echo layout-$((40+2))".into()],
                             missing: None,
                         }),
                     }),
-                    b: Box::new(TemplateTree::Leaf {
+                    b: Box::new(WorkspaceTree::Leaf {
                         cwd: cwd.clone(),
                         run: Some(Run::Exec {
                             argv: vec!["/bin/sh".into()],
@@ -1144,9 +1150,9 @@ fn a_layout_opens_in_one_go() {
                 },
                 focused: 1,
             },
-            TabTemplate {
+            WorkspaceTab {
                 title: Some("two".into()),
-                tree: TemplateTree::Leaf {
+                tree: WorkspaceTree::Leaf {
                     cwd: cwd.clone(),
                     run: Some(Run::Type {
                         commands: vec!["no-such-prog-kibann".into()],
@@ -1158,7 +1164,7 @@ fn a_layout_opens_in_one_go() {
         ],
         active: 1,
     };
-    let (pane, tab) = c.act(Action::OpenWorkspace { template }).unwrap();
+    let (pane, tab) = c.act(Action::OpenWorkspace { workspace }).unwrap();
     let l = next_layout(&app_rx);
     assert_eq!(l.tabs.len(), 3);
     let (one, two) = (&l.tabs[1], &l.tabs[2]);
@@ -1241,4 +1247,16 @@ fn an_unknown_request_is_answered_not_fatal() {
     assert!(matches!(reply, Reply::Hello { .. }), "{reply:?}");
     d.shutdown();
     h.join().unwrap().unwrap();
+}
+
+/// Every pane's directory in a saved workspace.
+fn dirs(w: &proto::layout::Workspace) -> Vec<String> {
+    w.tabs
+        .iter()
+        .flat_map(|t| t.tree.leaves())
+        .filter_map(|l| match l {
+            proto::layout::WorkspaceTree::Leaf { cwd, .. } => Some(cwd.clone()),
+            _ => None,
+        })
+        .collect()
 }

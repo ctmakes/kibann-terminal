@@ -2,7 +2,7 @@
 //! written by hand (or by `kibann workspace save`) and opened with `kibann
 //! workspace open`. TOML, because splits nest. See `plans/layouts.md`.
 //!
-//! [`parse`] turns a file into a [`Template`] (directories made absolute and
+//! [`parse`] turns a file into a [`Workspace`] (directories made absolute and
 //! checked, commands picked for this system, splits of N panes turned into
 //! binary ones); [`write`] goes the other way, from the layout on screen.
 
@@ -11,7 +11,7 @@ use std::fmt;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
-use proto::layout::{Dir, PaneId, Run, TabTemplate, Template, TemplateTree, Tree};
+use proto::layout::{Dir, PaneId, Run, Tree, Workspace, WorkspaceTab, WorkspaceTree};
 use serde::Deserialize;
 use toml::Spanned;
 
@@ -203,7 +203,7 @@ impl Ctx<'_> {
         top: bool,
         leaves: &mut usize,
         focus: &mut Option<(usize, Range<usize>)>,
-    ) -> TemplateTree {
+    ) -> WorkspaceTree {
         let n = node.get_ref();
         if !top && let Some(t) = &n.title {
             self.problem(t.span(), "`title` is for tabs, not panes");
@@ -228,7 +228,7 @@ impl Ctx<'_> {
         top: bool,
         leaves: &mut usize,
         focus: &mut Option<(usize, Range<usize>)>,
-    ) -> TemplateTree {
+    ) -> WorkspaceTree {
         let n = node.get_ref();
         for (key, span) in [
             ("command", n.command.as_ref().map(Spanned::span)),
@@ -274,7 +274,7 @@ impl Ctx<'_> {
             return self.leaf(node, cwd.to_path_buf(), true, leaves, focus);
         }
         let shares = self.shares(panes, panes_span);
-        let kids: Vec<TemplateTree> = panes
+        let kids: Vec<WorkspaceTree> = panes
             .iter()
             .map(|p| self.node(p, cwd, false, leaves, focus))
             .collect();
@@ -288,7 +288,7 @@ impl Ctx<'_> {
         top: bool,
         leaves: &mut usize,
         focus: &mut Option<(usize, Range<usize>)>,
-    ) -> TemplateTree {
+    ) -> WorkspaceTree {
         let n = node.get_ref();
         let index = *leaves;
         *leaves += 1;
@@ -346,7 +346,7 @@ impl Ctx<'_> {
             let span = n.cwd.as_ref().map_or(node.span(), Spanned::span);
             self.problem(span, format!("no directory {}", cwd.display()));
         }
-        TemplateTree::Leaf {
+        WorkspaceTree::Leaf {
             cwd: cwd.to_string_lossy().into_owned(),
             run,
         }
@@ -411,13 +411,13 @@ impl Ctx<'_> {
 
 /// Panes side by side (or stacked) with the given shares, as nested
 /// binary splits: the first pane against the rest, and so on.
-fn chain(dir: Dir, mut kids: Vec<TemplateTree>, shares: &[f64]) -> TemplateTree {
+fn chain(dir: Dir, mut kids: Vec<WorkspaceTree>, shares: &[f64]) -> WorkspaceTree {
     if kids.len() == 1 {
         return kids.pop().unwrap();
     }
     let total: f64 = shares.iter().sum();
     let first = kids.remove(0);
-    TemplateTree::Split {
+    WorkspaceTree::Split {
         dir,
         ratio: shares[0] / total,
         a: Box::new(first),
@@ -476,7 +476,7 @@ fn default_root(file_dir: Option<&Path>, opened_from: &Path) -> PathBuf {
 }
 
 /// Read a workspace file: every problem in it, or the workspace to open.
-pub fn parse(src: &Source<'_>) -> Result<Template, Problems> {
+pub fn parse(src: &Source<'_>) -> Result<Workspace, Problems> {
     let doc: Doc = match toml::from_str(src.text) {
         Ok(d) => d,
         Err(e) => {
@@ -528,7 +528,7 @@ pub fn parse(src: &Source<'_>) -> Result<Template, Problems> {
         let mut leaves = 0;
         let mut focus = None;
         let tree = cx.node(t, &root, true, &mut leaves, &mut focus);
-        tabs.push(TabTemplate {
+        tabs.push(WorkspaceTab {
             title: n.title.as_ref().map(|t| t.get_ref().clone()),
             tree,
             focused: focus.map_or(0, |(i, _)| i as u32),
@@ -553,7 +553,7 @@ pub fn parse(src: &Source<'_>) -> Result<Template, Problems> {
             .and_then(Path::file_stem)
             .map(|s| s.to_string_lossy().into_owned())
     });
-    Ok(Template {
+    Ok(Workspace {
         name,
         tabs,
         active: active.map_or(0, |(i, _)| i as u32),
@@ -829,7 +829,7 @@ mod tests {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let root =
-                std::env::temp_dir().join(format!("kibann-template-{}-{n}", std::process::id()));
+                std::env::temp_dir().join(format!("kibann-workspace-{}-{n}", std::process::id()));
             for d in subdirs {
                 std::fs::create_dir_all(root.join(d)).unwrap();
             }
@@ -845,7 +845,7 @@ mod tests {
         }
     }
 
-    fn parse_in(dir: &Path, text: &str) -> Result<Template, Problems> {
+    fn parse_in(dir: &Path, text: &str) -> Result<Workspace, Problems> {
         parse(&Source {
             text,
             file: None,
@@ -854,7 +854,7 @@ mod tests {
         })
     }
 
-    fn messages(r: Result<Template, Problems>) -> Vec<String> {
+    fn messages(r: Result<Workspace, Problems>) -> Vec<String> {
         r.unwrap_err()
             .0
             .into_iter()
@@ -862,9 +862,9 @@ mod tests {
             .collect()
     }
 
-    fn cwd_of(t: &TemplateTree) -> &str {
+    fn cwd_of(t: &WorkspaceTree) -> &str {
         match t {
-            TemplateTree::Leaf { cwd, .. } => cwd,
+            WorkspaceTree::Leaf { cwd, .. } => cwd,
             _ => panic!("not a leaf"),
         }
     }
@@ -899,14 +899,14 @@ command = "lazygit"
         let agents = &t.tabs[0];
         assert_eq!(agents.title.as_deref(), Some("agents"));
         assert_eq!(agents.focused, 0);
-        let TemplateTree::Split { dir, ratio, a, b } = &agents.tree else {
+        let WorkspaceTree::Split { dir, ratio, a, b } = &agents.tree else {
             panic!()
         };
         assert_eq!(*dir, Dir::Row);
         assert!((ratio - 0.6).abs() < 1e-9);
         assert_eq!(
             **a,
-            TemplateTree::Leaf {
+            WorkspaceTree::Leaf {
                 cwd: s.0.to_string_lossy().into_owned(),
                 run: Some(Run::Type {
                     commands: vec!["claude".into()],
@@ -914,7 +914,7 @@ command = "lazygit"
                 }),
             }
         );
-        let TemplateTree::Split {
+        let WorkspaceTree::Split {
             dir,
             ratio,
             b: docs,
@@ -928,7 +928,7 @@ command = "lazygit"
         assert_eq!(cwd_of(docs), s.0.join("docs").to_string_lossy());
         assert_eq!(
             t.tabs[1].tree,
-            TemplateTree::Leaf {
+            WorkspaceTree::Leaf {
                 cwd: s.0.to_string_lossy().into_owned(),
                 run: Some(Run::Type {
                     commands: vec!["lazygit".into()],
@@ -950,11 +950,11 @@ panes = [{ size = 40 }, {}, {}]
 "#,
         )
         .unwrap();
-        let TemplateTree::Split { ratio, b, .. } = &t.tabs[0].tree else {
+        let WorkspaceTree::Split { ratio, b, .. } = &t.tabs[0].tree else {
             panic!()
         };
         assert!((ratio - 0.4).abs() < 1e-9);
-        let TemplateTree::Split { ratio, .. } = &**b else {
+        let WorkspaceTree::Split { ratio, .. } = &**b else {
             panic!()
         };
         assert!((ratio - 0.5).abs() < 1e-9);
@@ -983,7 +983,7 @@ focus = true
         let leaves = t.tabs[0].tree.leaves();
         assert!(matches!(
             leaves[1],
-            TemplateTree::Leaf { run: Some(Run::Exec { argv }), .. } if argv[0] == "top"
+            WorkspaceTree::Leaf { run: Some(Run::Exec { argv }), .. } if argv[0] == "top"
         ));
     }
 
@@ -1095,7 +1095,7 @@ panes = [
         .unwrap();
         let leaves = t.tabs[0].tree.leaves();
         let run = |i: usize| match leaves[i] {
-            TemplateTree::Leaf { run, .. } => run.clone(),
+            WorkspaceTree::Leaf { run, .. } => run.clone(),
             _ => unreachable!(),
         };
         assert_eq!(
@@ -1249,7 +1249,7 @@ panes = [{ missing = "m" }]
         assert_eq!(t.tabs[0].title.as_deref(), Some("t \"one\""));
         // Same panes in the same places: compare each pane's box.
         let want = boxes_of_tree(&tree, (0.0, 0.0, 1.0, 1.0));
-        let got = boxes_of_template(&t.tabs[0].tree, (0.0, 0.0, 1.0, 1.0));
+        let got = boxes_of_workspace(&t.tabs[0].tree, (0.0, 0.0, 1.0, 1.0));
         assert_eq!(want.len(), got.len(), "{text}");
         for (w, (g, cwd, run)) in want.iter().zip(&got) {
             let (pane, wb) = w;
@@ -1298,20 +1298,20 @@ panes = [{ missing = "m" }]
         }
     }
 
-    fn boxes_of_template(t: &TemplateTree, b: Rect) -> Vec<(Box4, String, Option<Run>)> {
+    fn boxes_of_workspace(t: &WorkspaceTree, b: Rect) -> Vec<(Box4, String, Option<Run>)> {
         match t {
-            TemplateTree::Leaf { cwd, run } => {
+            WorkspaceTree::Leaf { cwd, run } => {
                 vec![([b.0, b.1, b.2, b.3], cwd.clone(), run.clone())]
             }
-            TemplateTree::Split {
+            WorkspaceTree::Split {
                 dir,
                 ratio,
                 a,
                 b: bb,
             } => {
                 let (l, r) = cut(*dir, *ratio, b);
-                let mut v = boxes_of_template(a, l);
-                v.extend(boxes_of_template(bb, r));
+                let mut v = boxes_of_workspace(a, l);
+                v.extend(boxes_of_workspace(bb, r));
                 v
             }
         }

@@ -11,27 +11,43 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::Duration;
 
-use proto::layout::{Layout, PaneId, Tree};
+use proto::layout::{Layout, PaneId, Workspace};
 use serde::{Deserialize, Serialize};
 
 /// How long the layout must stay the same before it's written.
 pub const SAVE_DELAY: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+/// What's kept: the window as a workspace (opened again by
+/// [`ClientMsg::Restore`](proto::wire::ClientMsg::Restore)), and the theme.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
-    pub layout: Layout,
-    /// Each pane's last directory, when known.
-    pub dirs: BTreeMap<PaneId, String>,
+    pub workspace: Workspace,
     /// The sessions' colors, last set by a client: a daemon starting again
     /// uses them from the first pane on.
     #[serde(default)]
     pub theme: Option<proto::theme::Theme>,
 }
 
-impl Saved {
-    pub fn panes(&self) -> usize {
-        self.layout.tabs.iter().map(|t| t.tree.panes().len()).sum()
-    }
+/// The file as 0.7 wrote it. Read once, by the first daemon after the
+/// update; remove in 0.9.
+#[derive(Deserialize)]
+struct Before {
+    layout: Layout,
+    dirs: BTreeMap<PaneId, String>,
+    #[serde(default)]
+    theme: Option<proto::theme::Theme>,
+}
+
+/// The saved file, in either shape.
+fn read(path: &Path) -> Option<Saved> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Saved>(&text).ok().or_else(|| {
+        let b: Before = serde_json::from_str(&text).ok()?;
+        Some(Saved {
+            workspace: Workspace::of(&b.layout, |p| b.dirs.get(&p).cloned()),
+            theme: b.theme,
+        })
+    })
 }
 
 /// Writes the newest layout offered, once it has been the same for
@@ -129,54 +145,42 @@ fn write(path: &Path, text: &str) -> std::io::Result<()> {
 
 /// The saved layout, if there is a readable one with panes in it.
 pub fn load(path: &Path) -> Option<Saved> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let s: Saved = serde_json::from_str(&text).ok()?;
-    (s.panes() > 0).then_some(s)
+    read(path).filter(|s| s.workspace.panes() > 0)
 }
 
 /// The theme kept with the layout, if any (with or without panes).
 pub fn load_theme(path: &Path) -> Option<proto::theme::Theme> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Saved>(&text).ok()?.theme
-}
-
-/// `tree` with each pane replaced as `f` says.
-pub fn map_tree(tree: &Tree, f: &mut impl FnMut(PaneId) -> PaneId) -> Tree {
-    match tree {
-        Tree::Leaf { pane } => Tree::leaf(f(*pane)),
-        Tree::Split { dir, ratio, a, b } => Tree::Split {
-            dir: *dir,
-            ratio: *ratio,
-            a: Box::new(map_tree(a, f)),
-            b: Box::new(map_tree(b, f)),
-        },
-    }
+    read(path)?.theme
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proto::layout::{Dir, Tab};
+    use proto::layout::{Dir, Tab, Tree, WorkspaceTree};
 
-    fn sample() -> Saved {
+    fn layout() -> Layout {
         let tree = Tree::Split {
             dir: Dir::Row,
             ratio: 0.3,
             a: Box::new(Tree::leaf(4)),
             b: Box::new(Tree::leaf(7)),
         };
+        Layout {
+            tabs: vec![Tab {
+                id: 2,
+                tree,
+                focused: 7,
+                zoomed: None,
+                title: None,
+            }],
+            active: Some(2),
+        }
+    }
+
+    fn sample() -> Saved {
+        let dirs = BTreeMap::from([(4, "/tmp".to_owned())]);
         Saved {
-            layout: Layout {
-                tabs: vec![Tab {
-                    id: 2,
-                    tree,
-                    focused: 7,
-                    zoomed: None,
-                    title: None,
-                }],
-                active: Some(2),
-            },
-            dirs: BTreeMap::from([(4, "/tmp".to_owned())]),
+            workspace: Workspace::of(&layout(), |p| dirs.get(&p).cloned()),
             theme: None,
         }
     }
@@ -188,7 +192,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = Saver::start(path.clone(), Duration::from_millis(50));
         let mut empty = sample();
-        empty.layout.tabs.clear();
+        empty.workspace.tabs.clear();
         // Changes in quick succession: only the last is written.
         s.offer(&empty);
         s.offer(&sample());
@@ -216,8 +220,30 @@ mod tests {
     }
 
     #[test]
-    fn trees_map_to_new_panes() {
-        let t = map_tree(&sample().layout.tabs[0].tree, &mut |p| p + 100);
-        assert_eq!(t.panes(), [104, 107]);
+    fn the_layout_becomes_a_workspace() {
+        let w = sample().workspace;
+        assert_eq!(w.panes(), 2);
+        assert_eq!(w.tabs[0].focused, 1);
+        let WorkspaceTree::Split { a, b, ratio, .. } = &w.tabs[0].tree else {
+            panic!("a split");
+        };
+        assert_eq!(*ratio, 0.3);
+        assert!(matches!(&**a, WorkspaceTree::Leaf { cwd, run: None } if cwd == "/tmp"));
+        assert!(matches!(&**b, WorkspaceTree::Leaf { cwd, run: None } if cwd.is_empty()));
+    }
+
+    #[test]
+    fn a_file_from_before_reads_as_a_workspace() {
+        let dir = std::env::temp_dir().join(format!("kibann-before-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("layout.json");
+        let before = serde_json::json!({
+            "layout": layout(),
+            "dirs": {"4": "/tmp"},
+        });
+        std::fs::write(&path, before.to_string()).unwrap();
+        assert_eq!(load(&path), Some(sample()));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

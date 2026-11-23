@@ -3,7 +3,7 @@
 // TypeScript. Either way the workspace changes only when a layout comes back
 // (`Workspace.apply`), except for focus, which it moves at once.
 
-import type { Acted, AgentState, Layout, LayoutAction, PaneDir, TemplateTree, Tree } from "../proto";
+import type { Acted, AgentState, Layout, LayoutAction, PaneDir, Tree, WorkspaceTree } from "../proto";
 import { panes, type PaneId } from "./layout";
 import { Model, type TabId } from "./model";
 import type { GitMap } from "./pane";
@@ -153,9 +153,9 @@ export class FakeBackend implements LayoutBackend {
         if (m.zoom(a.tab, a.pane ?? null)) acted = { pane: a.pane ?? null, tab: a.tab };
         break;
       case "open_workspace": {
-        const t = a.template;
+        const t = a.workspace;
         t.tabs.forEach((tab, i) => {
-          const build = (n: TemplateTree): Tree =>
+          const build = (n: WorkspaceTree): Tree =>
             n.kind === "leaf"
               ? { kind: "leaf", pane: ++this.nextPane }
               : { kind: "split", dir: n.dir, ratio: n.ratio, a: build(n.a), b: build(n.b) };

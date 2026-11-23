@@ -124,7 +124,7 @@ pub enum Action {
     },
     /// Open a workspace file's tabs after the others, and show its active one.
     OpenWorkspace {
-        template: Template,
+        workspace: Workspace,
     },
 }
 
@@ -176,7 +176,7 @@ impl Layout {
 /// What runs in a pane opened from a workspace file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "t", rename_all = "snake_case")]
-#[ts(export, rename = "TemplateRun")]
+#[ts(export, rename = "WorkspaceRun")]
 pub enum Run {
     /// Typed into the login shell once it is ready, followed by Enter: the
     /// first of `commands` whose program is installed. With none installed
@@ -195,7 +195,7 @@ pub enum Run {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[ts(export)]
-pub enum TemplateTree {
+pub enum WorkspaceTree {
     Leaf {
         cwd: String,
         /// `None` is a plain shell.
@@ -205,17 +205,17 @@ pub enum TemplateTree {
     Split {
         dir: Dir,
         ratio: f64,
-        a: Box<TemplateTree>,
-        b: Box<TemplateTree>,
+        a: Box<WorkspaceTree>,
+        b: Box<WorkspaceTree>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct TabTemplate {
+pub struct WorkspaceTab {
     #[ts(optional)]
     pub title: Option<String>,
-    pub tree: TemplateTree,
+    pub tree: WorkspaceTree,
     /// The focused pane, as an index in reading order.
     pub focused: u32,
 }
@@ -223,20 +223,71 @@ pub struct TabTemplate {
 /// A workspace file, ready to open.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct Template {
+pub struct Workspace {
     #[ts(optional)]
     pub name: Option<String>,
-    pub tabs: Vec<TabTemplate>,
+    pub tabs: Vec<WorkspaceTab>,
     /// The tab shown after opening, as an index into `tabs`.
     pub active: u32,
 }
 
-impl TemplateTree {
+impl Workspace {
+    /// The window's tabs as a workspace to open again later: a shell in
+    /// each pane's directory (`dir_of`; "" for unknown, which opens home),
+    /// with the same splits, focus, titles and shown tab.
+    pub fn of(layout: &Layout, dir_of: impl Fn(PaneId) -> Option<String>) -> Workspace {
+        fn tree(t: &Tree, dir_of: &dyn Fn(PaneId) -> Option<String>) -> WorkspaceTree {
+            match t {
+                Tree::Leaf { pane } => WorkspaceTree::Leaf {
+                    cwd: dir_of(*pane).unwrap_or_default(),
+                    run: None,
+                },
+                Tree::Split { dir, ratio, a, b } => WorkspaceTree::Split {
+                    dir: *dir,
+                    ratio: *ratio,
+                    a: Box::new(tree(a, dir_of)),
+                    b: Box::new(tree(b, dir_of)),
+                },
+            }
+        }
+        let tabs = layout
+            .tabs
+            .iter()
+            .map(|t| WorkspaceTab {
+                title: t.title.clone(),
+                tree: tree(&t.tree, &dir_of),
+                focused: t
+                    .tree
+                    .panes()
+                    .iter()
+                    .position(|p| *p == t.focused)
+                    .unwrap_or(0) as u32,
+            })
+            .collect();
+        let active = layout
+            .tabs
+            .iter()
+            .position(|t| Some(t.id) == layout.active)
+            .unwrap_or(0) as u32;
+        Workspace {
+            name: None,
+            tabs,
+            active,
+        }
+    }
+
+    /// How many panes opening it starts.
+    pub fn panes(&self) -> usize {
+        self.tabs.iter().map(|t| t.tree.leaves().len()).sum()
+    }
+}
+
+impl WorkspaceTree {
     /// Leaves in reading order: left before right, top before bottom.
-    pub fn leaves(&self) -> Vec<&TemplateTree> {
+    pub fn leaves(&self) -> Vec<&WorkspaceTree> {
         match self {
-            TemplateTree::Leaf { .. } => vec![self],
-            TemplateTree::Split { a, b, .. } => {
+            WorkspaceTree::Leaf { .. } => vec![self],
+            WorkspaceTree::Split { a, b, .. } => {
                 let mut v = a.leaves();
                 v.extend(b.leaves());
                 v

@@ -348,7 +348,7 @@ async fn workspace_open(
     }
     state
         .client()?
-        .act(Action::OpenWorkspace { template: t })
+        .act(Action::OpenWorkspace { workspace: t })
         .map_err(|e| e.to_string())?;
     Ok(true)
 }

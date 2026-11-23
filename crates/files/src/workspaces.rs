@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use proto::layout::{Layout, PaneId, Run, TabId, Template, TemplateTree};
+use proto::layout::{Layout, PaneId, Run, TabId, Workspace, WorkspaceTree};
 use proto::wire::PaneInfo;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::workspace::{self as template, Problems, SaveOptions, SavePane, SaveTab, Source};
+use crate::workspace::{self as file, Problems, SaveOptions, SavePane, SaveTab, Source};
 
 /// The workspaces Kibann comes with, by name.
 pub const BUILTINS: &[(&str, &str)] = &[
@@ -104,7 +104,7 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
             read(path, name, Origin::Project)
         }
         Some(a) if is_path(a) => {
-            let path = template::resolve_path(a, cwd, proto::paths::home_dir().as_deref())
+            let path = file::resolve_path(a, cwd, proto::paths::home_dir().as_deref())
                 .unwrap_or_else(|| cwd.join(a));
             let origin = if path.ends_with(PROJECT_FILE) {
                 Origin::Project
@@ -158,9 +158,9 @@ fn project_name(path: &Path) -> String {
 }
 
 /// Read `f`'s workspace as opened from `cwd`.
-pub fn parse(f: &Found, cwd: &Path) -> Result<Template, Problems> {
+pub fn parse(f: &Found, cwd: &Path) -> Result<Workspace, Problems> {
     let home = proto::paths::home_dir();
-    let mut t = template::parse(&Source {
+    let mut t = file::parse(&Source {
         text: &f.text,
         file: f.path.as_deref(),
         opened_from: cwd,
@@ -259,11 +259,11 @@ pub struct Runs {
 }
 
 /// Every command a workspace would run, in order.
-pub fn commands(t: &Template) -> Vec<Runs> {
+pub fn commands(t: &Workspace) -> Vec<Runs> {
     let mut out = Vec::new();
     for tab in &t.tabs {
         for leaf in tab.tree.leaves() {
-            let TemplateTree::Leaf {
+            let WorkspaceTree::Leaf {
                 cwd,
                 run: Some(run),
             } = leaf
@@ -319,11 +319,11 @@ pub(crate) fn load_trusted(file: &Path) -> Trusted {
 /// Whether opening `f` must ask first: it runs commands, and isn't the
 /// user's own (built-in, in their workspaces folder, or agreed to before in
 /// exactly this version).
-pub fn needs_asking(f: &Found, t: &Template) -> bool {
+pub fn needs_asking(f: &Found, t: &Workspace) -> bool {
     needs_asking_in(f, t, proto::paths::trusted_file().as_deref())
 }
 
-fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
+fn needs_asking_in(f: &Found, t: &Workspace, store: Option<&Path>) -> bool {
     if matches!(f.origin, Origin::Builtin | Origin::User) || commands(t).is_empty() {
         return false;
     }
@@ -496,7 +496,7 @@ pub fn snapshot(
         .position(|t| Some(t.id) == layout.active)
         .unwrap_or(0);
     let home = proto::paths::home_dir();
-    Ok(template::write(
+    Ok(file::write(
         &save,
         &info,
         &SaveOptions {
@@ -566,7 +566,7 @@ mod tests {
                     continue;
                 }
                 seen += 1;
-                let r = template::parse(&Source {
+                let r = file::parse(&Source {
                     text: &block,
                     file: None,
                     opened_from: &here,
