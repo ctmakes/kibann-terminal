@@ -6,6 +6,7 @@
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod fonts;
+mod notify;
 mod open;
 #[cfg(unix)]
 mod screens;
@@ -827,20 +828,10 @@ fn settings_current(
 }
 
 /// A system notification (an agent waits or finished, in a pane the user
-/// isn't looking at). Clicking it shows the pane: see [`on_notification_click`].
+/// isn't looking at). Clicking it shows the pane: see [`notify`].
 #[tauri::command]
 fn notify(app: AppHandle, pane: u32, title: String, body: String) {
-    use tauri_plugin_notification::NotificationExt;
-    let r = app
-        .notification()
-        .builder()
-        .id(i32::try_from(pane).unwrap_or(0))
-        .title(title)
-        .body(body)
-        .show();
-    if let Err(e) = r {
-        eprintln!("kibann: notification: {e}");
-    }
+    notify::show(&app, pane, title, body);
 }
 
 /// The shortcuts changed (the config's `keybind`): show each menu item's
@@ -870,31 +861,6 @@ fn menu_keys(app: AppHandle, keys: std::collections::HashMap<String, Option<Stri
     if let Some(menu) = app.menu() {
         walk(menu.items().unwrap_or_default(), &keys);
     }
-}
-
-/// A click on one of our notifications: bring the window forward and show
-/// the pane it's about (its id is the notification's). A pane closed since
-/// does nothing.
-fn on_notification_click(app: &AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
-    let handle = app.clone();
-    let _ = app.notification().on_action(move |done| {
-        if done.action_id() != "tap" {
-            return;
-        }
-        let Some(pane) = done.notification().map(|n| n.id()) else {
-            return;
-        };
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        tray::show_window(&handle);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        if let Some(w) = handle.get_webview_window("main") {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-        let _ = handle.emit("focus-pane", pane);
-    });
 }
 
 /// Poll the config file and the user's themes: editors save in ways
@@ -1279,7 +1245,7 @@ pub fn run() {
             app.manage(screens::Screens::default());
             reload_choice(handle);
             watch_config(handle.clone());
-            on_notification_click(handle);
+            notify::init(handle);
             update::start(handle);
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
