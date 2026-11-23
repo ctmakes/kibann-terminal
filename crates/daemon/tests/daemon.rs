@@ -564,7 +564,14 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
         // which measures the frame pacing, not the socket.
         type_text(c, s, &marker);
         loop {
-            match rx.recv_timeout(Duration::from_secs(2)).expect("echo") {
+            let ev = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|_| {
+                panic!(
+                    "no echo of {marker} after {:?} (sample {i}, earlier {times:?}); the screen:\n{}",
+                    t.elapsed(),
+                    screen.lines().join("\n")
+                )
+            });
+            match ev {
                 Ev::Frame(id, f) if id == s => {
                     c.send(&ClientMsg::Ack {
                         session: s,
