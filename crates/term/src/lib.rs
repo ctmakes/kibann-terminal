@@ -10,6 +10,7 @@ pub mod emulator;
 pub mod frame;
 pub mod keymap;
 pub mod links;
+pub mod pacer;
 pub mod process;
 pub mod read;
 pub mod replay;

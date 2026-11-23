@@ -10,17 +10,9 @@
 //!   stops reading input can't stall the emulator.
 //! - **waiter**: reports the child's exit status.
 //!
-//! Pacing (see `plans/done/renderer.md`): a frame goes out right away if none went
-//! out in the last 16 ms, otherwise at the 16 ms mark. Nothing is built while
-//! more than one frame is unacknowledged; changes keep accumulating and the
-//! next frame carries all of them.
-//!
-//! Any number of views (the app, a phone) can watch a session, each pacing
-//! itself with its own acks and seq. Frames are built once for all of them.
-//! A view still waiting on acks when a frame is built misses it, and gets
-//! a full frame once it catches up, so a slow view never holds back a fast
-//! one. The screen state (size, scroll, selection, search, hover) is the
-//! session's: the views share it, and the last resize wins.
+//! Frames go to any number of views (the app, a phone), paced by
+//! [`crate::pacer`]. The screen state (size, scroll, selection, search,
+//! hover) is the session's: the views share it, and the last resize wins.
 
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -38,10 +30,10 @@ use std::sync::{Arc, Mutex};
 use crate::agent::{Agent, State as AgentState};
 use crate::cast::{CastWriter, Header};
 use crate::emulator::{Emulator, TERMINFO_NAME};
+use crate::pacer::Pacer;
+pub use crate::pacer::{FRAME_INTERVAL, FrameSink, ViewId};
 use crate::selection::AUTOSCROLL_INTERVAL;
 
-/// Minimum time between frames.
-pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// How much PTY output to process before checking whether a frame is due.
 const OUTPUT_BUDGET: usize = 1 << 20;
 /// Chunks of PTY output in flight to the session thread. Bounded so a
@@ -101,10 +93,6 @@ const LOOK_INTERVAL: Duration = Duration::from_millis(250);
 const LOOK_IDLE: Duration = Duration::from_secs(2);
 
 pub type Sink = Box<dyn FnMut(Event) + Send>;
-/// Where one view's frames go.
-pub type FrameSink = Box<dyn FnMut(Frame) + Send>;
-/// Names a view of a session; the caller picks it.
-pub type ViewId = u64;
 
 /// PTY output, on the bounded queue.
 enum Output {
@@ -515,110 +503,6 @@ fn spawn_writer(mut w: Box<dyn Write + Send>) -> io::Result<Sender<Vec<u8>>> {
     Ok(tx)
 }
 
-/// One view's pacing.
-struct View {
-    id: ViewId,
-    sink: FrameSink,
-    /// Seq of the last frame sent to it and the last one it acknowledged.
-    sent: u64,
-    acked: u64,
-    /// It has every frame built so far, so the next partial one applies.
-    current: bool,
-}
-
-impl View {
-    fn ready(&self) -> bool {
-        self.sent.saturating_sub(self.acked) <= 1
-    }
-}
-
-/// Pacing and backpressure state of the session thread.
-struct Pacer {
-    views: Vec<View>,
-    /// Terminal changed since the last frame.
-    dirty: bool,
-    /// The next frame is full for every view (a resize, a new theme).
-    force_full: bool,
-    last_frame: Option<Instant>,
-}
-
-impl Pacer {
-    fn any_ready(&self) -> bool {
-        self.views.iter().any(View::ready)
-    }
-
-    /// A view that is ready but missed a frame, so the next one is full.
-    fn needs_full(&self) -> bool {
-        self.force_full || self.views.iter().any(|v| v.ready() && !v.current)
-    }
-
-    /// `f` to every view that can take it; the rest miss it.
-    fn emit(&mut self, mut f: Frame, now: Instant) {
-        self.last_frame = Some(now);
-        for v in &mut self.views {
-            if v.ready() && (v.current || f.full) {
-                v.sent += 1;
-                f.seq = v.sent;
-                (v.sink)(f.clone());
-                v.current = true;
-            } else {
-                v.current = false;
-            }
-        }
-    }
-
-    fn build(&mut self, emu: &mut Emulator, now: Instant) {
-        let full = self.needs_full();
-        if let Ok(Some(f)) = emu.build_frame(full) {
-            self.emit(f, now);
-        }
-        self.dirty = false;
-        self.force_full = false;
-    }
-
-    /// Send what changed now to the views keeping up, whether or not a
-    /// frame is due or the screen is held.
-    fn flush(&mut self, emu: &mut Emulator, now: Instant) {
-        if !self.any_ready() {
-            return;
-        }
-        if let Some(f) = emu.take_captured() {
-            self.emit(f, now);
-        }
-        if self.any_ready() {
-            self.build(emu, now);
-        }
-    }
-
-    /// Send a frame if one is due. Returns when to check again, if waiting on the clock.
-    fn tick(&mut self, emu: &mut Emulator, now: Instant) -> Option<Instant> {
-        if !self.any_ready() {
-            return None;
-        }
-        // A frame captured at the start of a hold goes first.
-        if let Some(f) = emu.take_captured() {
-            self.emit(f, now);
-            return None;
-        }
-        let full = self.needs_full();
-        if !(self.dirty || full) || emu.held() {
-            return None;
-        }
-        if let Some(t) = self.last_frame {
-            let due = t + FRAME_INTERVAL;
-            if now < due && !full {
-                return Some(due);
-            }
-        }
-        self.build(emu, now);
-        None
-    }
-
-    fn view(&mut self, id: ViewId) -> Option<&mut View> {
-        self.views.iter_mut().find(|v| v.id == id)
-    }
-}
-
 /// How long one pass of searching may take, and the pause between passes.
 const FIND_SLICE: Duration = Duration::from_millis(4);
 
@@ -718,12 +602,7 @@ fn run(
     let Ok(mut emu) = Emulator::new(size) else {
         return;
     };
-    let mut p = Pacer {
-        views: Vec::new(),
-        dirty: false,
-        force_full: false,
-        last_frame: None,
-    };
+    let mut p = Pacer::default();
     let mut owner: Option<Sink> = None;
     let mut output_done = false;
     // Exit code and when it arrived.
@@ -745,17 +624,10 @@ fn run(
         let exit_wait = exit
             .filter(|_| !output_done && !exit_sent)
             .map(|(_, t)| t + EXIT_GRACE);
-        let wake = [
-            deadline,
-            emu.hold_deadline(),
-            exit_wait,
-            autoscroll,
-            look_due,
-            find_due,
-        ]
-        .into_iter()
-        .flatten()
-        .min();
+        let wake = [deadline, exit_wait, autoscroll, look_due, find_due]
+            .into_iter()
+            .flatten()
+            .min();
         let Ok(first) = inbox.wait(wake, !output_done) else {
             return;
         };
@@ -768,7 +640,7 @@ fn run(
                 In::Output(Output::Data(data)) => {
                     budget = budget.saturating_sub(data.len());
                     emu.write(&data);
-                    p.dirty = true;
+                    p.changed();
                     if let Some(due) = look_due {
                         let now = Instant::now();
                         let soon = looked.map_or(now, |t| (t + LOOK_INTERVAL).max(now));
@@ -804,7 +676,7 @@ fn run(
                     }
                     let _ = emu.input(&e);
                     // Selection and scrolling change the screen with no output.
-                    p.dirty = true;
+                    p.changed();
                 }
                 In::Msg(Msg::Resize(s)) => {
                     if let Some(r) = &mut rec {
@@ -814,47 +686,28 @@ fn run(
                         if let Some(m) = &master {
                             let _ = m.master.resize(pty_size(s));
                         }
-                        p.dirty = true;
-                        p.force_full = true;
+                        p.changed_all();
                     }
                 }
-                In::Msg(Msg::Ack(id, seq)) => {
-                    if let Some(v) = p.view(id) {
-                        v.acked = v.acked.max(seq.min(v.sent));
-                    }
-                }
-                // The client asks after missing a frame, and drops every
-                // partial frame until a full one: frames in flight will never
-                // be acked, and waiting on them would stall the pane for good.
-                In::Msg(Msg::RequestFull(id)) => {
-                    if let Some(v) = p.view(id) {
-                        v.current = false;
-                        v.acked = v.sent;
-                    }
-                }
+                In::Msg(Msg::Ack(id, seq)) => p.ack(id, seq),
+                In::Msg(Msg::RequestFull(id)) => p.request_full(id),
                 In::Msg(Msg::Theme(t)) => {
                     let _ = emu.set_theme(&t);
-                    p.dirty = true;
-                    p.force_full = true;
+                    p.changed_all();
                 }
-                In::Msg(Msg::Events(sink)) => owner = Some(sink),
-                In::Msg(Msg::View(id, sink)) => {
-                    // A view replacing one by the same id carries on its
-                    // seq; frames sent to the old one will never be acked.
-                    let sent = p.view(id).map_or(0, |v| v.sent);
-                    p.views.retain(|v| v.id != id);
-                    p.views.push(View {
-                        id,
-                        sink,
-                        sent,
-                        acked: sent,
-                        current: false,
-                    });
+                In::Msg(Msg::Events(sink)) => {
+                    owner = Some(sink);
+                    // It hears what runs now, even if an earlier look saw it.
+                    foreground = None;
+                    if look_due.is_some() {
+                        look_due = Some(Instant::now());
+                    }
                 }
-                In::Msg(Msg::Unview(id)) => p.views.retain(|v| v.id != id),
+                In::Msg(Msg::View(id, sink)) => p.add_view(id, sink),
+                In::Msg(Msg::Unview(id)) => p.remove_view(id),
                 In::Msg(Msg::Show(data)) => {
                     emu.write(&data);
-                    p.dirty = true;
+                    p.changed();
                 }
                 In::Msg(Msg::Read(source, lines, reply)) => {
                     let text = crate::read::text(emu.terminal(), emu.size(), source, lines);
@@ -873,7 +726,7 @@ fn run(
 
         // The foreground program changes as programs start, exit or exec,
         // which comes with output; the lookup is a syscall or two.
-        if p.dirty
+        if p.dirty()
             && let Some(m) = &master
         {
             emu.set_program_name(m.foreground_pid().and_then(crate::process::name));
@@ -890,14 +743,11 @@ fn run(
         send_outbox(&mut emu, &pty, &mut rec);
 
         let now = Instant::now();
-        if emu.expire_hold(now) {
-            p.dirty = true;
-        }
         if emu.autoscrolling() {
             let due = *autoscroll.get_or_insert(now + AUTOSCROLL_INTERVAL);
             if now >= due {
                 let _ = emu.autoscroll_tick();
-                p.dirty = true;
+                p.changed();
                 autoscroll = Some(now + AUTOSCROLL_INTERVAL);
             }
         } else {
@@ -905,10 +755,10 @@ fn run(
         }
         // Searching: a slice of work per pass (output and input go first),
         // and again shortly while the scrollback isn't all searched.
-        if emu.finding() && (p.dirty || find_due.is_some_and(|t| now >= t)) {
+        if emu.finding() && (p.dirty() || find_due.is_some_and(|t| now >= t)) {
             let more = emu.find_work(FIND_SLICE);
             find_due = more.then(|| now + FIND_SLICE);
-            p.dirty = true;
+            p.changed();
         } else if !emu.finding() {
             find_due = None;
         }

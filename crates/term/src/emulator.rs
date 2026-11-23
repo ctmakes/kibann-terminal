@@ -22,9 +22,6 @@ use crate::vt::search::{MatchBuffer, Search, Status};
 use crate::vt::terminal::ScrollViewport;
 use crate::vt::{Terminal, focus, mouse, paste};
 
-/// How long a program may hold rendering (mode 2026) before we end the hold.
-pub const HOLD_TIMEOUT: Duration = Duration::from_secs(1);
-
 pub const TERMINFO_NAME: &str = "xterm-256color";
 pub const SCROLLBACK_LINES: usize = 10_000;
 
@@ -34,7 +31,6 @@ struct Shared {
     /// Bytes for the PTY: device responses and encoded input.
     outbox: RefCell<Vec<u8>>,
     held: Cell<bool>,
-    hold_since: Cell<Option<Instant>>,
     /// The frame captured when a hold began, waiting to be sent.
     captured: RefCell<Option<Frame>>,
 }
@@ -116,7 +112,6 @@ impl Emulator {
             builder: RefCell::new(FrameBuilder::new()?),
             outbox: RefCell::new(Vec::new()),
             held: Cell::new(false),
-            hold_since: Cell::new(None),
             captured: RefCell::new(None),
         });
 
@@ -144,9 +139,6 @@ impl Emulator {
                 {
                     *s.captured.borrow_mut() = Some(f);
                 }
-                s.hold_since.set(Some(Instant::now()));
-            } else {
-                s.hold_since.set(None);
             }
             s.held.set(held);
         })?;
@@ -217,45 +209,20 @@ impl Emulator {
         self.shared.held.get()
     }
 
-    /// When the current hold times out, if there is one.
     /// The directory the shell last reported (OSC 7), if any.
     pub fn reported_dir(&self) -> Option<std::path::PathBuf> {
         crate::process::parse_reported_dir(self.term.pwd().ok()?)
-    }
-
-    pub fn hold_deadline(&self) -> Option<Instant> {
-        self.shared
-            .hold_since
-            .get()
-            .filter(|_| self.held())
-            .map(|t| t + HOLD_TIMEOUT)
-    }
-
-    /// End a hold that has gone on too long. Returns true if one was ended.
-    pub fn expire_hold(&mut self, now: Instant) -> bool {
-        match self.hold_deadline() {
-            Some(d) if now >= d => {
-                self.end_hold();
-                true
-            }
-            _ => false,
-        }
     }
 
     /// End the current hold now (turn mode 2026 off).
     pub fn end_hold(&mut self) {
         let _ = self.term.set_mode(Mode::SYNC_OUTPUT, false);
         self.shared.held.set(false);
-        self.shared.hold_since.set(None);
     }
 
     /// The frame captured at the start of a hold, if one is waiting.
     pub fn take_captured(&self) -> Option<Frame> {
         self.shared.captured.borrow_mut().take()
-    }
-
-    pub fn has_captured(&self) -> bool {
-        self.shared.captured.borrow().is_some()
     }
 
     /// Build a frame of everything that changed since the last one.

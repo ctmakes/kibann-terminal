@@ -1,13 +1,16 @@
-//! Play a recording through the emulator and frame builder, paced the way a
-//! live session paces frames, but on the recording's clock instead of the
-//! wall clock. Backpressure is left out: the frontend is assumed to keep up.
+//! Play a recording through the emulator and the session's own pacing
+//! ([`crate::pacer`]), on the recording's clock instead of the wall clock.
+//! Backpressure is left out: the frontend acks every frame at once.
+
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use proto::{Frame, Resize};
 use serde::{Deserialize, Serialize};
 
 use crate::cast::{CastEvent, Header};
-use crate::emulator::{Emulator, HOLD_TIMEOUT};
-use crate::session::FRAME_INTERVAL;
+use crate::emulator::Emulator;
+use crate::pacer::Pacer;
 
 /// A frame and when it would have been sent, in ms from the start.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,69 +22,46 @@ pub struct TimedFrame {
 /// Default cell size in device px. It only affects pixel size reports.
 pub const CELL: (u16, u16) = (8, 16);
 
+/// The recording's clock: ms from its start, as the [`Instant`]s the pacer
+/// works in.
+struct Clock(Instant);
+
+impl Clock {
+    fn at(&self, ms: f64) -> Instant {
+        self.0 + Duration::from_nanos((ms * 1e6).round() as u64)
+    }
+
+    fn ms(&self, t: Instant) -> f64 {
+        (t - self.0).as_nanos() as f64 / 1e6
+    }
+}
+
 struct Player {
     emu: Emulator,
+    pacer: Pacer,
+    clock: Clock,
+    /// Frames the pacer sent and haven't been timed yet.
+    sent: Arc<Mutex<Vec<Frame>>>,
     out: Vec<TimedFrame>,
-    last: f64,
-    /// A frame is waiting for the 16 ms mark.
-    pending: bool,
-    hold_start: Option<f64>,
+    /// When the pacer wants to be back.
+    wake: Option<Instant>,
 }
 
 impl Player {
-    fn push(&mut self, t: f64, frame: Option<Frame>) {
-        if let Some(frame) = frame {
-            self.last = t;
-            self.out.push(TimedFrame { t, frame });
+    /// What the session does at `t`; what it sent goes out at `t`, acked.
+    fn tick(&mut self, t: Instant) {
+        self.wake = self.pacer.tick(&mut self.emu, t);
+        let ms = self.clock.ms(t);
+        for frame in self.sent.lock().unwrap().drain(..) {
+            self.pacer.ack(0, frame.seq);
+            self.out.push(TimedFrame { t: ms, frame });
         }
     }
 
-    fn build(&mut self, t: f64, full: bool) -> Result<(), String> {
-        let f = self.emu.build_frame(full).map_err(|e| e.to_string())?;
-        self.pending = false;
-        self.push(t, f);
-        Ok(())
-    }
-
-    /// Do whatever the session would have done on its own before time `t`:
-    /// time out a hold, send a frame that came due.
-    fn advance(&mut self, t: f64) -> Result<(), String> {
-        let interval = FRAME_INTERVAL.as_secs_f64() * 1e3;
-        if let Some(h) = self.hold_start {
-            let end = h + HOLD_TIMEOUT.as_secs_f64() * 1e3;
-            if t < end {
-                return Ok(());
-            }
-            self.emu.end_hold();
-            self.hold_start = None;
-            let at = end.max(self.last + interval);
-            if at <= t {
-                self.build(at, false)?;
-            } else {
-                self.pending = true;
-            }
-        }
-        if self.pending && t >= self.last + interval {
-            self.build(self.last + interval, false)?;
-        }
-        Ok(())
-    }
-
-    /// After feeding output at `t`: send a captured frame, track holds, and
-    /// send now if the leading edge allows it.
-    fn after_output(&mut self, t: f64) -> Result<(), String> {
-        let captured = self.emu.take_captured();
-        self.push(t, captured);
-        if self.emu.held() {
-            self.hold_start.get_or_insert(t);
-            return Ok(());
-        }
-        self.hold_start = None;
-        if t >= self.last + FRAME_INTERVAL.as_secs_f64() * 1e3 {
-            self.build(t, false)
-        } else {
-            self.pending = true;
-            Ok(())
+    /// Everything the session would have done on its own before `t`.
+    fn until(&mut self, t: Instant) {
+        while let Some(w) = self.wake.filter(|w| *w <= t) {
+            self.tick(w);
         }
     }
 }
@@ -99,36 +79,46 @@ pub fn replay(
         cell_h: cell.1,
     };
     let emu = Emulator::new(size(header.width, header.height)).map_err(|e| e.to_string())?;
+    let sent = Arc::<Mutex<Vec<Frame>>>::default();
+    let mut pacer = Pacer::default();
+    let to = sent.clone();
+    pacer.add_view(0, Box::new(move |f| to.lock().unwrap().push(f)));
+    let clock = Clock(Instant::now());
+    let start = clock.at(0.0);
     let mut p = Player {
         emu,
+        pacer,
+        clock,
+        sent,
         out: Vec::new(),
-        last: 0.0,
-        pending: false,
-        hold_start: None,
+        wake: None,
     };
-    p.build(0.0, true)?;
+    p.tick(start);
 
     for ev in events {
-        let t = ev.time() * 1e3;
-        p.advance(t)?;
+        let t = p.clock.at(ev.time() * 1e3);
+        p.until(t);
         match ev {
             CastEvent::Output(_, data) => {
                 p.emu.write(data.as_bytes());
-                p.after_output(t)?;
+                p.pacer.changed();
             }
             CastEvent::Resize(_, cols, rows) => {
                 if p.emu
                     .resize(size(*cols, *rows))
                     .map_err(|e| e.to_string())?
                 {
-                    p.build(t, true)?;
+                    p.pacer.changed_all();
                 }
             }
             CastEvent::Input(..) => {}
         }
+        p.tick(t);
     }
     // Let the last hold time out and the last frame go out.
-    p.advance(f64::INFINITY)?;
+    while let Some(w) = p.wake {
+        p.tick(w);
+    }
     Ok(p.out)
 }
 

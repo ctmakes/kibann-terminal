@@ -250,9 +250,13 @@ fn render_hold_captures_the_frame_before_it() {
 fn render_hold_times_out() {
     let mut e = emu();
     e.write(b"\x1b[?2026h");
-    let d = e.hold_deadline().unwrap();
-    assert!(!e.expire_hold(d - std::time::Duration::from_millis(1)));
-    assert!(e.expire_hold(d));
+    let mut p = term::pacer::Pacer::default();
+    let t0 = std::time::Instant::now();
+    let d = p.tick(&mut e, t0).expect("comes back when the hold ends");
+    assert_eq!(d, t0 + term::pacer::HOLD_TIMEOUT);
+    p.tick(&mut e, d - std::time::Duration::from_millis(1));
+    assert!(e.held());
+    p.tick(&mut e, d);
     assert!(!e.held());
     assert!(
         !e.terminal()
