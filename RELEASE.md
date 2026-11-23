@@ -65,7 +65,8 @@ that first, then that every secret is set.
 
 A failed run: fix and commit, delete the draft (`gh release delete
 v0.2.0`), then `scripts/retrigger-release.sh 0.2.0` (it pushes the fix
-to `main` and moves the tag).
+to `main` and moves the tag; once a release is published it refuses:
+release the next version instead).
 
 ## By-hand check before publishing
 
