@@ -71,7 +71,8 @@ export interface CardPane {
   /** In the tab shown. */
   shown: boolean;
   focused: boolean;
-  canvas: HTMLCanvasElement | null;
+  /** Its picture, painted up to date. */
+  canvas: () => HTMLCanvasElement | null;
   /** The terminal's background, behind the thumbnail. */
   bg: string;
   /** Where the cursor is, as a fraction of the screen's height. */
@@ -633,7 +634,7 @@ export class Sidebar {
     const id = this.previewing;
     const p = id === null ? undefined : this.pane(id);
     const row = id === null ? undefined : this.rows.get(id);
-    const src = p?.canvas;
+    const src = p?.canvas();
     if (!p || !row || !src || src.width === 0 || src.height === 0) {
       this.preview.style.display = "none";
       return;

@@ -96,6 +96,10 @@ export class TerminalView {
   /** When the last frame arrived, and the check for a stall under way. */
   private lastFrameAt = performance.now();
   private stallTimer = 0;
+  private fullTimer = 0;
+  private shown = true;
+  /** Frames were applied while hidden, and not painted. */
+  private stale = false;
   private focused = false;
   private fontSize: number;
   private readonly cleanups: Array<() => void> = [];
@@ -386,6 +390,18 @@ export class TerminalView {
     }, STALL_TIMEOUT_MS);
   }
 
+  /** Ask for the full frame the grid waits for, and again until it comes:
+   * with one lost on the way, a pane nobody types into (and its thumbnail)
+   * would stay stale. */
+  private askFull(): void {
+    this.transport.requestFull();
+    clearTimeout(this.fullTimer);
+    this.fullTimer = window.setTimeout(() => {
+      this.fullTimer = 0;
+      if (this.grid.awaitingFull) this.askFull();
+    }, STALL_TIMEOUT_MS);
+  }
+
   enqueue(frame: Frame): void {
     this.lastFrameAt = performance.now();
     this.pending.push(frame);
@@ -409,7 +425,7 @@ export class TerminalView {
       if (!r.applied) {
         if (r.requestFull && !askedFull) {
           askedFull = true;
-          this.transport.requestFull();
+          this.askFull();
         }
         continue;
       }
@@ -419,29 +435,21 @@ export class TerminalView {
     }
     if (ackSeq === null) return;
 
-    // The backend's size wins; a mismatch settles once our resize reaches it.
-    if (this.grid.cols !== this.painter.cols || this.grid.rows !== this.painter.rows) {
-      this.painter.resize(this.grid.cols, this.grid.rows);
-      this.cursor.resize(this.grid.cols, this.grid.rows);
-      full = true;
-    }
-
     const t0 = performance.now();
-    if (full) this.painter.paintAll(this.grid);
-    else this.painter.paintRows(this.grid, dirty);
-    this.cursor.update(this.grid, !sameCursor(prevCursor, this.grid.cursor));
+    if (this.shown) {
+      if (this.fitPainter()) full = true;
+      if (full) this.painter.paintAll(this.grid);
+      else this.painter.paintRows(this.grid, dirty);
+      this.cursor.update(this.grid, !sameCursor(prevCursor, this.grid.cursor));
+    } else this.stale = true;
     const ms = performance.now() - t0;
 
     this.root.style.background = css(this.grid.defaultBg);
     this.dimEl.style.background = css(this.grid.defaultBg);
-    this.updateScrollbar();
     if (this.grid.title !== prevTitle) this.opts.onTitle?.(this.grid.title);
     this.mouse.setTracking(this.grid.mouseTracking);
-    this.links.update(this.grid, this.m);
-    this.finds.update(this.grid, this.m);
+    if (this.shown) this.decorate();
     if (this.grid.find !== prevFind) this.opts.onFind?.(this.grid.find);
-    this.mouse.setLinkShown(this.links.link !== null);
-    this.positionTextarea();
     this.transport.ack(ackSeq);
     this.opts.onPaint?.({
       ms,
@@ -450,6 +458,48 @@ export class TerminalView {
       dirty: full ? null : [...dirty].sort((a, b) => a - b),
       seq: ackSeq,
     });
+  }
+
+  /** The backend's size wins; a mismatch settles once our resize reaches
+   * it. Whether the painter had to change size (and so paint everything). */
+  private fitPainter(): boolean {
+    if (this.grid.cols === this.painter.cols && this.grid.rows === this.painter.rows) return false;
+    this.painter.resize(this.grid.cols, this.grid.rows);
+    this.cursor.resize(this.grid.cols, this.grid.rows);
+    return true;
+  }
+
+  /** What sits over the grid: the scrollbar, links, find matches and the
+   * input's position. */
+  private decorate(): void {
+    this.updateScrollbar();
+    this.links.update(this.grid, this.m);
+    this.finds.update(this.grid, this.m);
+    this.mouse.setLinkShown(this.links.link !== null);
+    this.positionTextarea();
+  }
+
+  /** Whether the pane is on screen. A hidden one keeps its grid up to date
+   * but paints only once it's shown, or when its picture is asked for. */
+  setShown(shown: boolean): void {
+    if (this.shown === shown) return;
+    this.shown = shown;
+    if (shown) this.catchUp();
+  }
+
+  /** The grid canvas, painted up to the latest frame (for thumbnails). */
+  picture(): HTMLCanvasElement {
+    this.catchUp();
+    return this.gridCanvas;
+  }
+
+  /** Paint what frames changed while the pane was hidden. */
+  private catchUp(): void {
+    if (!this.stale) return;
+    this.stale = false;
+    this.fitPainter();
+    this.repaint();
+    if (this.shown) this.decorate();
   }
 
   private updateScrollbar(): void {
@@ -469,6 +519,7 @@ export class TerminalView {
 
   dispose(): void {
     clearTimeout(this.stallTimer);
+    clearTimeout(this.fullTimer);
     if (this.raf) cancelAnimationFrame(this.raf);
     this.cursor.dispose();
     for (const c of this.cleanups) c();

@@ -513,7 +513,7 @@ export class Workspace {
               tab: i,
               shown: t === this.active,
               focused: t.focused === id,
-              canvas: p.view?.gridCanvas ?? null,
+              canvas: () => p.view?.picture() ?? null,
               bg,
               cursor: () => (p.view ? cursorAt(p.view.grid) : 1),
             },
@@ -1133,7 +1133,7 @@ export class Workspace {
   private async thumbnail(id: number, width: number, height?: number): Promise<ImageBitmap | null> {
     const p = this.panes.get(id);
     const view = p?.view;
-    const src = view?.gridCanvas;
+    const src = view?.picture();
     if (!view || !src || src.width === 0 || src.height === 0) return null;
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.min(1600, Math.round(width * dpr)));
@@ -1209,6 +1209,7 @@ export class Workspace {
         return;
       }
       pane.view = view;
+      this.showPanes();
       if (gen !== this.fontGen) void view.setFont(this.fontSize);
       this.renderSidebar();
       view.setActive(pane.tab.focused === pane.id);
@@ -1339,6 +1340,13 @@ export class Workspace {
     }
   }
 
+  /** Tell each pane whether it's on screen: hidden ones don't paint. */
+  private showPanes(): void {
+    for (const p of this.panes.values()) {
+      p.view?.setShown(p.tab === this.active && p.el.style.display !== "none");
+    }
+  }
+
   /** Position the panes only. */
   private place(tab: Tab): void {
     const box = this.box();
@@ -1364,6 +1372,7 @@ export class Workspace {
         height: `${r.h}px`,
       });
     }
+    this.showPanes();
   }
 
   dispose(): void {

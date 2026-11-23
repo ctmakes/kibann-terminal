@@ -8,7 +8,7 @@ const pane = (id: number, tab: number): CardPane => ({
   tab,
   shown: false,
   focused: false,
-  canvas: null,
+  canvas: () => null,
   bg: "#000",
   cursor: () => 1,
 });
