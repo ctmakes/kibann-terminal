@@ -6,6 +6,7 @@
     "dev": "vite",
     "tauri": "tauri",
     "build": "npm run typecheck && vite build",
+    "package:windows": "cd .. && cargo build --release -p cli && cd app && tauri build --config src-tauri/tauri.windows-package.conf.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.parts.json",
     "test": "vitest run",
     "test:watch": "vitest",
