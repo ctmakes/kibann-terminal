@@ -44,8 +44,12 @@ fn start(socket: &Path, idle: Duration) -> (Arc<Daemon>, JoinHandle<std::io::Res
     };
     let dd = d.clone();
     let h = thread::spawn(move || serve_socket(&dd, &cfg));
-    let deadline = Instant::now() + Duration::from_secs(2);
+    // Generous: a loaded machine (CI) can take seconds.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !socket.exists() {
+        if h.is_finished() {
+            panic!("the daemon ended: {:?}", h.join().unwrap());
+        }
         assert!(Instant::now() < deadline, "daemon didn't start");
         thread::sleep(Duration::from_millis(10));
     }
