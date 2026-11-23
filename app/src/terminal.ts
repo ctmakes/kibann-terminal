@@ -329,6 +329,15 @@ export class TerminalView {
     this.layout(this.container.clientWidth, this.container.clientHeight);
   }
 
+  /**
+   * Fit the container as it is now. The ResizeObserver doesn't run while
+   * the page is hidden (a covered or closed window), and panes still move
+   * then: a split from the CLI.
+   */
+  fit(): void {
+    this.layout(this.container.clientWidth, this.container.clientHeight);
+  }
+
   /** Fit the grid to the container; repaint from the mirror and tell the backend. */
   layout(widthCss: number, heightCss: number): void {
     if (widthCss <= 0 || heightCss <= 0) return;

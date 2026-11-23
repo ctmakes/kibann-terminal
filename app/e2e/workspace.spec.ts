@@ -368,6 +368,31 @@ test.describe("links", () => {
 });
 
 test.describe("agents", () => {
+  test("a split in a hidden window resizes both panes", async ({ page }) => {
+    // As in a covered or closed window: the page is hidden, and WebKit runs
+    // no ResizeObserver for it.
+    await page.addInitScript(() => {
+      const w = window as any;
+      Object.defineProperty(Document.prototype, "hidden", { get: () => w.__hidden === true });
+      const Real = window.ResizeObserver;
+      window.ResizeObserver = class extends Real {
+        constructor(cb: ResizeObserverCallback) {
+          super((entries, ro) => w.__hidden !== true && cb(entries, ro));
+        }
+      };
+    });
+    await open(page);
+    const cols = () =>
+      page.evaluate(() => (window as any).__ws.transports.map((t: any) => t.resizes.at(-1)?.cols));
+    const [whole] = await cols();
+    await page.evaluate(() => ((window as any).__hidden = true));
+    await page.evaluate(() => (window as any).__ws.agent({ t: "split", pane: 1, dir: "row", focus: false }));
+    await settle(page);
+    const [left, right] = await cols();
+    expect(left).toBeLessThan(whole / 2 + 1);
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  });
+
   test("a pane an agent opens appears without taking focus", async ({ page }) => {
     await open(page);
     await page.keyboard.type("a");

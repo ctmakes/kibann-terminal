@@ -507,9 +507,12 @@ export class Workspace {
   }
 
   /**
-   * A shortcut can arrive twice, as a key press in the page and as its menu
-   * item firing, in either order. The second is skipped: running a toggle
-   * (zoom) twice would undo it.
+   * A shortcut must not run twice, as a key press in the page and as its
+   * menu item firing (in either order): running a toggle (zoom) twice would
+   * undo it. The second within MENU_ECHO_MS is skipped. On macOS it never
+   * comes (a key the page prevents doesn't reach the menu; checked in a
+   * release build, 0.8), nor on Linux (GTK runs the accelerator and the page
+   * never sees the key); kept for WebView2, not yet checked.
    */
   private runOnce(action: Action, from: "key" | "menu"): void {
     const key = JSON.stringify(action);
@@ -1023,6 +1026,8 @@ export class Workspace {
     });
     place(els, paneRects(tab, this.box(), this.solo));
     this.showPanes();
+    // Nothing observes sizes in a hidden page: measure here instead.
+    if (document.hidden) for (const [id] of els) this.panes.get(id)?.view?.fit();
   }
 
   dispose(): void {
