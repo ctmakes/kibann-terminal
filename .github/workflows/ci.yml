@@ -24,12 +24,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # Zig for libghostty-vt's build, at the version in .zig-version.
+      - id: zig
+        shell: bash
+        run: echo "version=$(cat .zig-version)" >> "$GITHUB_OUTPUT"
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.1
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+          version: ${{ steps.zig.outputs.version }}
+      # Rust as rust-toolchain.toml says.
+      - run: rustup toolchain install
       - name: Linux packages for Tauri
         if: runner.os == 'Linux'
         run: |

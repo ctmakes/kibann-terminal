@@ -39,7 +39,7 @@ start() {
 
 case "${1:-}" in
   image)
-    docker build -t "$IMAGE" "$ROOT/scripts/linux"
+    docker build --build-arg ZIG="$(cat "$ROOT/.zig-version")" -t "$IMAGE" "$ROOT/scripts/linux"
     ;;
   start) start ;;
   build)

@@ -349,7 +349,7 @@ app/src-tauri/   Tauri shell: one window; turns commands into daemon requests
 
 ### The app
 
-You need Rust, Node and Zig 0.17 on `PATH` (libghostty-vt builds from source).
+You need rustup, Node and Zig on `PATH`: the Zig in `.zig-version` (libghostty-vt builds from source), and rustup installs the Rust in `rust-toolchain.toml`.
 
 ```sh
 cd app
@@ -396,7 +396,7 @@ The screenshot baselines in `app/e2e/__screenshots__` were made on macOS. On oth
 ### The backend
 
 ```sh
-cargo test             # needs Zig 0.17 on PATH to build libghostty-vt
+cargo test             # needs Zig (.zig-version) on PATH to build libghostty-vt
 cargo run -p term --bin vt-record -- -o out.cast -- vim    # record a program (asciicast v2)
 cargo run -p term --bin vt-replay -- out.cast -o out.jsonl # frames a session would send
 ```

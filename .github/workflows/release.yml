@@ -64,12 +64,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # Zig for libghostty-vt's build, at the version in .zig-version.
+      - id: zig
+        shell: bash
+        run: echo "version=$(cat .zig-version)" >> "$GITHUB_OUTPUT"
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.1
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
+          version: ${{ steps.zig.outputs.version }}
+      # Rust as rust-toolchain.toml says.
+      - run: rustup toolchain install && rustup target add aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           key: release
@@ -199,10 +202,14 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # Zig for libghostty-vt's build, at the version in .zig-version.
+      - id: zig
+        shell: bash
+        run: echo "version=$(cat .zig-version)" >> "$GITHUB_OUTPUT"
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.1
-      - uses: dtolnay/rust-toolchain@stable
+          version: ${{ steps.zig.outputs.version }}
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.arch }}

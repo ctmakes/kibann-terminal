@@ -18,8 +18,9 @@ ENV LANG=en_US.UTF-8
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
   && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-# Zig 0.17.1 (libghostty-vt's build), as CI.
-ARG ZIG=0.17.1
+# Zig for libghostty-vt's build: linux-dev.sh passes .zig-version, as CI
+# uses.
+ARG ZIG
 RUN arch=$(uname -m) \
   && curl -fsSL "https://ziglang.org/download/${ZIG}/zig-${arch}-linux-${ZIG}.tar.xz" \
      | tar -xJ -C /opt && ln -s /opt/zig-${arch}-linux-${ZIG}/zig /usr/local/bin/zig
@@ -28,6 +29,7 @@ RUN useradd -m -s /bin/zsh dev \
   && mkdir -p /home/dev/work /home/dev/.cargo/registry \
   && chown -R dev:dev /home/dev
 USER dev
-RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal -c clippy,rustfmt
+# rustup; the first cargo command installs rust-toolchain.toml's Rust.
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
 ENV PATH=/home/dev/.cargo/bin:$PATH
 WORKDIR /home/dev
