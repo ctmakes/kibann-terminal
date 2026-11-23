@@ -5,6 +5,27 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.8.0] - Unreleased
+
+- If the terminal service stops (it crashed, or something ended it), the
+  window starts a new one and reopens your saved tabs and splits, instead
+  of quitting.
+- Config lines all read the same way: a value in quotes, and a `# comment`
+  after it, now work for `theme` too (`theme = "Nord" # cold`).
+- `kibann pane run --wait` works in fish and PowerShell as well as in
+  POSIX shells.
+- An agent that finishes in a pane you aren't looking at is marked done
+  even while `kibann pane diff --view` is open.
+- Panels in a screen need the "type" permission to close a pane, and can't
+  press keys for you.
+- Panes in tabs you aren't looking at no longer draw, and a pane that stops
+  getting updates asks for them again on its own.
+- A pane no longer stays in a fallback font when the terminal font loads
+  late.
+- `TERM_PROGRAM_VERSION` in your shells is Kibann's version.
+- This update restarts the terminal service once (it asks first when
+  something is running in a pane).
+
 ## [0.7.1] - 2026-11-21
 
 - The window shows your terminals again. In 0.7.0 it showed only the tab
