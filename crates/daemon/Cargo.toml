@@ -10,6 +10,7 @@ name = "kibannd"
 path = "src/bin/kibannd.rs"
 
 [dependencies]
+agent = { path = "../agent" }
 proto = { path = "../proto" }
 client = { path = "../client" }
 endpoint = { path = "../endpoint" }

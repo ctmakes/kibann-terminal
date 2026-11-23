@@ -5,7 +5,7 @@
 //! - `fixtures/codex/`: Codex CLI 0.169.0 on a local model, 80x24.
 //! - `fixtures/opencode/`: OpenCode 2.2.7, 80x24.
 
-use term::agent::{Agent, State, detect};
+use agent::{Agent, State, detect};
 
 fn state_of(agent: Agent, name: &str) -> State {
     let path = format!(

@@ -4,7 +4,6 @@
 
 pub use libghostty_vt as vt;
 
-pub mod agent;
 pub mod cast;
 pub mod emulator;
 pub mod frame;

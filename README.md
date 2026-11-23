@@ -332,12 +332,19 @@ Key sequences (`a>b`) and `global:` bindings aren't supported.
 ## Development
 
 ```
-crates/proto/   message types shared by the backend and the web renderer (source of truth)
-crates/term/    terminal session: PTY, libghostty-vt emulator, frame builder, input encoders
-crates/daemon/  the daemon that owns the sessions and the layout (kibannd), its client, and the kibann CLI
-skills/kibann/  the guide that teaches agents the CLI
-app/            web frontend: canvas renderer, input handling, browser harness, tests
-app/src-tauri/  Tauri shell: one window; turns commands into daemon requests
+crates/proto/    message types shared by the backend and the web renderer (source of truth)
+crates/term/     terminal session: PTY, libghostty-vt emulator, frame builder, input encoders
+crates/agent/    which coding agent runs in a pane and what it is doing, from its title and screen
+crates/procinfo/ what the OS says about a process: name, arguments, directory, children
+crates/git/      git context for panes, by running git
+crates/files/    the user's files: workspaces, screens, parts, themes, and which may run commands
+crates/endpoint/ where the daemon and its clients meet: the socket or pipe, and the daemon's lock
+crates/client/   how a program talks to the daemon, and starts it
+crates/daemon/   the daemon that owns the sessions and the layout (kibannd)
+crates/cli/      the kibann command line, and the diff viewer it opens in a pane
+skills/kibann/   the guide that teaches agents the CLI
+app/             web frontend: canvas renderer, input handling, browser harness, tests
+app/src-tauri/   Tauri shell: one window; turns commands into daemon requests
 ```
 
 ### The app

@@ -27,12 +27,12 @@ use proto::{Frame, InputEvent, MouseAction, Resize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::agent::{Agent, State as AgentState};
 use crate::cast::{CastWriter, Header};
 use crate::emulator::{Emulator, TERMINFO_NAME};
 use crate::pacer::Pacer;
 pub use crate::pacer::{FRAME_INTERVAL, FrameSink, ViewId};
 use crate::selection::AUTOSCROLL_INTERVAL;
+use agent::{Agent, State as AgentState};
 
 /// How much PTY output to process before checking whether a frame is due.
 const OUTPUT_BUDGET: usize = 1 << 20;
@@ -561,7 +561,7 @@ impl Pty {
         let argv = fg.and_then(procinfo::argv);
         let agent = fg.and_then(|pid| {
             let name = procinfo::name(pid).unwrap_or_default();
-            crate::agent::identify(&name, argv.as_deref().unwrap_or_default())
+            agent::identify(&name, argv.as_deref().unwrap_or_default())
         });
         let agent = agent.map(|a| {
             let text = crate::read::text(
@@ -572,7 +572,7 @@ impl Pty {
             )
             .unwrap_or_default();
             let lines: Vec<&str> = text.lines().collect();
-            (a, crate::agent::detect(a, &emu.title(), &lines))
+            (a, agent::detect(a, &emu.title(), &lines))
         });
         let program = argv.filter(|a| !at_shell && !a.is_empty());
         let fg = Foreground {

@@ -1030,9 +1030,9 @@ impl Daemon {
         }
         let agent = fg.agent.map(|(a, s)| {
             let state = match s {
-                term::agent::State::Idle => AgentState::Idle,
-                term::agent::State::Working => AgentState::Working,
-                term::agent::State::Blocked => AgentState::Blocked,
+                agent::State::Idle => AgentState::Idle,
+                agent::State::Working => AgentState::Working,
+                agent::State::Blocked => AgentState::Blocked,
             };
             (a.name().to_owned(), state)
         });
