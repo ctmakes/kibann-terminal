@@ -49,8 +49,9 @@ installed copies update to.
    scripts/bump-version.sh 0.2.0
    ```
 
-   It sets the version in `app/package.json`, `app/src-tauri/Cargo.toml`
-   and `app/src-tauri/tauri.conf.json` (and the lock files), dates the
+   It sets the version, which lives only in the root `Cargo.toml`
+   (`[workspace.package]`; every crate and Tauri read it there, and
+   `Cargo.lock` follows), dates the
    changelog section, commits "Release 0.2.0", pushes it to `main` (and
    your branch), then tags `v0.2.0` and pushes the tag. `--local` changes
    the files only.
