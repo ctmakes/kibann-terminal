@@ -1,9 +1,9 @@
 // The layout model the daemon owns (`crates/daemon/src/layout.rs`), in
-// TypeScript for the browser harness, which has no daemon. Keep the two in
-// step; `model.test.ts` mirrors the Rust tests.
+// TypeScript for the browser harness, which has no daemon. `model.test.ts`
+// replays the daemon's cases (fixtures/layout) and fails where they differ.
 
 import type { Layout, LayoutTab } from "../proto";
-import { equalize, leaf, panes, pathOf, remove, setRatio, split, type Dir, type Path, type PaneId } from "./layout";
+import { equalize, leaf, nodeAt, panes, pathOf, remove, setRatio, split, type Dir, type Path, type PaneId } from "./layout";
 
 export type TabId = number;
 
@@ -91,7 +91,7 @@ export class Model {
 
   setRatio(id: TabId, path: Path, ratio: number): boolean {
     const tab = this.tab(id);
-    if (!tab || !Number.isFinite(ratio)) return false;
+    if (!tab || !Number.isFinite(ratio) || nodeAt(tab.tree, path)?.kind !== "split") return false;
     tab.tree = setRatio(tab.tree, path, ratio);
     tab.zoomed = null;
     return true;

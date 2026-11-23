@@ -1,7 +1,8 @@
 //! The workspace layout the daemon owns: tabs of split trees, which pane has
 //! focus in each, and which tab is shown. Pure data; spawning and closing
-//! shells is the server's job. Mirrors `app/src/workspace/model.ts`, which
-//! the browser harness uses in place of the daemon.
+//! shells is the server's job. `app/src/workspace/model.ts` is the same
+//! model for the browser harness, which has no daemon; it must replay
+//! `fixtures/layout/cases.jsonl`, written here, step for step.
 //!
 //! Geometry (pixels, dividers, which pane is to the left) stays in the app:
 //! the daemon never knows the window's size.
@@ -388,5 +389,388 @@ mod tests {
         assert_eq!(tab(&m, 0).zoomed, Some(2));
         m.remove(1);
         assert_eq!(tab(&m, 0).zoomed, None);
+    }
+
+    /// One call on the model, as the shared cases name it.
+    #[derive(serde::Serialize)]
+    #[serde(tag = "op", rename_all = "snake_case")]
+    enum Op {
+        NewTab {
+            pane: PaneId,
+            focus: bool,
+        },
+        AddTab {
+            tree: Tree,
+            focused: PaneId,
+            title: Option<String>,
+            show: bool,
+        },
+        Split {
+            target: PaneId,
+            dir: Dir,
+            pane: PaneId,
+            focus: bool,
+        },
+        Remove {
+            pane: PaneId,
+        },
+        Focus {
+            pane: PaneId,
+        },
+        Activate {
+            tab: TabId,
+        },
+        SetRatio {
+            tab: TabId,
+            path: Vec<Step>,
+            ratio: f64,
+        },
+        Equalize {
+            tab: TabId,
+        },
+        Zoom {
+            tab: TabId,
+            pane: Option<PaneId>,
+        },
+    }
+
+    fn run(m: &mut Model, op: &Op) -> serde_json::Value {
+        use serde_json::json;
+        match op {
+            Op::NewTab { pane, focus } => json!(m.new_tab(*pane, *focus)),
+            Op::AddTab {
+                tree,
+                focused,
+                title,
+                show,
+            } => {
+                json!(m.add_tab(tree.clone(), *focused, title.clone(), *show))
+            }
+            Op::Split {
+                target,
+                dir,
+                pane,
+                focus,
+            } => json!(m.split(*target, *dir, *pane, *focus)),
+            Op::Remove { pane } => json!(m.remove(*pane)),
+            Op::Focus { pane } => json!(m.focus(*pane)),
+            Op::Activate { tab } => json!(m.activate(*tab)),
+            Op::SetRatio { tab, path, ratio } => json!(m.set_ratio(*tab, path, *ratio)),
+            Op::Equalize { tab } => json!(m.equalize(*tab)),
+            Op::Zoom { tab, pane } => json!(m.zoom(*tab, *pane)),
+        }
+    }
+
+    /// Scripts for both models: each step's result and the layout after it.
+    fn cases() -> Vec<(&'static str, Vec<Op>)> {
+        use Op::*;
+        let three = || {
+            vec![
+                NewTab {
+                    pane: 1,
+                    focus: true,
+                },
+                Split {
+                    target: 1,
+                    dir: Dir::Row,
+                    pane: 2,
+                    focus: true,
+                },
+                Split {
+                    target: 2,
+                    dir: Dir::Column,
+                    pane: 3,
+                    focus: true,
+                },
+            ]
+        };
+        let with = |mut a: Vec<Op>, b: Vec<Op>| {
+            a.extend(b);
+            a
+        };
+        vec![
+            (
+                "splits, with and without focus",
+                with(
+                    three(),
+                    vec![
+                        Focus { pane: 1 },
+                        Split {
+                            target: 1,
+                            dir: Dir::Column,
+                            pane: 4,
+                            focus: false,
+                        },
+                        Split {
+                            target: 9,
+                            dir: Dir::Row,
+                            pane: 5,
+                            focus: false,
+                        },
+                    ],
+                ),
+            ),
+            (
+                "removing moves focus back and drops emptied tabs",
+                with(
+                    three(),
+                    vec![
+                        NewTab {
+                            pane: 4,
+                            focus: true,
+                        },
+                        NewTab {
+                            pane: 5,
+                            focus: false,
+                        },
+                        Remove { pane: 3 },
+                        Remove { pane: 4 },
+                        Remove { pane: 5 },
+                        Remove { pane: 1 },
+                        Remove { pane: 1 },
+                        Remove { pane: 2 },
+                        NewTab {
+                            pane: 6,
+                            focus: false,
+                        },
+                    ],
+                ),
+            ),
+            (
+                "removing the focused first pane, and a middle tab",
+                vec![
+                    NewTab {
+                        pane: 1,
+                        focus: true,
+                    },
+                    Split {
+                        target: 1,
+                        dir: Dir::Row,
+                        pane: 2,
+                        focus: false,
+                    },
+                    Split {
+                        target: 2,
+                        dir: Dir::Row,
+                        pane: 3,
+                        focus: false,
+                    },
+                    Remove { pane: 1 },
+                    NewTab {
+                        pane: 4,
+                        focus: true,
+                    },
+                    NewTab {
+                        pane: 5,
+                        focus: false,
+                    },
+                    Activate { tab: 2 },
+                    Remove { pane: 4 },
+                ],
+            ),
+            (
+                "focus shows the tab and ends zoom on another pane",
+                with(
+                    three(),
+                    vec![
+                        NewTab {
+                            pane: 4,
+                            focus: true,
+                        },
+                        Zoom {
+                            tab: 1,
+                            pane: Some(2),
+                        },
+                        Focus { pane: 2 },
+                        Focus { pane: 3 },
+                        Activate { tab: 2 },
+                        Activate { tab: 99 },
+                        Focus { pane: 99 },
+                    ],
+                ),
+            ),
+            (
+                "ratios are clamped; a leaf has none",
+                with(
+                    three(),
+                    vec![
+                        SetRatio {
+                            tab: 1,
+                            path: vec![],
+                            ratio: 2.0,
+                        },
+                        SetRatio {
+                            tab: 1,
+                            path: vec![Step::B],
+                            ratio: 0.2,
+                        },
+                        SetRatio {
+                            tab: 1,
+                            path: vec![Step::A],
+                            ratio: 0.2,
+                        },
+                        SetRatio {
+                            tab: 1,
+                            path: vec![Step::B, Step::A],
+                            ratio: 0.3,
+                        },
+                        SetRatio {
+                            tab: 9,
+                            path: vec![],
+                            ratio: 0.3,
+                        },
+                        SetRatio {
+                            tab: 1,
+                            path: vec![],
+                            ratio: -1.0,
+                        },
+                    ],
+                ),
+            ),
+            (
+                "equalize shares runs in one direction",
+                vec![
+                    NewTab {
+                        pane: 1,
+                        focus: true,
+                    },
+                    Split {
+                        target: 1,
+                        dir: Dir::Row,
+                        pane: 2,
+                        focus: true,
+                    },
+                    Split {
+                        target: 2,
+                        dir: Dir::Row,
+                        pane: 3,
+                        focus: true,
+                    },
+                    Split {
+                        target: 3,
+                        dir: Dir::Column,
+                        pane: 4,
+                        focus: true,
+                    },
+                    SetRatio {
+                        tab: 1,
+                        path: vec![],
+                        ratio: 0.8,
+                    },
+                    Equalize { tab: 1 },
+                    Equalize { tab: 9 },
+                ],
+            ),
+            (
+                "zoom needs two panes; removing ends it",
+                vec![
+                    NewTab {
+                        pane: 1,
+                        focus: true,
+                    },
+                    Zoom {
+                        tab: 1,
+                        pane: Some(1),
+                    },
+                    Split {
+                        target: 1,
+                        dir: Dir::Row,
+                        pane: 2,
+                        focus: false,
+                    },
+                    Zoom {
+                        tab: 1,
+                        pane: Some(2),
+                    },
+                    Zoom {
+                        tab: 1,
+                        pane: Some(9),
+                    },
+                    Split {
+                        target: 1,
+                        dir: Dir::Column,
+                        pane: 3,
+                        focus: false,
+                    },
+                    Zoom {
+                        tab: 1,
+                        pane: Some(3),
+                    },
+                    Zoom { tab: 1, pane: None },
+                    Zoom {
+                        tab: 1,
+                        pane: Some(2),
+                    },
+                    Remove { pane: 1 },
+                    Remove { pane: 3 },
+                    Zoom { tab: 9, pane: None },
+                ],
+            ),
+            (
+                "a workspace's tabs, titled, shown or not",
+                vec![
+                    AddTab {
+                        tree: Tree::Split {
+                            dir: Dir::Row,
+                            ratio: 0.3,
+                            a: Box::new(Tree::leaf(1)),
+                            b: Box::new(Tree::leaf(2)),
+                        },
+                        focused: 2,
+                        title: Some("build".into()),
+                        show: false,
+                    },
+                    AddTab {
+                        tree: Tree::leaf(3),
+                        focused: 3,
+                        title: None,
+                        show: false,
+                    },
+                    AddTab {
+                        tree: Tree::leaf(4),
+                        focused: 4,
+                        title: Some("logs".into()),
+                        show: true,
+                    },
+                    Split {
+                        target: 2,
+                        dir: Dir::Row,
+                        pane: 5,
+                        focus: true,
+                    },
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn the_shared_cases_match() {
+        let mut text = String::new();
+        for (name, ops) in cases() {
+            let mut m = Model::default();
+            let steps: Vec<serde_json::Value> = ops
+                .iter()
+                .map(|op| {
+                    let result = run(&mut m, op);
+                    let mut step = serde_json::to_value(op).unwrap();
+                    step["result"] = result;
+                    step["layout"] = serde_json::to_value(m.layout()).unwrap();
+                    step
+                })
+                .collect();
+            let case = serde_json::json!({ "name": name, "steps": steps });
+            text.push_str(&serde_json::to_string(&case).unwrap());
+            text.push('\n');
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/layout/cases.jsonl");
+        if std::env::var_os("UPDATE_LAYOUT").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        assert!(
+            std::fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()),
+            "stale fixtures/layout/cases.jsonl: UPDATE_LAYOUT=1 cargo test -p daemon --lib layout"
+        );
     }
 }

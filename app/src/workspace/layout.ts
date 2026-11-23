@@ -39,6 +39,16 @@ export function pathOf(t: Tree, pane: PaneId): Path | null {
   return b ? ["b", ...b] : null;
 }
 
+/** The node at `path`, or null when the path runs through a leaf. */
+export function nodeAt(t: Tree, path: Path): Tree | null {
+  let n: Tree = t;
+  for (const step of path) {
+    if (n.kind !== "split") return null;
+    n = n[step];
+  }
+  return n;
+}
+
 function at(t: Tree, path: Path): Tree {
   return path.reduce((n, step) => (n.kind === "split" ? n[step] : n), t);
 }

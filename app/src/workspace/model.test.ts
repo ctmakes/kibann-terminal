@@ -1,71 +1,64 @@
-// Mirrors the tests in crates/daemon/src/layout.rs.
+// The daemon's layout model writes these cases (crates/daemon/src/layout.rs,
+// `the_shared_cases_match`): every call's result and the layout after it.
+// This model must give the same, step for step.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { panes } from "./layout";
-import { Model } from "./model";
+import type { Layout, Tree } from "../proto";
+import type { Dir, Path, PaneId } from "./layout";
+import { Model, type TabId } from "./model";
 
-/** 1 | (2 over 3), in tab 1. */
-function three(): Model {
-  const m = new Model();
-  m.newTab(1, true);
-  m.split(1, "row", 2, true);
-  m.split(2, "column", 3, true);
-  return m;
+type Op =
+  | { op: "new_tab"; pane: PaneId; focus: boolean }
+  | { op: "add_tab"; tree: Tree; focused: PaneId; title: string | null; show: boolean }
+  | { op: "split"; target: PaneId; dir: Dir; pane: PaneId; focus: boolean }
+  | { op: "remove"; pane: PaneId }
+  | { op: "focus"; pane: PaneId }
+  | { op: "activate"; tab: TabId }
+  | { op: "set_ratio"; tab: TabId; path: Path; ratio: number }
+  | { op: "equalize"; tab: TabId }
+  | { op: "zoom"; tab: TabId; pane: PaneId | null };
+
+type Step = Op & { result: unknown; layout: Layout };
+
+function run(m: Model, s: Op): unknown {
+  switch (s.op) {
+    case "new_tab":
+      return m.newTab(s.pane, s.focus);
+    case "add_tab":
+      return m.addTab(s.tree, s.focused, s.title, s.show);
+    case "split":
+      return m.split(s.target, s.dir, s.pane, s.focus);
+    case "remove":
+      return m.remove(s.pane);
+    case "focus":
+      return m.focus(s.pane);
+    case "activate":
+      return m.activate(s.tab);
+    case "set_ratio":
+      return m.setRatio(s.tab, s.path, s.ratio);
+    case "equalize":
+      return m.equalize(s.tab);
+    case "zoom":
+      return m.zoom(s.tab, s.pane);
+  }
 }
 
-describe("layout model", () => {
-  it("splits right or below, focusing the new pane when asked", () => {
-    const m = three();
-    expect(panes(m.layout.tabs[0].tree)).toEqual([1, 2, 3]);
-    expect(m.layout.tabs[0].focused).toBe(3);
-    m.focus(1);
-    expect(m.split(1, "column", 4, false)).toBe(1);
-    expect(m.layout.tabs[0].focused).toBe(1);
-    expect(m.split(9, "row", 5, false)).toBeNull();
-  });
+const FILE = fileURLToPath(new URL("../../../fixtures/layout/cases.jsonl", import.meta.url));
+const CASES = readFileSync(FILE, "utf8")
+  .split("\n")
+  .filter((l) => l.trim())
+  .map((l) => JSON.parse(l) as { name: string; steps: Step[] });
 
-  it("removes panes, moving focus back, and drops emptied tabs", () => {
-    const m = three();
-    m.remove(3);
-    expect(panes(m.layout.tabs[0].tree)).toEqual([1, 2]);
-    expect(m.layout.tabs[0].focused).toBe(2);
-    const t2 = m.newTab(4, true);
-    const t3 = m.newTab(5, false);
-    expect(m.layout.active).toBe(t2);
-    m.remove(4);
-    expect(m.layout.active).toBe(t3);
-    m.remove(5);
-    expect(m.layout.active).toBe(1);
-    m.remove(1);
-    m.remove(2);
-    expect(m.layout).toEqual({ tabs: [], active: null });
-    expect(m.newTab(6, false)).toBe(4);
-  });
-
-  it("focus shows the tab and ends zoom on another pane", () => {
-    const m = three();
-    m.newTab(4, true);
-    m.zoom(1, 2);
-    expect(m.layout.tabs[0].zoomed).toBe(2);
-    m.focus(2);
-    expect(m.layout.tabs[0].zoomed).toBe(2);
-    expect(m.layout.active).toBe(1);
-    m.focus(3);
-    expect(m.layout.tabs[0].zoomed).toBeNull();
-  });
-
-  it("never zooms a lone pane", () => {
-    const m = new Model();
-    m.newTab(1, true);
-    m.zoom(1, 1);
-    expect(m.layout.tabs[0].zoomed).toBeNull();
-    m.split(1, "row", 2, false);
-    m.zoom(1, 2);
-    m.remove(1);
-    expect(m.layout.tabs[0].zoomed).toBeNull();
-  });
-
-  it("starts after the ids of a given layout", () => {
-    const m = new Model({ tabs: [{ id: 7, tree: { kind: "leaf", pane: 1 }, focused: 1, zoomed: null }], active: 7 });
-    expect(m.newTab(2, false)).toBe(8);
-  });
+describe("layout model (fixtures/layout, from the daemon's)", () => {
+  for (const c of CASES) {
+    it(c.name, () => {
+      const m = new Model();
+      c.steps.forEach(({ result, layout, ...op }, i) => {
+        const what = `step ${i + 1}: ${JSON.stringify(op)}`;
+        expect(run(m, op), what).toEqual(result);
+        expect(m.layout, what).toEqual(layout);
+      });
+    });
+  }
 });
