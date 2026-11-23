@@ -18,9 +18,17 @@ function sources(dir: string): string[] {
 // shipped with the screen's layout rules in one, and the window lost its
 // terminals. Rules go in a .css file the module imports.
 describe("the release CSP", () => {
+  const root = fileURLToPath(new URL(".", import.meta.url));
+  const offending = (re: RegExp) => sources(root).filter((f) => re.test(readFileSync(f, "utf8")));
+
   it("isn't broken by a <style> element made at run time", () => {
-    const root = fileURLToPath(new URL(".", import.meta.url));
-    const found = sources(root).filter((f) => /createElement\(\s*["'`]style["'`]\s*\)/.test(readFileSync(f, "utf8")));
-    expect(found).toEqual([]);
+    expect(offending(/createElement\(\s*["'`]style["'`]\s*\)/)).toEqual([]);
+  });
+
+  // The nonce drops inline style attributes too: in markup set as HTML, and
+  // set with setAttribute. `el.style.x = …` (CSSOM) is allowed.
+  it("isn't broken by style attributes or <style> in markup", () => {
+    expect(offending(/setAttribute\(\s*["'`]style["'`]/)).toEqual([]);
+    expect(offending(/["'`][^"'`\n]*(<style\b|\sstyle=)/)).toEqual([]);
   });
 });
