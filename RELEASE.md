@@ -37,8 +37,8 @@ installed copies update to.
 
 ## Each release
 
-1. **CI green** on `main` (it's paused; run it: `gh workflow enable CI`,
-   `gh workflow run CI --ref main`, disable again once it's running).
+1. **CI green** on `main`: every push runs it (Rust on macOS, Linux and
+   Windows, and the web tests). `gh run list --workflow CI --limit 1`.
 2. **CHANGELOG.md:** a section `## [0.2.0] - Unreleased`, in plain words.
    It becomes the release notes. Say so when an update ends sessions (the
    protocol changed: `PROTOCOL_VERSION` in `crates/proto/src/wire.rs`).
