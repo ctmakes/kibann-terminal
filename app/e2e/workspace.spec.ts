@@ -166,16 +166,6 @@ test.describe("splits", () => {
     s = await state(page);
     expect(s.zoomed).toBeNull();
     expect(s.panes).toHaveLength(2);
-
-    // The menu item firing too, before or after the key, zooms only once.
-    const menu = () => page.evaluate(() => (window as any).__ws.ws.runFromMenu({ kind: "zoom" }));
-    await menu();
-    await press(page, "Meta+Shift+Enter");
-    expect((await state(page)).zoomed).toBe(2);
-    await press(page, "Meta+Shift+Enter");
-    await menu();
-    await settle(page);
-    expect((await state(page)).zoomed).toBeNull();
   });
 
   test("double-clicking a pane's header zooms it, and again comes back", async ({ page }) => {

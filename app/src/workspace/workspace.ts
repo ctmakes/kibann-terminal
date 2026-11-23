@@ -61,8 +61,6 @@ import "./workspace.css";
 
 /** How far one resize shortcut moves a divider, in CSS px (Ghostty's 10). */
 const RESIZE_STEP = 10;
-/** A menu item firing right before or after the same shortcut is that shortcut. */
-const MENU_ECHO_MS = 300;
 
 export interface Pane {
   id: PaneId;
@@ -161,7 +159,6 @@ export class Workspace {
   readonly panes = new Map<PaneId, Pane>();
   active: Tab | null = null;
   private readonly platform: Platform;
-  private lastRun: { action: string; from: "key" | "menu"; at: number } | null = null;
   private readonly cleanups: Array<() => void> = [];
   /** Agent status by pane, from the daemon. */
   status: StatusMap = {};
@@ -469,9 +466,14 @@ export class Workspace {
     this.opts.backend.act(a).catch((e) => console.warn(`kibann: ${a.t} failed:`, e));
   }
 
-  /** A menu item fired. */
+  /**
+   * A menu item fired (macOS; the other platforms have no menu bar). A
+   * shortcut never arrives as both its key and its menu item: the page
+   * prevents every key it maps, and WebKit hands the menu only keys the
+   * page leaves alone.
+   */
   runFromMenu(action: Action): void {
-    this.runOnce(action, "menu");
+    this.run(action);
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -491,7 +493,7 @@ export class Workspace {
         e.preventDefault();
         e.stopPropagation();
         if (e.key === "Escape") this.settings.hide();
-        else this.runOnce(action!, "key");
+        else this.run(action!);
       } else if (action) e.preventDefault();
       return;
     }
@@ -500,34 +502,14 @@ export class Workspace {
     if (this.shortcuts.visible && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
       e.preventDefault();
       e.stopPropagation();
-      // Its own shortcut toggles it closed through runOnce, so the menu
-      // item's echo of the same key is skipped instead of reopening it.
+      // Its own shortcut closes it by toggling.
       if (action?.kind !== "shortcuts") this.shortcuts.hide();
-      if (action) this.runOnce(action, "key");
+      if (action) this.run(action);
       return;
     }
     if (!action) return;
     e.preventDefault();
     e.stopPropagation();
-    this.runOnce(action, "key");
-  }
-
-  /**
-   * A shortcut must not run twice, as a key press in the page and as its
-   * menu item firing (in either order): running a toggle (zoom) twice would
-   * undo it. The second within MENU_ECHO_MS is skipped. On macOS it never
-   * comes (a key the page prevents doesn't reach the menu; checked in a
-   * release build, 0.8), nor on Linux (GTK runs the accelerator and the page
-   * never sees the key); kept for WebView2, not yet checked.
-   */
-  private runOnce(action: Action, from: "key" | "menu"): void {
-    const key = JSON.stringify(action);
-    const last = this.lastRun;
-    if (last && last.action === key && last.from !== from && performance.now() - last.at < MENU_ECHO_MS) {
-      this.lastRun = null;
-      return;
-    }
-    this.lastRun = { action: key, from, at: performance.now() };
     this.run(action);
   }
 
@@ -815,7 +797,7 @@ export class Workspace {
       key: (k, granted) => {
         const action = actionFor({ ...k, repeat: false, isComposing: false, keyCode: 0 }, this.platform);
         if (!action || (action.kind === "close" && !granted.type)) return;
-        this.runOnce(action, "key");
+        this.run(action);
       },
       release: () => this.focusedPane?.view?.focus(),
       error: (part, message) => {
