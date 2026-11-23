@@ -8,7 +8,7 @@
 
 import type { AgentState, PaneDir } from "../proto";
 import type { PaneId } from "./layout";
-import { headerParts, type GitMap } from "./pane";
+import { headerParts, paneName, type GitMap } from "./pane";
 import { makeDot, showDot, type StatusMap } from "./status";
 import { GEAR_ICON } from "./settings";
 import { tooltip } from "./tooltip";
@@ -549,7 +549,7 @@ export class Sidebar {
   }
 
   private fillRow(r: Row, p: CardPane, place: PaneDir | undefined, status: StatusMap, badge: string, tabbed: boolean): void {
-    const name = p.title || "shell";
+    const name = paneName(p.title);
     r.title.textContent = name;
     r.badge.textContent = badge;
     const tab = `Tab ${p.tab + 1}`;

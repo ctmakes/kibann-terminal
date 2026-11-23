@@ -9,6 +9,11 @@ export const HEADER_H = 20;
 /** Every pane's place, by pane id (JSON object keys are strings). */
 export type GitMap = Record<string, PaneDir>;
 
+/** What a pane is called: its program's title, or "shell" until it sets one. */
+export function paneName(title: string | undefined): string {
+  return title || "shell";
+}
+
 export type PartKind = "place" | "worktree" | "branch" | "op" | "conflicts" | "changed" | "sync";
 
 export interface Part {

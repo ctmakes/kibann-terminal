@@ -15,7 +15,7 @@ import type { Transport } from "../transport/types";
 import type { Layout, LayoutAction, Settings } from "../proto";
 import type { LayoutBackend } from "./backend";
 import { actionFor, keyFor, menuKeys, setKeybinds, type Action } from "./keymap";
-import { HEADER_H, PaneHeader, branchOf, type GitMap } from "./pane";
+import { HEADER_H, PaneHeader, branchOf, paneName, type GitMap } from "./pane";
 import { ThemePicker } from "./picker";
 import { WorkspacePicker, type WorkspaceApi } from "./workspaces";
 import { SettingsModal, type ConfigInfo, type SettingsApi, type SettingsTab, type UpdateStatus } from "./settings";
@@ -796,7 +796,7 @@ export class Workspace {
       t.button.style.background = on ? COLORS.activeTab : COLORS.tab;
       t.button.style.color = on ? COLORS.activeText : COLORS.text;
       const branch = branchOf(this.git[String(t.focused)]);
-      const title = (t.title || this.panes.get(t.focused)?.title || "shell") + (branch ? ` · ${branch}` : "");
+      const title = this.tabName(t) + (branch ? ` · ${branch}` : "");
       t.button.querySelector<HTMLSpanElement>(".tab-title")!.textContent = title;
       t.button.title = title;
       t.button.querySelector<HTMLSpanElement>(".tab-number")!.textContent = String(i + 1);
@@ -964,11 +964,16 @@ export class Workspace {
     });
   }
 
+  /** What a tab is called: the name it was given, or its focused pane's. */
+  private tabName(t: Tab): string {
+    return t.title || paneName(this.panes.get(t.focused)?.title);
+  }
+
   /** The window as parts see it. */
   private partState(): PartState {
     const tabs = this.tabs.map((t) => ({
       id: t.id,
-      title: t.title || this.panes.get(t.focused)?.title || "shell",
+      title: this.tabName(t),
       active: t === this.active,
       panes: panes(t.tree),
       focused: t.focused,
@@ -988,7 +993,7 @@ export class Workspace {
           {
             id,
             tab: t.id,
-            title: p.title || "shell",
+            title: paneName(p.title),
             focused: t.focused === id,
             shown: onScreen,
             cwd: place?.shown ?? "",
