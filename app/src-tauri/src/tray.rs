@@ -346,11 +346,11 @@ pub fn on_menu(app: &AppHandle, id: &str) {
 pub fn quit(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let open = app
-        .try_state::<crate::Term>()
+        .try_state::<crate::link::Term>()
         .and_then(|t| t.client().ok()?.layout().ok())
         .map_or(0, |l| l.panes().len());
     if open == 0 {
-        crate::quit_ending_sessions(app);
+        crate::menu::quit_ending_sessions(app);
         return;
     }
     show_window(app);
@@ -365,7 +365,7 @@ pub fn quit(app: &AppHandle) {
         ))
         .show(move |quit| {
             if quit {
-                crate::quit_ending_sessions(&handle);
+                crate::menu::quit_ending_sessions(&handle);
             }
         });
 }
