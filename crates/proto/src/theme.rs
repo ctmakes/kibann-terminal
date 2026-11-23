@@ -88,7 +88,17 @@ selection-foreground = #1f2328
 impl Theme {
     /// The built-in dark theme.
     pub fn kibann_dark() -> Self {
-        Self::parse(KIBANN_DARK, None).0
+        // It sets every color, so it needs no base of its own.
+        let blank = Theme {
+            palette: vec![0; 16],
+            background: 0,
+            foreground: 0,
+            cursor: None,
+            cursor_text: None,
+            selection_bg: None,
+            selection_fg: None,
+        };
+        Self::parse(KIBANN_DARK, Some(&blank)).0
     }
 
     /// The built-in light theme.
@@ -101,10 +111,7 @@ impl Theme {
     /// for each line it couldn't use; unknown keys are skipped silently, as
     /// Ghostty's theme files may carry other settings.
     pub fn parse(text: &str, base: Option<&Theme>) -> (Theme, Vec<String>) {
-        let mut t = match base {
-            Some(b) => b.clone(),
-            None => dark_base(),
-        };
+        let mut t = base.cloned().unwrap_or_else(Theme::kibann_dark);
         let mut errors = Vec::new();
         for entry in crate::config::entries(text) {
             let (n, key, value) = match entry {
@@ -154,22 +161,6 @@ impl Theme {
     /// Whether it's a dark theme (its background is dark).
     pub fn is_dark(&self) -> bool {
         luminance(self.background) < DARK_BELOW
-    }
-}
-
-/// The dark theme without parsing (parse's own fallback).
-fn dark_base() -> Theme {
-    Theme {
-        palette: vec![
-            0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6,
-            0x666666, 0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
-        ],
-        background: 0x000000,
-        foreground: 0xffffff,
-        cursor: None,
-        cursor_text: None,
-        selection_bg: None,
-        selection_fg: None,
     }
 }
 
@@ -352,7 +343,9 @@ mod tests {
     #[test]
     fn the_built_in_themes() {
         let d = Theme::kibann_dark();
-        assert_eq!(d, dark_base(), "the text and the fallback agree");
+        assert_eq!(d.palette[15], 0xeaeaea);
+        assert_eq!((d.background, d.foreground), (0x000000, 0xffffff));
+        assert_eq!(Theme::parse(KIBANN_DARK, None), (d.clone(), vec![]));
         assert!(d.is_dark());
         let l = Theme::kibann_light();
         assert!(!l.is_dark());
