@@ -451,6 +451,10 @@ mod tests {
                 "/** The parts API's version (`kibann.api`). */\nexport const PART_API = {};\n",
                 part::PART_API
             ),
+            format!(
+                "/** The daemon's wire protocol (`Hello.version`). */\nexport const PROTOCOL_VERSION = {};\n",
+                wire::PROTOCOL_VERSION
+            ),
         ]
         .join("\n");
         // Set (absolute) by .cargo/config.toml, like ts-rs's own output.

@@ -57,3 +57,6 @@ export const DARK_BELOW = 0.4;
 
 /** The parts API's version (`kibann.api`). */
 export const PART_API = 1;
+
+/** The daemon's wire protocol (`Hello.version`). */
+export const PROTOCOL_VERSION = 10;

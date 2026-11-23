@@ -7,6 +7,7 @@ use std::io::{self, Read, Write};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use ts_rs::TS;
 
 use std::collections::BTreeMap;
 
@@ -31,8 +32,9 @@ pub type SessionId = PaneId;
 /// Matches a reply to its request.
 pub type ReqId = u32;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "t", rename_all = "snake_case")]
+#[ts(export)]
 pub enum ClientMsg {
     /// First message on a connection. Replied with [`Reply::Hello`].
     Hello {
@@ -92,6 +94,7 @@ pub enum ClientMsg {
         pane: PaneId,
         agent: String,
         state: AgentState,
+        #[ts(type = "number | null")]
         seq: Option<u64>,
     },
     /// Everything uncommitted in `pane`'s checkout. Replied with
@@ -129,6 +132,7 @@ pub enum ClientMsg {
     },
     Ack {
         session: SessionId,
+        #[ts(type = "number")]
         seq: u64,
     },
     RequestFull {
@@ -174,8 +178,9 @@ impl ClientMsg {
 }
 
 /// What [`ClientMsg::Read`] returns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum ReadSource {
     /// The screen as the program drew it, row by row.
     Visible,
@@ -188,7 +193,8 @@ pub enum ReadSource {
 /// [`ClientMsg::Status`]; the emulator ignores it, so nothing shows.
 pub const MARK_OSC: u32 = 7770;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PaneInfo {
     pub id: PaneId,
     pub tab: TabId,
@@ -201,11 +207,13 @@ pub struct PaneInfo {
     pub git: Option<GitInfo>,
     /// The program running in it, `argv[0]` first, when it isn't the shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub program: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "t", rename_all = "snake_case")]
+#[ts(export)]
 pub enum Reply {
     Hello {
         version: u32,
@@ -256,8 +264,9 @@ pub enum Reply {
 
 /// Why a request failed, for a program to act on; [`Reply::Error`]'s
 /// message is for people.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum ErrorCode {
     /// No such pane, tab or split.
     NotFound,
@@ -273,8 +282,10 @@ pub enum ErrorCode {
     Failed,
     /// This daemon doesn't know the request: it's older than the client.
     Unsupported,
-    /// A code this build doesn't know, from a newer daemon.
+    /// A code this build doesn't know, from a newer daemon. (Not in the
+    /// TypeScript: a client there sees the code itself.)
     #[serde(other)]
+    #[ts(skip)]
     Other,
 }
 
@@ -297,8 +308,9 @@ impl ErrorCode {
 /// frames on can read them as raw JSON with [`RawServerMsg`]. Externally
 /// tagged (`{"frame": {...}}`), because serde can't keep raw JSON inside an
 /// internally tagged enum.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, concrete(F = Frame))]
 pub enum ServerMsg<F = Frame> {
     Reply {
         req: ReqId,
