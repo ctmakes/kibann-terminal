@@ -19,7 +19,7 @@ use crate::{Frame, InputEvent, Resize};
 /// different versions can't talk, except for [`ClientMsg::Hello`], its
 /// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
 /// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -44,6 +44,11 @@ pub enum ClientMsg {
     /// [`ServerMsg::Git`].
     Watch {
         req: ReqId,
+        /// This connection shows the panes to someone (the app's window), so
+        /// its focused pane counts as looked at: an agent finishing there
+        /// isn't "done". A tool that only follows changes (the diff viewer)
+        /// says false.
+        shows: bool,
     },
     /// Replied with [`Reply::Layout`].
     GetLayout {
@@ -349,7 +354,10 @@ mod tests {
                 req: 1,
                 version: PROTOCOL_VERSION,
             },
-            ClientMsg::Watch { req: 2 },
+            ClientMsg::Watch {
+                req: 2,
+                shows: true,
+            },
             ClientMsg::Act {
                 req: 3,
                 action: Action::Split {

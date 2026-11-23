@@ -404,7 +404,7 @@ mod term {
             }
             _ => {}
         }))?;
-        client.watch()?;
+        client.follow()?;
 
         let input = tx;
         std::thread::spawn(move || {

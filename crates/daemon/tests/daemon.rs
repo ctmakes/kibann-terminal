@@ -627,6 +627,46 @@ fn next_status(rx: &Receiver<Ev>, pane: SessionId, state: Option<AgentState>) {
 }
 
 #[test]
+fn a_tool_that_follows_the_panes_doesnt_see_them() {
+    let path = socket();
+    let dir = path.parent().unwrap().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", dir.join("claude")).unwrap();
+    std::fs::write(
+        dir.join("agent.sh"),
+        "printf '\\033]0;\\342\\240\\213 Working\\007'; echo busy; read x\n\
+         printf '\\033]0;\\342\\234\\263 Claude Code\\007'; echo finished; read y\n",
+    )
+    .unwrap();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    // The diff viewer, say, with the app closed.
+    let tool = Client::connect(&path, f).unwrap();
+    let first = sh(&tool, None);
+    tool.follow().unwrap();
+    let script = format!(
+        "set -m; {0}/claude {0}/agent.sh; exec /bin/sh",
+        dir.display()
+    );
+    let (p, _) = tool
+        .act(Action::Split {
+            pane: first,
+            dir: Dir::Row,
+            cwd: None,
+            argv: Some(vec!["/bin/sh".into(), "-c".into(), script]),
+            focus: true,
+        })
+        .unwrap();
+    let p = p.unwrap();
+    next_status(&rx, p, Some(AgentState::Working));
+    // It finishes in the focused pane, but nobody is looking: done.
+    type_text(&tool, p, "\r");
+    next_status(&rx, p, Some(AgentState::Done));
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
 fn agents_are_detected_and_done_while_unseen() {
     let path = socket();
     // A fake Claude Code: a shell named `claude` that sets the title the

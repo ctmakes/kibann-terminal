@@ -102,6 +102,8 @@ struct State {
     next_conn: ConnId,
     /// Connections that get every layout change.
     watchers: HashSet<ConnId>,
+    /// The watchers that show the panes to someone (see [`ClientMsg::Watch`]).
+    viewers: HashSet<ConnId>,
     model: Model,
     /// Panes whose shell ended, with the exit code, newest last.
     ended: VecDeque<(PaneId, Option<u32>)>,
@@ -166,9 +168,9 @@ impl State {
     }
 
     /// The pane the user is looking at: the focused pane of the shown tab,
-    /// while an app watches.
+    /// while an app shows it.
     fn seen_pane(&self) -> Option<PaneId> {
-        if self.watchers.is_empty() {
+        if self.viewers.is_empty() {
             return None;
         }
         let layout = self.model.layout();
@@ -425,9 +427,12 @@ impl Daemon {
                     build: self.build.clone(),
                 },
             ),
-            ClientMsg::Watch { req } => {
+            ClientMsg::Watch { req, shows } => {
                 let mut st = self.lock();
                 st.watchers.insert(conn);
+                if shows {
+                    st.viewers.insert(conn);
+                }
                 let layout = st.model.layout().clone();
                 // Also as the first event, so a client can take every
                 // layout from one ordered stream.
@@ -1098,6 +1103,7 @@ impl Daemon {
             out.close();
         }
         st.watchers.remove(&conn);
+        st.viewers.remove(&conn);
         let me = self.me.clone();
         for (id, e) in st.sessions.iter_mut() {
             if e.viewer == Some(conn) {

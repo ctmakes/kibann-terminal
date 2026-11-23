@@ -159,8 +159,20 @@ impl Client {
 
     /// The layout now, and every change from then on as
     /// [`ClientEvent::Layout`].
+    /// Get every change from now on, as the window that shows the panes:
+    /// its focused pane counts as looked at.
     pub fn watch(&self) -> io::Result<Layout> {
-        match self.request(|req| ClientMsg::Watch { req })? {
+        self.subscribe(true)
+    }
+
+    /// Get every change from now on, without showing the panes to anyone
+    /// (a tool that follows them).
+    pub fn follow(&self) -> io::Result<Layout> {
+        self.subscribe(false)
+    }
+
+    fn subscribe(&self, shows: bool) -> io::Result<Layout> {
+        match self.request(|req| ClientMsg::Watch { req, shows })? {
             Reply::Layout { layout } => Ok(layout),
             other => Err(unexpected(other)),
         }
