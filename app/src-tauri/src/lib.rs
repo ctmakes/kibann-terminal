@@ -20,7 +20,7 @@ mod update;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use daemon::client::{Client, ClientEvent};
+use client::{Client, ClientEvent};
 use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::wire::{ClientMsg, SessionId};
 use proto::{InputEvent, Resize};
@@ -176,7 +176,7 @@ fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
     use proto::wire::PROTOCOL_VERSION;
 
     let dev = cfg!(debug_assertions);
-    let socket = daemon::paths::socket_path(dev);
+    let socket = proto::paths::socket_path(dev);
     let exe = std::env::current_exe()?;
     let command = vec![exe.into_os_string(), "--daemon".into()];
 
@@ -238,7 +238,7 @@ fn offer_restart(app: &AppHandle) {
             if !restart {
                 return;
             }
-            let socket = daemon::paths::socket_path(cfg!(debug_assertions));
+            let socket = proto::paths::socket_path(cfg!(debug_assertions));
             if let Ok(old) = Client::connect(&socket, |_| {}) {
                 let _ = stop_daemon(old, &socket);
             }
@@ -283,7 +283,7 @@ fn offer_update_restart(app: &AppHandle, running: &[String]) {
             if !restart {
                 return;
             }
-            let socket = daemon::paths::socket_path(cfg!(debug_assertions));
+            let socket = proto::paths::socket_path(cfg!(debug_assertions));
             if let Ok(old) = Client::connect(&socket, |_| {}) {
                 if keeps_layout && let Err(e) = service::save_layout(&old) {
                     eprintln!("kibann: saving the layout: {e}");
@@ -415,7 +415,7 @@ fn opened_from(client: &Client, pane: Option<PaneId>) -> std::path::PathBuf {
     });
     cwd.map(std::path::PathBuf::from)
         .filter(|d| d.is_dir())
-        .or_else(daemon::paths::home_dir)
+        .or_else(proto::paths::home_dir)
         .unwrap_or_else(|| std::path::PathBuf::from("/"))
 }
 
@@ -424,8 +424,8 @@ fn opened_from(client: &Client, pane: Option<PaneId>) -> std::path::PathBuf {
 async fn workspaces_list(
     state: State<'_, Term>,
     pane: Option<PaneId>,
-) -> Result<Vec<daemon::workspaces::Listed>, String> {
-    Ok(daemon::workspaces::list(&opened_from(&state.client, pane)))
+) -> Result<Vec<files::workspaces::Listed>, String> {
+    Ok(files::workspaces::list(&opened_from(&state.client, pane)))
 }
 
 /// Open a workspace: a built-in one by `name`, a file by `path`. A file that
@@ -438,14 +438,14 @@ async fn workspace_open(
     path: Option<String>,
     pane: Option<PaneId>,
 ) -> Result<bool, String> {
-    use daemon::workspaces;
+    use files::workspaces;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     // The service from an earlier version can't open workspaces; offer to
     // restart it rather than send what it can't read.
     if state.older {
         #[cfg(unix)]
         {
-            let socket = daemon::paths::socket_path(cfg!(debug_assertions));
+            let socket = proto::paths::socket_path(cfg!(debug_assertions));
             let running = service::running_programs(&socket).unwrap_or_default();
             offer_update_restart(&app, &running);
         }
@@ -506,11 +506,11 @@ async fn workspace_save(
     name: String,
     force: bool,
 ) -> Result<String, String> {
-    use daemon::workspaces;
+    use files::workspaces;
     if name.is_empty() || name.starts_with('.') || name.contains(['/', '\\']) {
         return Err(format!("{name:?} can't be a workspace's name"));
     }
-    let dir = daemon::paths::workspaces_dir().ok_or("no home directory")?;
+    let dir = proto::paths::workspaces_dir().ok_or("no home directory")?;
     let target = dir.join(format!("{name}.toml"));
     if target.exists() && !force {
         return Err(format!("{} exists", target.display()));
@@ -876,7 +876,7 @@ fn watch_config(app: AppHandle) {
         .name("config-watch".into())
         .spawn(move || {
             let mut last = theme::stamp();
-            let mut screens_last = daemon::screens::stamp();
+            let mut screens_last = files::screens::stamp();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 let now = theme::stamp();
@@ -1203,7 +1203,7 @@ pub fn run() {
             let handle = app.handle();
             // Without the daemon the app still works; sessions just end with
             // it, as before.
-            let local = || Client::in_process(on_event(handle.clone(), channels.clone()));
+            let local = || daemon::in_process(on_event(handle.clone(), channels.clone()));
             #[cfg(unix)]
             let (client, older) = match connect(handle, &channels) {
                 Ok(Connected::Current(client)) => (client, false),

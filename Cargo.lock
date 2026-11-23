@@ -521,6 +521,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "client",
+ "daemon",
+ "files",
+ "libc",
+ "proto",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
+name = "client"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "proto",
+ "serde_json",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -725,10 +747,10 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 name = "daemon"
 version = "0.1.0"
 dependencies = [
+ "client",
  "git",
  "libc",
  "proto",
- "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -1088,6 +1110,17 @@ dependencies = [
  "libc",
  "thiserror 1.0.69",
  "winapi",
+]
+
+[[package]]
+name = "files"
+version = "0.1.0"
+dependencies = [
+ "proto",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]
@@ -2186,7 +2219,10 @@ name = "kibann"
 version = "0.7.1"
 dependencies = [
  "block2",
+ "cli",
+ "client",
  "daemon",
+ "files",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -3234,6 +3270,7 @@ dependencies = [
 name = "proto"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "ts-rs",

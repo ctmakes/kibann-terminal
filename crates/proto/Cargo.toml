@@ -9,3 +9,6 @@ description = "Message types shared by the terminal backend and the web renderer
 serde = { version = "1", features = ["derive"] }
 ts-rs = "12"
 serde_json = { version = "1", features = ["raw_value"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

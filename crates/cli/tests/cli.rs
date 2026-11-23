@@ -1,4 +1,4 @@
-//! The `kibann` CLI (as `kibannd pane ...`) against a daemon with real shells.
+//! The `kibann` CLI (as `kibann-cli pane ...`) against a daemon with real shells.
 
 #![cfg(unix)]
 
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use daemon::client::Client;
+use client::Client;
 use daemon::server::{Daemon, PaneEnv, SocketConfig, serve_socket};
 use proto::layout::Action;
 use serde_json::Value;
@@ -38,7 +38,7 @@ fn start(tag: &str) -> (PathBuf, Arc<Daemon>, JoinHandle<std::io::Result<()>>) {
 
 /// Run `kibann args...` as if from a shell in `pane`.
 fn kibann(socket: &Path, pane: Option<&str>, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kibannd"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kibann-cli"));
     cmd.args(args).env("KIBANN_SOCKET", socket);
     match pane {
         Some(p) => cmd.env("KIBANN_PANE", p),
@@ -324,7 +324,7 @@ fn pane_list_shows_the_checkout() {
 
 /// `kibann args...` run in `dir`, with its own config and state folders.
 fn kibann_at(socket: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_kibannd"))
+    Command::new(env!("CARGO_BIN_EXE_kibann-cli"))
         .args(args)
         .current_dir(dir)
         .env("KIBANN_SOCKET", socket)
@@ -470,7 +470,7 @@ fn workspaces_are_checked_opened_and_saved() {
     assert_eq!(fails(&out, 1)["error"]["code"], "not_found");
 
     // watch runs the command again and again.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kibannd"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kibann-cli"))
         .args(["watch", "0.1", "--", "echo", "tick"])
         .stdout(std::process::Stdio::piped())
         .spawn()

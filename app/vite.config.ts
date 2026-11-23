@@ -19,7 +19,7 @@ const TYPES: Record<string, string> = {
 
 /**
  * The screens and parts for the workspace harness (src/dev/workspace.ts),
- * served as the app's `kpart://` scheme serves them (daemon::screens):
+ * served as the app's `kpart://` scheme serves them (files::screens):
  * `/kpart/NAME/...` is a part's file, with kibann.js put first in its
  * page; `/kscreens/` lists the screens and `/kscreens/NAME` is one.
  */

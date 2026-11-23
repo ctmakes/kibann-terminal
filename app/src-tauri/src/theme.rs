@@ -46,7 +46,7 @@ fn bundled() -> &'static [(&'static str, &'static str, bool)] {
 
 /// Where the config file and the user's themes live.
 pub fn config_dir() -> Option<PathBuf> {
-    daemon::paths::config_dir()
+    proto::paths::config_dir()
 }
 
 pub fn config_file() -> Option<PathBuf> {

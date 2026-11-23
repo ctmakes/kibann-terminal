@@ -1343,7 +1343,7 @@ mod unix {
             .socket
             .parent()
             .ok_or_else(|| io::Error::other("socket path has no directory"))?;
-        crate::paths::prepare_dir(dir)?;
+        proto::paths::prepare_dir(dir)?;
         let mut lock_path = cfg.socket.clone().into_os_string();
         lock_path.push(".lock");
         let _lock = lock_file(std::path::Path::new(&lock_path))?;

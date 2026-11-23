@@ -3,7 +3,7 @@ name = "daemon"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "kibannd: owns the terminal sessions so they outlive the app; plus the client the app uses"
+description = "kibannd: owns the terminal sessions so they outlive the app"
 
 [[bin]]
 name = "kibannd"
@@ -11,13 +11,11 @@ path = "src/bin/kibannd.rs"
 
 [dependencies]
 proto = { path = "../proto" }
+client = { path = "../client" }
 term = { path = "../term" }
 git = { path = "../git" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-regex = "1"
-toml = "1"
-sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

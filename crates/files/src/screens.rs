@@ -100,7 +100,7 @@ fn user_folder(dir: Option<PathBuf>, name: &str, file: &str) -> Option<PathBuf> 
 pub fn list() -> Vec<ScreenEntry> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    if let Some(dir) = crate::paths::screens_dir()
+    if let Some(dir) = proto::paths::screens_dir()
         && let Ok(entries) = std::fs::read_dir(&dir)
     {
         let mut names: Vec<String> = entries
@@ -149,7 +149,7 @@ pub fn find(name: &str) -> Result<(String, Origin), String> {
             "{name:?} can't be a screen's name (lowercase letters, digits and dashes)"
         ));
     }
-    if let Some(d) = user_folder(crate::paths::screens_dir(), name, "screen.json") {
+    if let Some(d) = user_folder(proto::paths::screens_dir(), name, "screen.json") {
         let text = std::fs::read_to_string(d.join("screen.json"))
             .map_err(|e| format!("{}: {e}", d.join("screen.json").display()))?;
         return Ok((text, Origin::User(d)));
@@ -482,7 +482,7 @@ pub fn part(name: &str) -> Result<(PartManifest, Origin), String> {
         return Err(format!("{name} is drawn by Kibann, not a page"));
     }
     let (text, origin, file) =
-        if let Some(d) = user_folder(crate::paths::parts_dir(), name, "part.json") {
+        if let Some(d) = user_folder(proto::paths::parts_dir(), name, "part.json") {
             let file = d.join("part.json");
             let text =
                 std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
@@ -535,7 +535,7 @@ pub fn list_parts() -> Vec<(String, Option<String>, bool)> {
         .map(|(n, a)| ((*n).to_owned(), Some((*a).to_owned()), true))
         .collect();
     let mut seen = HashSet::new();
-    if let Some(dir) = crate::paths::parts_dir()
+    if let Some(dir) = proto::paths::parts_dir()
         && let Ok(entries) = std::fs::read_dir(&dir)
     {
         let mut names: Vec<String> = entries
@@ -601,7 +601,7 @@ pub fn needs_asking(origin: &Origin, m: &PartManifest) -> Option<Vec<String>> {
     if m.permissions.is_empty() {
         return None;
     }
-    let store = crate::paths::trusted_file();
+    let store = proto::paths::trusted_file();
     let agreed = store
         .as_deref()
         .map(crate::workspaces::load_trusted)
@@ -614,7 +614,7 @@ pub fn needs_asking(origin: &Origin, m: &PartManifest) -> Option<Vec<String>> {
 
 /// Remember that the part in `dir` may do what `m` asks.
 pub fn trust(dir: &Path, m: &PartManifest) -> io::Result<()> {
-    let Some(store) = crate::paths::trusted_file() else {
+    let Some(store) = proto::paths::trusted_file() else {
         return Ok(());
     };
     let digest = permissions_digest(&m.permissions);
@@ -643,7 +643,7 @@ pub fn serve(path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
     {
         return None;
     }
-    let bytes: Cow<'static, [u8]> = match user_folder(crate::paths::parts_dir(), name, "part.json")
+    let bytes: Cow<'static, [u8]> = match user_folder(proto::paths::parts_dir(), name, "part.json")
     {
         Some(dir) => {
             let file = dir.join(rest);
@@ -774,7 +774,7 @@ pub fn copy(from: &str, to: &str, force: bool) -> Result<PathBuf, String> {
         ));
     }
     let (text, origin) = find(from)?;
-    let dir = crate::paths::screens_dir()
+    let dir = proto::paths::screens_dir()
         .ok_or("no home directory for the screens folder")?
         .join(to);
     if dir.join("screen.json").exists() && !force {
@@ -803,7 +803,7 @@ pub fn copy_part(from: &str, to: &str, force: bool) -> Result<PathBuf, String> {
         return Err(format!("{to:?} can't be a part's name"));
     }
     let (_, origin) = part(from)?;
-    let dir = crate::paths::parts_dir()
+    let dir = proto::paths::parts_dir()
         .ok_or("no home directory for the parts folder")?
         .join(to);
     if dir.join("part.json").exists() && !force {
@@ -857,7 +857,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> io::Res
 /// When a screen or part last changed on disk: for noticing edits.
 pub fn stamp() -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
     let mut out = Vec::new();
-    for dir in [crate::paths::screens_dir(), crate::paths::parts_dir()]
+    for dir in [proto::paths::screens_dir(), proto::paths::parts_dir()]
         .into_iter()
         .flatten()
     {

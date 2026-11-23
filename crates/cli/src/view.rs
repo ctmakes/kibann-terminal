@@ -300,7 +300,7 @@ mod term {
     use proto::wire::{ClientMsg, Reply};
 
     use super::{Key, View, keys};
-    use crate::client::{Client, ClientEvent};
+    use client::{Client, ClientEvent};
 
     /// How often to re-fetch even without a status change: editing a file
     /// that's already changed doesn't change the count.

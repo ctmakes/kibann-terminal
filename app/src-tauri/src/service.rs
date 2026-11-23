@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use daemon::client::Client;
+use client::Client;
 use daemon::saved::Saved;
 use proto::wire::{ClientMsg, Reply};
 

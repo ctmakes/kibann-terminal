@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use daemon::client::{Client, ClientEvent};
+use client::{Client, ClientEvent};
 use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::git::PaneDir;
 use proto::layout::{Action, Dir, Layout};
@@ -521,7 +521,7 @@ fn clients_racing_to_start_share_one_daemon() {
 #[test]
 fn the_daemon_can_run_in_process() {
     let (f, rx) = events();
-    let c = Client::in_process(f).unwrap();
+    let c = daemon::in_process(f).unwrap();
     let s = sh(&c, None);
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     type_text(&c, s, "echo inproc-$((3*3))\r");
@@ -591,7 +591,7 @@ fn the_socket_adds_little_latency() {
     let socket = echo_latency(&c, &rx, s);
 
     let (f, rx) = events();
-    let local = Client::in_process(f).unwrap();
+    let local = daemon::in_process(f).unwrap();
     let s = sh(&local, None);
     let in_process = echo_latency(&local, &rx, s);
 

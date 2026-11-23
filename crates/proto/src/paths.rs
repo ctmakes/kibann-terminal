@@ -46,7 +46,7 @@ pub fn socket_path(dev: bool) -> PathBuf {
     }
 }
 
-/// Where the layout is kept between sessions (see [`crate::saved`]):
+/// Where the layout is kept between sessions (the daemon's `saved` module):
 /// `KIBANN_STATE_DIR` if set, else `~/Library/Application Support/kibann`
 /// on macOS, `$XDG_STATE_HOME/kibann` (`~/.local/state/kibann`) on Linux,
 /// `%APPDATA%\kibann` on Windows. Dev builds keep their own file.
@@ -109,7 +109,7 @@ pub fn workspaces_dir() -> Option<PathBuf> {
 }
 
 /// The files (workspaces, parts) the user said may run their commands (see
-/// [`crate::workspaces`]), next to the saved layout.
+/// the `files` crate), next to the saved layout.
 pub fn trusted_file() -> Option<PathBuf> {
     layout_file(false)?.parent().map(|d| d.join("trusted.json"))
 }

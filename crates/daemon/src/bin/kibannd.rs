@@ -1,12 +1,9 @@
-//! kibannd: keeps the terminal sessions running while the app is closed.
-//!
-//! Started by the app; not meant to be run by hand, though it can be:
-//! `kibannd [--socket PATH] [--idle-exit SECONDS]`. With a CLI command
-//! (`kibannd pane list`) it is the `kibann` CLI.
+//! kibannd: the daemon on its own, for tests. The app runs the same code as
+//! `kibann --daemon`: `kibannd [--socket PATH] [--idle-exit SECONDS]`.
 
 #[cfg(unix)]
 fn main() {
-    std::process::exit(daemon::main(std::env::args_os().skip(1).collect()));
+    std::process::exit(daemon::run_daemon(std::env::args_os().skip(1)));
 }
 
 #[cfg(not(unix))]

@@ -1,25 +1,41 @@
-//! The daemon owns the terminal sessions so they outlive the app, and the
-//! client is how the app (and later the CLI) talks to it.
+//! The daemon owns the terminal sessions so they outlive the app. It's the
+//! one long-lived process, so it holds only what has to live with the
+//! sessions (them, the layout, agent status, git context); restarting it
+//! ends every shell. Programs talk to it with the `client` crate.
 //!
 //! The server core ([`server::Daemon`]) serves any byte stream. On Unix it
-//! listens on a socket ([`server::serve_socket`]) and runs as `kibannd`; where
-//! there is no socket support yet (Windows), the app runs the same core in its
-//! own process over in-memory pipes ([`client::Client::in_process`]).
+//! listens on a socket ([`server::serve_socket`]); where there is no socket
+//! support yet (Windows), the app runs the same core in its own process over
+//! in-memory pipes ([`in_process`]).
 
-pub mod cli;
-pub mod client;
 pub mod installed;
 pub mod layout;
 pub mod outbox;
-pub mod paths;
 pub mod pipe;
 pub mod saved;
-pub mod screens;
 pub mod server;
 pub mod status;
-pub mod template;
-pub mod view;
-pub mod workspaces;
+
+use proto::paths;
+
+/// Run the daemon inside this process (where there is no socket support
+/// yet). Its sessions end with the process, as before the daemon existed.
+pub fn in_process(
+    on_event: impl FnMut(client::ClientEvent<'_>) + Send + 'static,
+) -> std::io::Result<client::Client> {
+    let daemon = server::Daemon::new("in-process");
+    if let Some(f) = layout_file(std::env::var_os("KIBANN_SOCKET").is_some()) {
+        daemon.save_layout_to(f, saved::SAVE_DELAY);
+    }
+    let (to_daemon, daemon_reads) = pipe::pipe();
+    let (daemon_writes, from_daemon) = pipe::pipe();
+    daemon.serve(daemon_reads, daemon_writes)?;
+    Ok(
+        client::Client::new(from_daemon, to_daemon, on_event)?.on_drop(move || {
+            let _ = &daemon;
+        }),
+    )
+}
 
 /// Identifies the daemon's code: a fingerprint of the source it's built
 /// from (see `build.rs`). The app compares a running daemon's with its own,
@@ -48,18 +64,6 @@ fn pane_env(socket: &std::path::Path) -> server::PaneEnv {
     }
 }
 
-/// `main` for the executables that hold the daemon and the CLI (`kibannd`;
-/// the app has its own and calls the same pieces): `pane ...`, `tab ...` and
-/// `skill ...` are CLI commands, anything else runs the daemon.
-#[cfg(unix)]
-pub fn main(args: Vec<std::ffi::OsString>) -> i32 {
-    if cli::is_command(args.first()) {
-        cli::run(args)
-    } else {
-        run_daemon(args.into_iter())
-    }
-}
-
 /// The file to keep the layout in, if any: not for a daemon on a socket of
 /// its own (tests, a private daemon) unless `KIBANN_STATE_DIR` says where.
 pub fn layout_file(own_socket: bool) -> Option<std::path::PathBuf> {
@@ -69,8 +73,9 @@ pub fn layout_file(own_socket: bool) -> Option<std::path::PathBuf> {
     paths::layout_file(cfg!(debug_assertions))
 }
 
-/// The daemon's `main`, shared by `kibannd` and the app's `--daemon` mode
-/// (used by dev builds). `args` are the arguments after the program name.
+/// The daemon's `main`, for `kibannd` (the tests' daemon) and the app's
+/// `--daemon` mode (what the app starts). `args` are the arguments after
+/// `--daemon`.
 /// Returns the exit code.
 #[cfg(unix)]
 pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {

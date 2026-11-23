@@ -1,4 +1,4 @@
-//! Workspace files around [`crate::template`]: where they're found (the
+//! Workspace files around [`crate::workspace`]: where they're found (the
 //! built-in ones, the user's, a project's), which may run their commands
 //! without asking, and making one from the panes on screen. Shared by the
 //! `kibann workspace` commands and the app.
@@ -12,7 +12,7 @@ use proto::wire::PaneInfo;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::template::{self, Problems, SaveOptions, SavePane, SaveTab, Source};
+use crate::workspace::{self as template, Problems, SaveOptions, SavePane, SaveTab, Source};
 
 /// The workspaces Kibann comes with, by name.
 pub const BUILTINS: &[(&str, &str)] = &[
@@ -65,7 +65,7 @@ fn is_path(arg: &str) -> bool {
 /// The project's workspace for `cwd`: `.kibann/workspace.toml` there or in a
 /// directory above, up to the repository's root (or home, outside one).
 pub fn project_workspace(cwd: &Path) -> Option<PathBuf> {
-    let home = crate::paths::home_dir();
+    let home = proto::paths::home_dir();
     for dir in cwd.ancestors() {
         let f = dir.join(PROJECT_FILE);
         if f.is_file() {
@@ -103,11 +103,11 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
             read(path, name, Origin::Project)
         }
         Some(a) if is_path(a) => {
-            let path = template::resolve_path(a, cwd, crate::paths::home_dir().as_deref())
+            let path = template::resolve_path(a, cwd, proto::paths::home_dir().as_deref())
                 .unwrap_or_else(|| cwd.join(a));
             let origin = if path.ends_with(PROJECT_FILE) {
                 Origin::Project
-            } else if crate::paths::workspaces_dir().is_some_and(|d| path.parent() == Some(&*d)) {
+            } else if proto::paths::workspaces_dir().is_some_and(|d| path.parent() == Some(&*d)) {
                 Origin::User
             } else {
                 Origin::File
@@ -120,7 +120,7 @@ pub fn find(arg: Option<&str>, cwd: &Path) -> Result<Found, String> {
             read(path, name, origin)
         }
         Some(name) => {
-            if let Some(dir) = crate::paths::workspaces_dir() {
+            if let Some(dir) = proto::paths::workspaces_dir() {
                 let path = dir.join(format!("{name}.toml"));
                 if path.is_file() {
                     return read(path, name.to_owned(), Origin::User);
@@ -158,7 +158,7 @@ fn project_name(path: &Path) -> String {
 
 /// Read `f`'s workspace as opened from `cwd`.
 pub fn parse(f: &Found, cwd: &Path) -> Result<Template, Problems> {
-    let home = crate::paths::home_dir();
+    let home = proto::paths::home_dir();
     let mut t = template::parse(&Source {
         text: &f.text,
         file: f.path.as_deref(),
@@ -214,7 +214,7 @@ pub fn list(cwd: &Path) -> Vec<Listed> {
         });
     }
     let mut mine = Vec::new();
-    if let Some(dir) = crate::paths::workspaces_dir()
+    if let Some(dir) = proto::paths::workspaces_dir()
         && let Ok(rd) = std::fs::read_dir(dir)
     {
         for e in rd.flatten() {
@@ -316,7 +316,7 @@ pub(crate) fn load_trusted(file: &Path) -> Trusted {
 /// user's own (built-in, in their workspaces folder, or agreed to before in
 /// exactly this version).
 pub fn needs_asking(f: &Found, t: &Template) -> bool {
-    needs_asking_in(f, t, crate::paths::trusted_file().as_deref())
+    needs_asking_in(f, t, proto::paths::trusted_file().as_deref())
 }
 
 fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
@@ -331,7 +331,7 @@ fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
 
 /// Remember that `path`, as it is now (`text`), may run its commands.
 pub fn trust(path: &Path, text: &str) -> io::Result<()> {
-    match crate::paths::trusted_file() {
+    match proto::paths::trusted_file() {
         Some(store) => trust_in(&store, path, text),
         None => Ok(()),
     }
@@ -484,7 +484,7 @@ pub fn snapshot(
         .iter()
         .position(|t| Some(t.id) == layout.active)
         .unwrap_or(0);
-    let home = crate::paths::home_dir();
+    let home = proto::paths::home_dir();
     Ok(template::write(
         &save,
         &info,

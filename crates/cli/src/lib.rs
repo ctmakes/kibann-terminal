@@ -5,6 +5,8 @@
 //! `{"error": {"code", "message"}}` on stderr with exit code 1; a malformed
 //! command line prints usage and exits 2.
 
+pub mod view;
+
 use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
@@ -18,8 +20,8 @@ use proto::wire::{ClientMsg, ReadSource, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
-use crate::client::{Client, unexpected};
-use crate::workspaces::{self, Found};
+use client::{Client, unexpected};
+use files::workspaces::{self, Found};
 
 /// The agent guide, installed by `kibann skill install`.
 pub const SKILL: &str = include_str!("../../../skills/kibann/SKILL.md");
@@ -295,7 +297,7 @@ fn connect() -> Result<Client, Fail> {
 
 #[cfg(unix)]
 fn connect() -> Result<Client, Fail> {
-    let socket = crate::paths::socket_path(cfg!(debug_assertions));
+    let socket = proto::paths::socket_path(cfg!(debug_assertions));
     let client = Client::connect(&socket, |_| {}).map_err(|e| {
         error(
             "not_running",
@@ -368,7 +370,7 @@ fn dispatch(args: &[String]) -> Out {
         }
         (Some("screen"), Some("list")) => {
             a.only(&[])?;
-            Ok(Some(json!({"screens": crate::screens::list()})))
+            Ok(Some(json!({"screens": files::screens::list()})))
         }
         (Some("screen"), Some("check")) => {
             a.only(&[])?;
@@ -382,7 +384,7 @@ fn dispatch(args: &[String]) -> Out {
             a.only(&["--from", "--force"])?;
             let name = one_name(&a, "screen")?;
             let from = a.get("--from").unwrap_or(proto::config::DEFAULT_SCREEN);
-            let dir = crate::screens::copy(from, name, a.has("--force"))
+            let dir = files::screens::copy(from, name, a.has("--force"))
                 .map_err(|e| error("invalid", e))?;
             Ok(Some(
                 json!({"screen": name, "path": dir.join("screen.json")}),
@@ -390,7 +392,7 @@ fn dispatch(args: &[String]) -> Out {
         }
         (Some("screen"), Some("parts")) => {
             a.only(&[])?;
-            let parts: Vec<Value> = crate::screens::list_parts()
+            let parts: Vec<Value> = files::screens::list_parts()
                 .into_iter()
                 .map(|(name, about, builtin)| json!({"name": name, "about": about, "builtin": builtin}))
                 .collect();
@@ -405,7 +407,7 @@ fn dispatch(args: &[String]) -> Out {
             print!(
                 "{}",
                 String::from_utf8_lossy(
-                    crate::screens::builtin_file("parts/kibann.d.ts").unwrap_or_default()
+                    files::screens::builtin_file("parts/kibann.d.ts").unwrap_or_default()
                 )
             );
             Ok(None)
@@ -674,7 +676,7 @@ fn view(pane: PaneId) -> Out {
     let result = (|| {
         // Check the pane first, so a bad id fails before the screen changes.
         check_pane(&connect()?, pane)?;
-        let socket = crate::paths::socket_path(cfg!(debug_assertions));
+        let socket = proto::paths::socket_path(cfg!(debug_assertions));
         crate::view::run(pane, |on_event| Client::connect(&socket, on_event))?;
         Ok(None)
     })();
@@ -1047,14 +1049,14 @@ fn screen_check(a: &Args) -> Out {
         [n] => n.clone(),
         _ => return Err(usage("give one screen name")),
     };
-    let (screen, origin) = crate::screens::read(&name).map_err(|e| error("invalid", e))?;
-    let parts: Vec<Value> = crate::screens::parts_of(&screen)
+    let (screen, origin) = files::screens::read(&name).map_err(|e| error("invalid", e))?;
+    let parts: Vec<Value> = files::screens::parts_of(&screen)
         .into_iter()
         .filter_map(|p| {
-            let (m, o) = crate::screens::part(&p).ok()?;
+            let (m, o) = files::screens::part(&p).ok()?;
             let path = match &o {
-                crate::screens::Origin::User(d) => Some(d.clone()),
-                crate::screens::Origin::Builtin => None,
+                files::screens::Origin::User(d) => Some(d.clone()),
+                files::screens::Origin::Builtin => None,
             };
             Some(json!({
                 "name": p,
@@ -1062,13 +1064,13 @@ fn screen_check(a: &Args) -> Out {
                 "builtin": path.is_none(),
                 "path": path,
                 "permissions": m.permissions,
-                "asks": crate::screens::needs_asking(&o, &m).unwrap_or_default(),
+                "asks": files::screens::needs_asking(&o, &m).unwrap_or_default(),
             }))
         })
         .collect();
     let path = match origin {
-        crate::screens::Origin::User(d) => Some(d.join("screen.json")),
-        crate::screens::Origin::Builtin => None,
+        files::screens::Origin::User(d) => Some(d.join("screen.json")),
+        files::screens::Origin::Builtin => None,
     };
     Ok(Some(json!({
         "name": name,
@@ -1081,7 +1083,7 @@ fn screen_check(a: &Args) -> Out {
 
 /// The config file's `screen`, or the default.
 fn current_screen() -> String {
-    crate::paths::config_dir()
+    proto::paths::config_dir()
         .and_then(|d| std::fs::read_to_string(d.join("config")).ok())
         .map(|t| proto::config::Settings::parse(&t).0.screen)
         .unwrap_or_else(|| proto::config::DEFAULT_SCREEN.to_owned())
@@ -1089,8 +1091,8 @@ fn current_screen() -> String {
 
 fn screen_use(a: &Args) -> Out {
     let name = one_name(a, "screen")?;
-    crate::screens::read(name).map_err(|e| error("invalid", e))?;
-    let file = crate::paths::config_dir()
+    files::screens::read(name).map_err(|e| error("invalid", e))?;
+    let file = proto::paths::config_dir()
         .ok_or_else(|| error("no_home", "no home directory for the config file"))?
         .join("config");
     let text = std::fs::read_to_string(&file).unwrap_or_default();
@@ -1112,15 +1114,15 @@ fn screen_use(a: &Args) -> Out {
 fn screen_part(a: &Args) -> Out {
     let name = one_name(a, "part")?;
     let dir = match a.get("--from") {
-        Some(from) => crate::screens::copy_part(from, name, a.has("--force"))
+        Some(from) => files::screens::copy_part(from, name, a.has("--force"))
             .map_err(|e| error("invalid", e))?,
         None => {
             if !proto::config::valid_name(name)
-                || crate::screens::NATIVE_PARTS.iter().any(|(n, _)| *n == name)
+                || files::screens::NATIVE_PARTS.iter().any(|(n, _)| *n == name)
             {
                 return Err(error("invalid", format!("{name:?} can't be a part's name")));
             }
-            let dir = crate::paths::parts_dir()
+            let dir = proto::paths::parts_dir()
                 .ok_or_else(|| error("no_home", "no home directory for the parts folder"))?
                 .join(name);
             if dir.join("part.json").exists() && !a.has("--force") {
@@ -1238,9 +1240,9 @@ fn ask_to_run(f: &Found, t: &proto::layout::Template) -> Result<(), Fail> {
 
 fn workspace_save(a: &Args) -> Out {
     let here = here()?;
-    let home = crate::paths::home_dir();
+    let home = proto::paths::home_dir();
     let to = a.get("--to").map(|t| {
-        crate::template::resolve_path(t, &here, home.as_deref()).unwrap_or_else(|| here.join(t))
+        files::workspace::resolve_path(t, &here, home.as_deref()).unwrap_or_else(|| here.join(t))
     });
     let name = match (a.pos.first(), &to) {
         (Some(n), _) => n.clone(),
@@ -1262,7 +1264,7 @@ fn workspace_save(a: &Args) -> Out {
     }
     let target = match to {
         Some(t) => t,
-        None => crate::paths::workspaces_dir()
+        None => proto::paths::workspaces_dir()
             .ok_or_else(|| error("no_home", "no home directory for the workspaces folder"))?
             .join(format!("{name}.toml")),
     };

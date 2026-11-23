@@ -12,6 +12,7 @@ use ts_rs::TS;
 pub mod config;
 pub mod git;
 pub mod layout;
+pub mod paths;
 pub mod screen;
 pub mod status;
 pub mod theme;

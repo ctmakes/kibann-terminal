@@ -3,7 +3,7 @@
 //! leaves are blocks; a block shows the terminals or a part (Kibann's own,
 //! like the sidebar, or a web page from `parts/NAME/`).
 //!
-//! The daemon crate reads and checks them (`daemon::screens`); the app
+//! The `files` crate reads and checks them; the app
 //! draws them (`app/src/screen/`).
 
 use std::collections::BTreeMap;

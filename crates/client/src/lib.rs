@@ -18,9 +18,6 @@ use proto::wire::{
     write_msg,
 };
 
-use crate::pipe::pipe;
-use crate::server::Daemon;
-
 /// How long a request may take. Spawning looks up a directory, which can
 /// take up to half a second on a busy session.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -48,8 +45,6 @@ pub struct Client {
     writer: Mutex<Box<dyn Write + Send>>,
     pending: Pending,
     next_req: AtomicU32,
-    /// The daemon itself, when it runs in this process.
-    _local: Option<Arc<Daemon>>,
     /// Closes the connection both ways. The reader thread holds its own
     /// handle to the stream, so dropping the writer alone wouldn't.
     hangup: Option<Box<dyn Fn() + Send + Sync>>,
@@ -102,24 +97,15 @@ impl Client {
             writer: Mutex::new(Box::new(writer)),
             pending,
             next_req: AtomicU32::new(0),
-            _local: None,
             hangup: None,
         })
     }
 
-    /// Run the daemon inside this process (where there is no socket support
-    /// yet). Its sessions end with the process, as before the daemon existed.
-    pub fn in_process(on_event: impl FnMut(ClientEvent<'_>) + Send + 'static) -> io::Result<Self> {
-        let daemon = Daemon::new("in-process");
-        if let Some(f) = crate::layout_file(std::env::var_os("KIBANN_SOCKET").is_some()) {
-            daemon.save_layout_to(f, crate::saved::SAVE_DELAY);
-        }
-        let (to_daemon, daemon_reads) = pipe();
-        let (daemon_writes, from_daemon) = pipe();
-        daemon.serve(daemon_reads, daemon_writes)?;
-        let mut c = Self::new(from_daemon, to_daemon, on_event)?;
-        c._local = Some(daemon);
-        Ok(c)
+    /// Run `f` when the client is dropped (and the connection closes):
+    /// what keeps the other end alive, or shuts it down.
+    pub fn on_drop(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.hangup = Some(Box::new(f));
+        self
     }
 
     pub fn send(&self, msg: &ClientMsg) -> io::Result<()> {
@@ -283,7 +269,7 @@ mod unix {
         let dir = socket
             .parent()
             .ok_or_else(|| io::Error::other("socket path has no directory"))?;
-        crate::paths::prepare_dir(dir)?;
+        proto::paths::prepare_dir(dir)?;
         let mut log_path = socket.as_os_str().to_owned();
         log_path.push(".log");
         let log = std::fs::File::options()

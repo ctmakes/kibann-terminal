@@ -1,4 +1,4 @@
-//! Screens for the window (see `daemon::screens`): the one the config
+//! Screens for the window (see `files::screens`): the one the config
 //! names, ready to show; serving parts' pages (`kpart://`) with a policy
 //! that keeps them to what they were allowed; asking before a part gets
 //! its permissions; and running programs for parts that may.
@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use daemon::screens;
+use files::screens;
 use proto::screen::{ScreenEntry, ScreenNow};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -198,7 +198,7 @@ pub async fn part_exec(
     }
     let path =
         daemon::installed::locate(&program).ok_or_else(|| format!("{program} isn't installed"))?;
-    let home = daemon::paths::home_dir();
+    let home = proto::paths::home_dir();
     let dir = match cwd.as_deref() {
         Some("~") => home.clone(),
         Some(c) if c.starts_with("~/") => home.as_ref().map(|h| h.join(&c[2..])),

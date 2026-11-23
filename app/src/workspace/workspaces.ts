@@ -1,7 +1,7 @@
 // Workspace files (View → Open Workspace… / Save Workspace…): a searchable list of
 // the project's, the user's and the built-in workspaces, and a name field to
 // save the window as one. The files themselves are read and written by the
-// app's backend (`daemon::workspaces`); see README "Workspace files".
+// app's backend (`files::workspaces`); see README "Workspace files".
 
 import type { PaneId } from "./layout";
 
