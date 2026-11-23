@@ -1,6 +1,6 @@
 [package]
 name = "git"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Git context for panes: discovery, status and watching, by running git"

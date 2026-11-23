@@ -84,9 +84,10 @@ jobs:
         shell: bash
         run: |
           want="${GITHUB_REF_NAME#v}"
-          have=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          have=$(cargo metadata --no-deps --format-version 1 \
+            | node -p "JSON.parse(require('fs').readFileSync(0)).packages.find((p) => p.name === 'kibann').version")
           if [ "$want" != "$have" ]; then
-            echo "::error::tag $GITHUB_REF_NAME but tauri.conf.json says $have (use scripts/bump-version.sh)"
+            echo "::error::tag $GITHUB_REF_NAME but Cargo.toml says $have (use scripts/bump-version.sh)"
             exit 1
           fi
 

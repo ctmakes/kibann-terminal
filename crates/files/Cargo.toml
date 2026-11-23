@@ -1,6 +1,6 @@
 [package]
 name = "files"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "The user's files: workspace files, screens and parts, and which of them may run commands"

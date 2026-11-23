@@ -1,6 +1,6 @@
 [package]
 name = "endpoint"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Where the daemon and its clients meet: the socket, and the daemon's lock"

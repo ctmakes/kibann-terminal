@@ -1,6 +1,6 @@
 [package]
 name = "agent"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Which coding agent runs in a pane and what it is doing, from its process, title and screen."

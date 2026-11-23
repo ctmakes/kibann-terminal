@@ -1,6 +1,6 @@
 [package]
 name = "proto"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Message types shared by the terminal backend and the web renderer"

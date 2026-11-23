@@ -1,9 +1,9 @@
 #!/bin/bash
 # Usage: scripts/bump-version.sh 0.2.0 [--local]
 #
-# Sets the app's version in app/package.json, app/package-lock.json,
-# app/src-tauri/Cargo.toml (and Cargo.lock) and app/src-tauri/tauri.conf.json,
-# dates its CHANGELOG.md section, then commits "Release 0.2.0" and pushes
+# Sets the app's version, the workspace's in Cargo.toml (every crate and
+# Tauri take it from there; Cargo.lock follows), dates its CHANGELOG.md
+# section, then commits "Release 0.2.0" and pushes
 # it to main (and the branch you're on), then tags v0.2.0 and pushes the
 # tag, which starts the release workflow. Releases are only built from
 # commits on main: the workflow checks.
@@ -57,18 +57,15 @@ sedi() {
 }
 
 echo "Version $VERSION"
-# The first "version" in each file is the app's.
-sedi -E "1,/\"version\": \"[^\"]+\"/s/\"version\": \"[^\"]+\"/\"version\": \"$VERSION\"/" app/package.json
-sedi -E "1,/\"version\": \"[^\"]+\"/s/\"version\": \"[^\"]+\"/\"version\": \"$VERSION\"/" app/src-tauri/tauri.conf.json
-sedi -E "1,/^version = \"[^\"]+\"/s/^version = \"[^\"]+\"/version = \"$VERSION\"/" app/src-tauri/Cargo.toml
-(cd app && npm install --package-lock-only --ignore-scripts --silent)
-cargo update -p kibann --offline --quiet 2>/dev/null || cargo metadata --format-version 1 >/dev/null
+# The only `version = ` line in the root Cargo.toml is [workspace.package]'s.
+sedi -E "s/^version = \"[^\"]+\"/version = \"$VERSION\"/" Cargo.toml
+cargo update --workspace --offline --quiet 2>/dev/null || cargo metadata --format-version 1 >/dev/null
 sedi -E "s/^## \[$VERSION\] - Unreleased$/## [$VERSION] - $(date +%Y-%m-%d)/" CHANGELOG.md
 
 git --no-pager diff --stat
 $LOCAL && exit 0
 
-git add -A app/package.json app/package-lock.json app/src-tauri/tauri.conf.json app/src-tauri/Cargo.toml Cargo.lock CHANGELOG.md
+git add -A Cargo.toml Cargo.lock CHANGELOG.md
 git commit -q -m "Release $VERSION"
 git tag -a "v$VERSION" -m "Kibann Terminal $VERSION"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
