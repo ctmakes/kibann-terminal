@@ -213,7 +213,25 @@ export class TerminalView {
       this.textarea.removeEventListener("blur", onBlur);
       this.root.removeEventListener("mousedown", onRootDown);
     });
-    this.cleanups.push(this.watchLostPixels());
+    this.cleanups.push(this.watchLostPixels(), this.watchFonts());
+  }
+
+  /**
+   * A face that loads after the first measurement (a cold cache, or the
+   * fonts' stylesheet not applied yet when [`loadFonts`] asked) would
+   * otherwise leave the pane in a fallback font until it is resized: measure
+   * again with it, and paint.
+   */
+  private watchFonts(): () => void {
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+    if (!fonts) return () => {};
+    const onLoaded = () => {
+      const m = this.measure();
+      if (m.cellW !== this.m.cellW || m.cellH !== this.m.cellH || m.baseline !== this.m.baseline) this.remeasure();
+      this.repaint();
+    };
+    fonts.addEventListener("loadingdone", onLoaded);
+    return () => fonts.removeEventListener("loadingdone", onLoaded);
   }
 
   /**
