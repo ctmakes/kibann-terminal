@@ -729,6 +729,33 @@ test.describe("sidebar", () => {
     await expect(page.locator(".tab-bar")).toBeHidden();
   });
 
+  test("a shortcut with Settings or a picker open does nothing, and is prevented", async ({ page }) => {
+    await open(page, { w: "900", h: "560" });
+    // Prevented is what keeps WebKit from handing it to the app's menu.
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__prevented = [];
+      window.addEventListener("keydown", (e) => e.code === "KeyD" && w.__prevented.push(e.defaultPrevented));
+    });
+    const prevented = () => page.evaluate(() => (window as any).__prevented);
+    await press(page, "Meta+,");
+    await expect(page.locator(".settings-modal")).toBeVisible();
+    await press(page, "Meta+d");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".settings-modal")).toBeHidden();
+
+    await press(page, "Meta+Shift+b");
+    await page.locator(".sidebar-themes").click();
+    await expect(page.locator(".theme-picker-input")).toBeFocused();
+    await press(page, "Meta+d");
+    await page.keyboard.type("x");
+    await expect(page.locator(".theme-picker-input")).toHaveValue("x");
+    await page.keyboard.press("Escape");
+
+    expect(await prevented()).toEqual([true, true]);
+    expect((await state(page)).panes.map((p) => p.id)).toEqual([1]);
+  });
+
   test("its gear opens Settings, and says its key", async ({ page }) => {
     await three(page);
     await press(page, "Meta+Shift+b");

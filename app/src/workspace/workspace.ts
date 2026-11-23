@@ -475,9 +475,15 @@ export class Workspace {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
-    // The theme picker's search field takes the keys while it's open.
-    if (this.picker?.visible || this.workspacePicker?.visible || this.screenPicker?.visible) return;
     const action = actionFor(e, this.platform);
+    // While a picker or Settings is open a shortcut does nothing, and it's
+    // prevented: on macOS WebKit hands a key the page leaves alone to the
+    // menu, which would run it behind them (a split with Settings open).
+    // A picker's search field still gets every key (prevented, not stopped).
+    if (this.picker?.visible || this.workspacePicker?.visible || this.screenPicker?.visible) {
+      if (action) e.preventDefault();
+      return;
+    }
     // Settings takes the keys while open (its fields): Esc closes it, and
     // so does its own shortcut. Nothing reaches the panes.
     if (this.settings?.visible) {
@@ -486,7 +492,7 @@ export class Workspace {
         e.stopPropagation();
         if (e.key === "Escape") this.settings.hide();
         else this.runOnce(action!, "key");
-      }
+      } else if (action) e.preventDefault();
       return;
     }
     // While the shortcut sheet is open, a key closes it and goes nowhere
