@@ -534,6 +534,40 @@ fn the_daemon_can_run_in_process() {
 }
 
 /// Median time from a typed character to the frame that shows it.
+/// Apply and ack frames for `s` until a line ends with `marker`.
+fn shows(
+    c: &Client,
+    rx: &Receiver<Ev>,
+    s: PaneId,
+    screen: &mut TextScreen,
+    marker: &str,
+    sample: usize,
+) {
+    let t = Instant::now();
+    loop {
+        let ev = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|_| {
+            panic!(
+                "no echo of {marker} after {:?} (sample {sample}); the screen:\n{}",
+                t.elapsed(),
+                screen.lines().join("\n")
+            )
+        });
+        if let Ev::Frame(id, f) = ev
+            && id == s
+        {
+            c.send(&ClientMsg::Ack {
+                session: s,
+                seq: f.seq,
+            })
+            .unwrap();
+            screen.apply(&f);
+            if screen.lines().iter().any(|r| r.ends_with(marker)) {
+                return;
+            }
+        }
+    }
+}
+
 fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     type_text(c, s, "stty -icanon; echo ready\r");
@@ -556,38 +590,19 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
                 screen.apply(&f);
             }
         }
-        let ch = char::from(b'a' + (i % 26) as u8).to_string();
         // A comment: run as a command, `cc` or `dd` would print (or read)
         // after the next marker's echo, and its line would never end with it.
-        let marker = format!("#{ch}{ch}");
+        // The `#` goes first, untimed: one typed character echoes in one
+        // write, while several can come back in two, the second waiting for
+        // the next frame slot (16 ms), which measures the pacing, not the
+        // socket.
+        type_text(c, s, "#");
+        shows(c, rx, s, &mut screen, "#", i);
+        thread::sleep(Duration::from_millis(30)); // past the frame throttle
+        let ch = char::from(b'a' + (i % 26) as u8);
         let t = Instant::now();
-        // In one input, so it echoes in one go: typed apart, the second
-        // echo can wait for the next frame slot (16 ms) on a busy machine,
-        // which measures the frame pacing, not the socket.
-        type_text(c, s, &marker);
-        loop {
-            let ev = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|_| {
-                panic!(
-                    "no echo of {marker} after {:?} (sample {i}, earlier {times:?}); the screen:\n{}",
-                    t.elapsed(),
-                    screen.lines().join("\n")
-                )
-            });
-            match ev {
-                Ev::Frame(id, f) if id == s => {
-                    c.send(&ClientMsg::Ack {
-                        session: s,
-                        seq: f.seq,
-                    })
-                    .unwrap();
-                    screen.apply(&f);
-                    if screen.lines().iter().any(|r| r.ends_with(&marker)) {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
+        type_text(c, s, &ch.to_string());
+        shows(c, rx, s, &mut screen, &format!("#{ch}"), i);
         times.push(t.elapsed());
         type_text(c, s, "\r");
     }
