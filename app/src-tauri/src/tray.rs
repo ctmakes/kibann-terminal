@@ -390,10 +390,16 @@ fn quit_text(open: usize, restores: bool) -> String {
         "Next time starts with a fresh shell."
     };
     format!(
-        "{what}, including Claude Code sessions.\n\n{next} To keep the shells \
-         running, close the window or press ⌘Q instead."
+        "{what}, including Claude Code sessions.\n\n{next} To keep the shells running, {KEEP} instead."
     )
 }
+
+/// How to leave and keep the shells.
+const KEEP: &str = if cfg!(target_os = "macos") {
+    "close the window or press ⌘Q"
+} else {
+    "close the window"
+};
 
 #[cfg(test)]
 mod tests {
@@ -455,7 +461,10 @@ mod tests {
             quit_text(1, true),
             "This ends the open terminal and everything running in it, including Claude Code \
              sessions.\n\nNext time, the tabs and splits reopen with fresh shells. To keep the \
-             shells running, close the window or press ⌘Q instead."
+             shells running, "
+                .to_owned()
+                + KEEP
+                + " instead."
         );
         assert!(
             quit_text(3, false)

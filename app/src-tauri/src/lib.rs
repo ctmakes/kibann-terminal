@@ -668,7 +668,14 @@ fn config_open(app: AppHandle, reveal: bool) -> Result<(), String> {
                 .then_some(())
                 .ok_or_else(|| format!("open: {s}"))
         });
-    #[cfg(not(target_os = "macos"))]
+    // Windows asks which app opens a file without an extension.
+    #[cfg(windows)]
+    return std::process::Command::new("notepad.exe")
+        .arg(&file)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string());
+    #[cfg(not(any(target_os = "macos", windows)))]
     app.opener()
         .open_path(file.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
