@@ -678,10 +678,13 @@ fn view(pane: PaneId) -> Out {
     result
 }
 
+/// The viewer drives the terminal in raw mode, done for Unix only so far.
 #[cfg(not(unix))]
 fn view(_pane: PaneId) -> Out {
-    connect()?;
-    Ok(None)
+    Err(error(
+        "unsupported",
+        "kibann pane view doesn't run on Windows yet",
+    ))
 }
 
 fn read(c: &Client, pane: PaneId, source: ReadSource, lines: Option<u32>) -> Result<String, Fail> {

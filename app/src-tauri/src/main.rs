@@ -3,7 +3,6 @@
 
 fn main() {
     // The daemon runs from this same executable (`kibann --daemon`).
-    #[cfg(unix)]
     if std::env::args_os().nth(1).is_some_and(|a| a == "--daemon") {
         std::process::exit(daemon::run_daemon(std::env::args_os().skip(2)));
     }

@@ -41,6 +41,13 @@ pub fn git(dir: &Path) -> Command {
         .env_remove("GIT_COMMON_DIR")
         .stdin(Stdio::null())
         .stderr(Stdio::null());
+    // The daemon has no console, so each git would open a window of its own.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd
 }
 

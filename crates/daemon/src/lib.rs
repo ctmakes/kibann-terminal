@@ -65,30 +65,65 @@ fn close_inherited() {
 /// that doesn't keeps the daemon and its shells.
 pub const BUILD: &str = env!("KIBANN_DAEMON_BUILD");
 
-/// What shells learn about this daemon: its socket, and a `kibann` link to
-/// this executable on `PATH` (in `<socket>.bin/` beside the socket, so a dev
-/// and an installed copy each find their own).
-#[cfg(unix)]
+/// What shells learn about this daemon: its socket, and `kibann` on
+/// `PATH` (in `<socket>.bin/` beside the socket, so a dev and an installed
+/// copy each find their own).
 fn pane_env(socket: &std::path::Path) -> server::PaneEnv {
-    let bin = std::env::current_exe().ok();
-    let path_dir = bin.as_ref().and_then(|exe| {
+    let cli = cli_exe();
+    let linked = cli.as_ref().and_then(|exe| {
         let dir = socket.with_extension("bin");
         std::fs::create_dir_all(&dir).ok()?;
-        let link = dir.join("kibann");
-        let _ = std::fs::remove_file(&link);
-        std::os::unix::fs::symlink(exe, &link).ok()?;
-        Some(dir)
+        link_cli(exe, &dir)
     });
     server::PaneEnv {
         socket: Some(socket.to_owned()),
-        bin,
-        path_dir,
+        path_dir: linked.as_ref().and_then(|l| l.parent()).map(Into::into),
+        bin: linked.or(cli),
         // Split on whitespace.
         command: std::env::var("KIBANN_COMMAND")
             .ok()
             .map(|c| c.split_whitespace().map(String::from).collect::<Vec<_>>())
             .filter(|c| !c.is_empty()),
     }
+}
+
+/// The `kibann` command: this executable. On Windows the app is a GUI
+/// program, whose output a console never shows, so the console build of
+/// the CLI beside it (`kibann-cli.exe`) when there is one.
+fn cli_exe() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    {
+        let cli = exe.with_file_name("kibann-cli.exe");
+        if cli.is_file() {
+            return Some(cli);
+        }
+    }
+    Some(exe)
+}
+
+/// A `kibann` in `dir` that runs `exe`: a symlink.
+#[cfg(unix)]
+fn link_cli(exe: &std::path::Path, dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let link = dir.join("kibann");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(exe, &link).ok()?;
+    Some(link)
+}
+
+/// A `kibann.exe` in `dir` that runs `exe`: a hard link (a symlink needs
+/// developer mode), or a copy when `dir` is on another drive. One a shell
+/// still runs can't be replaced, and stays.
+#[cfg(windows)]
+fn link_cli(exe: &std::path::Path, dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let link = dir.join("kibann.exe");
+    if std::fs::remove_file(&link).is_err() && link.exists() {
+        return Some(link);
+    }
+    std::fs::hard_link(exe, &link)
+        .or_else(|_| std::fs::copy(exe, &link).map(drop))
+        .ok()?;
+    Some(link)
 }
 
 /// The file to keep the layout in, if any: not for a daemon on a socket of
@@ -104,7 +139,6 @@ pub fn layout_file(own_socket: bool) -> Option<std::path::PathBuf> {
 /// `--daemon` mode (what the app starts). `args` are the arguments after
 /// `--daemon`.
 /// Returns the exit code.
-#[cfg(unix)]
 pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
     use std::time::Duration;
 

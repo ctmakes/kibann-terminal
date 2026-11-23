@@ -340,12 +340,10 @@ impl Client {
     }
 }
 
-/// Start `command` as the daemon for `socket`: in its own session, so
-/// closing the app (or its terminal) doesn't signal it, with output going
-/// to a log file beside the socket.
-#[cfg(unix)]
+/// Start `command` as the daemon for `socket`, on its own (closing the
+/// app, or its terminal, doesn't end it), with output going to a log file
+/// beside the socket.
 pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
-    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
     let (exe, args) = command
@@ -354,7 +352,10 @@ pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
     let dir = socket
         .parent()
         .ok_or_else(|| io::Error::other("socket path has no directory"))?;
+    #[cfg(unix)]
     proto::paths::prepare_dir(dir)?;
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)?;
     let mut log_path = socket.as_os_str().to_owned();
     log_path.push(".log");
     let log = std::fs::File::options()
@@ -369,16 +370,8 @@ pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
         .stdout(log.try_clone()?)
         .stderr(log)
         // Don't keep the app's directory busy.
-        .current_dir("/");
-    // SAFETY: setsid is async-signal-safe.
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+        .current_dir(dir);
+    detach(&mut cmd)?;
     let mut child = cmd.spawn()?;
     // Reap it when it exits, so it doesn't linger as a zombie while the
     // app runs.
@@ -388,10 +381,29 @@ pub fn start_daemon(socket: &Path, command: &[OsString]) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-pub fn start_daemon(_socket: &Path, _command: &[OsString]) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "the terminal service doesn't run on this platform yet",
-    ))
+/// In a session of its own, so no terminal's hang-up signals reach it.
+#[cfg(unix)]
+fn detach(cmd: &mut std::process::Command) -> io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid is async-signal-safe.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(())
+}
+
+/// With no console (closing the starter's doesn't end it) and out of the
+/// starter's Ctrl+C group.
+#[cfg(windows)]
+fn detach(cmd: &mut std::process::Command) -> io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    Ok(())
 }
