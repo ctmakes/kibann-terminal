@@ -226,6 +226,28 @@ fn spawn_type_and_see_the_output() {
 }
 
 #[test]
+fn two_clients_see_the_same_pane() {
+    let path = socket();
+    let (d, h) = start(&path, Duration::from_secs(60));
+    let (f, rx) = events();
+    let a = Client::connect(&path, f).unwrap();
+    let (f, rx2) = events();
+    let b = Client::connect(&path, f).unwrap();
+    let s = sh(&a, None);
+    a.send(&ClientMsg::Attach { session: s }).unwrap();
+    b.send(&ClientMsg::Attach { session: s }).unwrap();
+    type_text(&a, s, "echo both-$((2+2))\r");
+    wait_for(&a, &rx, s, "both-4");
+    wait_for(&b, &rx2, s, "both-4");
+    // One leaving doesn't stop the other's frames.
+    drop(b);
+    type_text(&a, s, "echo still-$((3+3))\r");
+    wait_for(&a, &rx, s, "still-6");
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
 fn sessions_keep_running_while_detached() {
     let path = socket();
     let (d, h) = start(&path, Duration::from_secs(60));
@@ -245,32 +267,6 @@ fn sessions_keep_running_while_detached() {
     assert_eq!(c.layout().unwrap().panes(), vec![s]);
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     wait_for(&c, &rx, s, "later-2");
-    d.shutdown();
-    h.join().unwrap().unwrap();
-}
-
-#[test]
-fn a_second_client_takes_the_session_over() {
-    let path = socket();
-    let (d, h) = start(&path, Duration::from_secs(60));
-    let (f1, rx1) = events();
-    let c1 = Client::connect(&path, f1).unwrap();
-    let s = sh(&c1, None);
-    c1.send(&ClientMsg::Attach { session: s }).unwrap();
-    type_text(&c1, s, "echo one\r");
-    wait_for(&c1, &rx1, s, "one");
-
-    let (f2, rx2) = events();
-    let c2 = Client::connect(&path, f2).unwrap();
-    c2.send(&ClientMsg::Attach { session: s }).unwrap();
-    wait_for(&c2, &rx2, s, "one"); // the full frame on attach
-    while rx1.recv_timeout(Duration::from_millis(200)).is_ok() {}
-    type_text(&c2, s, "echo two-$((1+1))\r");
-    wait_for(&c2, &rx2, s, "two-2");
-    assert!(
-        !rx1.try_iter().any(|e| matches!(e, Ev::Frame(..))),
-        "the first client no longer gets frames"
-    );
     d.shutdown();
     h.join().unwrap().unwrap();
 }

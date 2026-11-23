@@ -17,7 +17,7 @@ pub mod selection;
 pub mod session;
 
 pub use emulator::Emulator;
-pub use session::{Event, Foreground, Session, Spawn};
+pub use session::{Event, Foreground, Session, Spawn, ViewId};
 
 /// Version string of the linked libghostty-vt.
 pub fn ghostty_version() -> String {

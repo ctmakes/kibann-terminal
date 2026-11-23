@@ -33,17 +33,21 @@ fn foreign_terminal_variables_are_dropped() {
     )
     .unwrap();
     let (tx, rx) = mpsc::channel();
-    session.attach(move |e| {
-        let _ = tx.send(e);
+    let t = tx.clone();
+    session.on_event(move |e| {
+        let _ = t.send(Err(e));
+    });
+    session.view(0, move |f| {
+        let _ = tx.send(Ok(f));
     });
     let mut line = String::new();
     loop {
         let f = match rx.recv_timeout(Duration::from_secs(5)).expect("event") {
-            Event::Frame(f) => f,
-            Event::Foreground(_) => continue,
-            Event::Exited(_) => break,
+            Ok(f) => f,
+            Err(Event::Foreground(_)) => continue,
+            Err(Event::Exited(_)) => break,
         };
-        session.ack(f.seq);
+        session.ack(0, f.seq);
         if let Some(row) = f.rows.iter().find(|r| r.y == 0) {
             line = row
                 .runs

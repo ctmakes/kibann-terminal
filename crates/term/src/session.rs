@@ -14,6 +14,13 @@
 //! out in the last 16 ms, otherwise at the 16 ms mark. Nothing is built while
 //! more than one frame is unacknowledged; changes keep accumulating and the
 //! next frame carries all of them.
+//!
+//! Any number of views (the app, a phone) can watch a session, each pacing
+//! itself with its own acks and seq. Frames are built once for all of them.
+//! A view still waiting on acks when a frame is built misses it, and gets
+//! a full frame once it catches up, so a slow view never holds back a fast
+//! one. The screen state (size, scroll, selection, search, hover) is the
+//! session's: the views share it, and the last resize wins.
 
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -44,13 +51,9 @@ const QUEUE: usize = 256;
 /// never report the end of output on its own.
 const EXIT_GRACE: Duration = Duration::from_millis(200);
 
-/// What a session reports to its frontend.
-// Nearly every event is a frame, moved straight into the sink; boxing it
-// would only add an allocation.
-#[allow(clippy::large_enum_variant)]
+/// What a session reports to its owner (see [`Session::on_event`]).
 #[derive(Debug)]
 pub enum Event {
-    Frame(Frame),
     /// The shell exited, with its exit code when known.
     Exited(Option<u32>),
     /// What runs in the foreground changed (see [`Foreground`]).
@@ -98,6 +101,10 @@ const LOOK_INTERVAL: Duration = Duration::from_millis(250);
 const LOOK_IDLE: Duration = Duration::from_secs(2);
 
 pub type Sink = Box<dyn FnMut(Event) + Send>;
+/// Where one view's frames go.
+pub type FrameSink = Box<dyn FnMut(Frame) + Send>;
+/// Names a view of a session; the caller picks it.
+pub type ViewId = u64;
 
 /// PTY output, on the bounded queue.
 enum Output {
@@ -110,10 +117,12 @@ enum Msg {
     ChildExited(Option<u32>),
     Input(InputEvent),
     Resize(Resize),
-    Ack(u64),
-    RequestFull,
+    Ack(ViewId, u64),
+    RequestFull(ViewId),
     Theme(proto::theme::Theme),
-    Attach(Sink),
+    Events(Sink),
+    View(ViewId, FrameSink),
+    Unview(ViewId),
     Show(Vec<u8>),
     Read(ReadSource, Option<usize>, Sender<String>),
     Shutdown,
@@ -270,10 +279,21 @@ impl Session {
         })
     }
 
-    /// Send frames to `sink` from now on, starting with a full frame. Replaces
-    /// any earlier sink (a reloaded frontend).
-    pub fn attach(&self, sink: impl FnMut(Event) + Send + 'static) {
-        self.send(Msg::Attach(Box::new(sink)));
+    /// Report the exit and foreground changes to `sink` (replacing any
+    /// earlier one). An exit before there is one waits for it.
+    pub fn on_event(&self, sink: impl FnMut(Event) + Send + 'static) {
+        self.send(Msg::Events(Box::new(sink)));
+    }
+
+    /// Send frames to `sink` as view `id`, starting with a full frame.
+    /// Replaces an earlier view with the same id (a reloaded frontend).
+    pub fn view(&self, id: ViewId, sink: impl FnMut(Frame) + Send + 'static) {
+        self.send(Msg::View(id, Box::new(sink)));
+    }
+
+    /// Stop sending frames to view `id`.
+    pub fn unview(&self, id: ViewId) {
+        self.send(Msg::Unview(id));
     }
 
     pub fn input(&self, e: InputEvent) {
@@ -284,13 +304,14 @@ impl Session {
         self.send(Msg::Resize(size));
     }
 
-    /// The frontend painted every frame up to `seq`.
-    pub fn ack(&self, seq: u64) {
-        self.send(Msg::Ack(seq));
+    /// View `id` painted every frame up to `seq`.
+    pub fn ack(&self, id: ViewId, seq: u64) {
+        self.send(Msg::Ack(id, seq));
     }
 
-    pub fn request_full(&self) {
-        self.send(Msg::RequestFull);
+    /// View `id` missed a frame: it gets a full one next.
+    pub fn request_full(&self, id: ViewId) {
+        self.send(Msg::RequestFull(id));
     }
 
     /// Use `theme`'s colors; the screen and scrollback redraw in them.
@@ -494,56 +515,84 @@ fn spawn_writer(mut w: Box<dyn Write + Send>) -> io::Result<Sender<Vec<u8>>> {
     Ok(tx)
 }
 
-/// Pacing and backpressure state of the session thread.
-struct Pacer {
-    sink: Option<Sink>,
-    /// Seq of the last frame sent and the last one acknowledged.
+/// One view's pacing.
+struct View {
+    id: ViewId,
+    sink: FrameSink,
+    /// Seq of the last frame sent to it and the last one it acknowledged.
     sent: u64,
     acked: u64,
+    /// It has every frame built so far, so the next partial one applies.
+    current: bool,
+}
+
+impl View {
+    fn ready(&self) -> bool {
+        self.sent.saturating_sub(self.acked) <= 1
+    }
+}
+
+/// Pacing and backpressure state of the session thread.
+struct Pacer {
+    views: Vec<View>,
     /// Terminal changed since the last frame.
     dirty: bool,
+    /// The next frame is full for every view (a resize, a new theme).
     force_full: bool,
     last_frame: Option<Instant>,
 }
 
 impl Pacer {
-    fn unacked(&self) -> u64 {
-        self.sent.saturating_sub(self.acked)
+    fn any_ready(&self) -> bool {
+        self.views.iter().any(View::ready)
     }
 
-    fn can_send(&self) -> bool {
-        self.sink.is_some() && self.unacked() <= 1
+    /// A view that is ready but missed a frame, so the next one is full.
+    fn needs_full(&self) -> bool {
+        self.force_full || self.views.iter().any(|v| v.ready() && !v.current)
     }
 
-    fn emit(&mut self, f: Frame, now: Instant) {
-        self.sent = f.seq;
+    /// `f` to every view that can take it; the rest miss it.
+    fn emit(&mut self, mut f: Frame, now: Instant) {
         self.last_frame = Some(now);
-        if let Some(s) = &mut self.sink {
-            s(Event::Frame(f));
+        for v in &mut self.views {
+            if v.ready() && (v.current || f.full) {
+                v.sent += 1;
+                f.seq = v.sent;
+                (v.sink)(f.clone());
+                v.current = true;
+            } else {
+                v.current = false;
+            }
         }
     }
 
-    /// Send what changed now, if the viewer is keeping up, whether or not
-    /// a frame is due or the screen is held.
+    fn build(&mut self, emu: &mut Emulator, now: Instant) {
+        let full = self.needs_full();
+        if let Ok(Some(f)) = emu.build_frame(full) {
+            self.emit(f, now);
+        }
+        self.dirty = false;
+        self.force_full = false;
+    }
+
+    /// Send what changed now to the views keeping up, whether or not a
+    /// frame is due or the screen is held.
     fn flush(&mut self, emu: &mut Emulator, now: Instant) {
-        if !self.can_send() {
+        if !self.any_ready() {
             return;
         }
         if let Some(f) = emu.take_captured() {
             self.emit(f, now);
         }
-        if self.can_send()
-            && let Ok(Some(f)) = emu.build_frame(self.force_full)
-        {
-            self.emit(f, now);
-            self.dirty = false;
-            self.force_full = false;
+        if self.any_ready() {
+            self.build(emu, now);
         }
     }
 
     /// Send a frame if one is due. Returns when to check again, if waiting on the clock.
     fn tick(&mut self, emu: &mut Emulator, now: Instant) -> Option<Instant> {
-        if !self.can_send() {
+        if !self.any_ready() {
             return None;
         }
         // A frame captured at the start of a hold goes first.
@@ -551,23 +600,22 @@ impl Pacer {
             self.emit(f, now);
             return None;
         }
-        if !(self.dirty || self.force_full) || emu.held() {
+        let full = self.needs_full();
+        if !(self.dirty || full) || emu.held() {
             return None;
         }
         if let Some(t) = self.last_frame {
             let due = t + FRAME_INTERVAL;
-            if now < due && !self.force_full {
+            if now < due && !full {
                 return Some(due);
             }
         }
-        match emu.build_frame(self.force_full) {
-            Ok(Some(f)) => self.emit(f, now),
-            Ok(None) => {}
-            Err(_) => return None,
-        }
-        self.dirty = false;
-        self.force_full = false;
+        self.build(emu, now);
         None
+    }
+
+    fn view(&mut self, id: ViewId) -> Option<&mut View> {
+        self.views.iter_mut().find(|v| v.id == id)
     }
 }
 
@@ -671,13 +719,12 @@ fn run(
         return;
     };
     let mut p = Pacer {
-        sink: None,
-        sent: 0,
-        acked: 0,
+        views: Vec::new(),
         dirty: false,
-        force_full: true,
+        force_full: false,
         last_frame: None,
     };
+    let mut owner: Option<Sink> = None;
     let mut output_done = false;
     // Exit code and when it arrived.
     let mut exit: Option<(Option<u32>, Instant)> = None;
@@ -771,27 +818,40 @@ fn run(
                         p.force_full = true;
                     }
                 }
-                In::Msg(Msg::Ack(seq)) => p.acked = p.acked.max(seq.min(p.sent)),
+                In::Msg(Msg::Ack(id, seq)) => {
+                    if let Some(v) = p.view(id) {
+                        v.acked = v.acked.max(seq.min(v.sent));
+                    }
+                }
                 // The client asks after missing a frame, and drops every
                 // partial frame until a full one: frames in flight will never
                 // be acked, and waiting on them would stall the pane for good.
-                In::Msg(Msg::RequestFull) => {
-                    p.force_full = true;
-                    p.acked = p.sent;
+                In::Msg(Msg::RequestFull(id)) => {
+                    if let Some(v) = p.view(id) {
+                        v.current = false;
+                        v.acked = v.sent;
+                    }
                 }
                 In::Msg(Msg::Theme(t)) => {
                     let _ = emu.set_theme(&t);
                     p.dirty = true;
                     p.force_full = true;
                 }
-                In::Msg(Msg::Attach(sink)) => {
-                    p.sink = Some(sink);
-                    // Frames sent to the old sink will never be acked.
-                    p.acked = p.sent;
-                    p.force_full = true;
-                    p.last_frame = None;
-                    exit_sent = false;
+                In::Msg(Msg::Events(sink)) => owner = Some(sink),
+                In::Msg(Msg::View(id, sink)) => {
+                    // A view replacing one by the same id carries on its
+                    // seq; frames sent to the old one will never be acked.
+                    let sent = p.view(id).map_or(0, |v| v.sent);
+                    p.views.retain(|v| v.id != id);
+                    p.views.push(View {
+                        id,
+                        sink,
+                        sent,
+                        acked: sent,
+                        current: false,
+                    });
                 }
+                In::Msg(Msg::Unview(id)) => p.views.retain(|v| v.id != id),
                 In::Msg(Msg::Show(data)) => {
                     emu.write(&data);
                     p.dirty = true;
@@ -867,7 +927,7 @@ fn run(
             let fg = Foreground { entered, ..fg };
             if foreground.as_ref() != Some(&fg) {
                 foreground = Some(fg.clone());
-                if let Some(sink) = p.sink.as_mut() {
+                if let Some(sink) = owner.as_mut() {
                     sink(Event::Foreground(fg));
                 }
             }
@@ -888,14 +948,12 @@ fn run(
             && let Some((code, at)) = exit
             && (output_done || now >= at + EXIT_GRACE)
             && !exit_sent
-            && p.sink.is_some()
+            && let Some(sink) = owner.as_mut()
         {
-            // The last output goes on screen first, if the viewer is
-            // keeping up (a captured frame before it).
+            // The last output goes on screen first, to the views keeping
+            // up (a captured frame before it).
             p.flush(&mut emu, now);
-            if let Some(sink) = p.sink.as_mut() {
-                sink(Event::Exited(code));
-            }
+            sink(Event::Exited(code));
             exit_sent = true;
         }
     }

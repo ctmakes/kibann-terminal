@@ -63,6 +63,25 @@ fn line0(f: &Frame) -> String {
     s.trim_end().to_owned()
 }
 
+/// A session's frames (for view 0) and events, in one stream.
+#[allow(clippy::large_enum_variant)]
+enum Ev {
+    Frame(Frame),
+    Event(Event),
+}
+
+fn watch(s: &Session) -> Receiver<Ev> {
+    let (tx, rx) = mpsc::channel();
+    let t = tx.clone();
+    s.on_event(move |e| {
+        let _ = t.send(Ev::Event(e));
+    });
+    s.view(0, move |f| {
+        let _ = tx.send(Ev::Frame(f));
+    });
+    rx
+}
+
 struct Harness {
     session: Session,
     pty: Sender<Vec<u8>>,
@@ -83,10 +102,8 @@ fn harness() -> Harness {
     )
     .unwrap();
     let (ftx, frames) = mpsc::channel();
-    session.attach(move |e| {
-        if let Event::Frame(f) = e {
-            let _ = ftx.send(f);
-        }
+    session.view(0, move |f| {
+        let _ = ftx.send(f);
     });
     Harness {
         session,
@@ -127,7 +144,7 @@ fn output_produces_frames_and_backpressure_holds_them() {
     h.pty.send(b" three".to_vec()).unwrap();
     assert!(h.none_within(Duration::from_millis(100)));
 
-    h.session.ack(f2.seq);
+    h.session.ack(0, f2.seq);
     let f3 = h.next();
     assert_eq!(f3.seq, f2.seq + 1);
     assert_eq!(
@@ -141,7 +158,7 @@ fn output_produces_frames_and_backpressure_holds_them() {
 fn frames_are_throttled() {
     let h = harness();
     let f = h.next();
-    h.session.ack(f.seq);
+    h.session.ack(0, f.seq);
     let start = std::time::Instant::now();
     for i in 0..10 {
         h.pty.send(format!("{i}").into_bytes()).unwrap();
@@ -151,10 +168,10 @@ fn frames_are_throttled() {
     // limit follows the time the writes really took (a busy CI machine
     // can stretch 20 ms of sleeps a lot), at one frame per interval.
     let mut seqs = vec![h.next().seq];
-    h.session.ack(seqs[0]);
+    h.session.ack(0, seqs[0]);
     while let Ok(f) = h.frames.recv_timeout(Duration::from_millis(60)) {
         seqs.push(f.seq);
-        h.session.ack(f.seq);
+        h.session.ack(0, f.seq);
     }
     let took = start.elapsed().saturating_sub(Duration::from_millis(60));
     let most = (took.as_millis() / term::session::FRAME_INTERVAL.as_millis()) as usize + 2;
@@ -169,16 +186,14 @@ fn frames_are_throttled() {
 fn request_full_and_reattach() {
     let h = harness();
     let f = h.next();
-    h.session.ack(f.seq);
-    h.session.request_full();
+    h.session.ack(0, f.seq);
+    h.session.request_full(0);
     let f = h.next();
     assert!(f.full);
 
     let (tx, rx) = mpsc::channel();
-    h.session.attach(move |e| {
-        if let Event::Frame(f) = e {
-            let _ = tx.send(f);
-        }
+    h.session.view(0, move |f| {
+        let _ = tx.send(f);
     });
     let f2 = rx.recv_timeout(WAIT).unwrap();
     assert!(f2.full);
@@ -195,7 +210,7 @@ fn request_full_goes_out_with_frames_unacked() {
     h.pty.send(b"one".to_vec()).unwrap();
     let f2 = h.next();
     assert_eq!(f2.seq, f1.seq + 1);
-    h.session.request_full();
+    h.session.request_full(0);
     let f3 = h.next();
     assert!(f3.full);
     assert_eq!(line0(&f3), "one");
@@ -228,7 +243,7 @@ fn input_and_device_responses_reach_the_pty() {
 fn resize_sends_full_frame() {
     let h = harness();
     let f = h.next();
-    h.session.ack(f.seq);
+    h.session.ack(0, f.seq);
     h.session.resize(Resize {
         cols: 40,
         rows: 10,
@@ -244,14 +259,14 @@ fn resize_sends_full_frame() {
 fn stuck_render_hold_releases_after_timeout() {
     let h = harness();
     let f = h.next();
-    h.session.ack(f.seq);
+    h.session.ack(0, f.seq);
     h.pty.send(b"\x1b[?2026hstuck".to_vec()).unwrap();
     // Nothing changed before the hold began, so no capture goes out; the
     // held text shows up once the hold times out (1 s).
     let start = std::time::Instant::now();
     let f = loop {
         let f = h.next();
-        h.session.ack(f.seq);
+        h.session.ack(0, f.seq);
         if !f.rows.is_empty() {
             break f;
         }
@@ -279,24 +294,21 @@ fn real_pty_runs_a_command_and_reports_exit() {
         SIZE,
     )
     .unwrap();
-    let (tx, rx) = mpsc::channel();
-    session.attach(move |e| {
-        let _ = tx.send(e);
-    });
+    let rx = watch(&session);
     let mut seen = String::new();
     loop {
         match rx.recv_timeout(WAIT).expect("event") {
-            Event::Frame(f) => {
-                session.ack(f.seq);
+            Ev::Frame(f) => {
+                session.ack(0, f.seq);
                 if f.rows.iter().any(|r| r.y == 0) {
                     seen = line0(&f);
                 }
             }
-            Event::Exited(code) => {
+            Ev::Event(Event::Exited(code)) => {
                 assert_eq!(code, Some(3));
                 break;
             }
-            Event::Foreground(_) => {}
+            Ev::Event(Event::Foreground(_)) => {}
         }
     }
     assert!(seen.starts_with("hi from pty"), "row 0 was {seen:?}");
@@ -312,12 +324,8 @@ fn spawn_sh(script: &str) -> Session {
         SIZE,
     )
     .unwrap();
-    let (tx, rx) = mpsc::channel::<Event>();
-    s.attach(move |e| {
-        let _ = tx.send(e);
-    });
     // Keep the channel open; frames pile up unacked, which is fine here.
-    std::mem::forget(rx);
+    std::mem::forget(watch(&s));
     s
 }
 
@@ -372,18 +380,15 @@ fn titles_until(script: &str, last: &str) -> Vec<String> {
         SIZE,
     )
     .unwrap();
-    let (tx, rx) = mpsc::channel();
-    s.attach(move |e| {
-        let _ = tx.send(e);
-    });
+    let rx = watch(&s);
     let mut seen = Vec::new();
     loop {
         let f = match rx.recv_timeout(WAIT) {
-            Ok(Event::Frame(f)) => f,
-            Ok(Event::Foreground(_)) => continue,
+            Ok(Ev::Frame(f)) => f,
+            Ok(Ev::Event(Event::Foreground(_))) => continue,
             _ => break,
         };
-        s.ack(f.seq);
+        s.ack(0, f.seq);
         if let Some(t) = f.title {
             let done = t == last;
             seen.push(t);
@@ -430,4 +435,53 @@ fn typing_goes_through_ahead_of_a_flood_of_output() {
         !screen.expect("the screen").contains("END"),
         "the key waited for all the output"
     );
+}
+
+#[test]
+fn a_slow_view_doesnt_hold_back_a_fast_one() {
+    let h = harness();
+    let (tx, slow) = mpsc::channel();
+    h.session.view(1, move |f| {
+        let _ = tx.send(f);
+    });
+    let recv = |rx: &Receiver<Frame>| rx.recv_timeout(WAIT).expect("a frame");
+
+    // View 0 acks everything; view 1 nothing after its first two frames.
+    let mut fast = vec![h.next()];
+    h.session.ack(0, fast[0].seq);
+    let s1 = recv(&slow);
+    assert!(s1.full);
+    for word in ["one ", "two ", "three ", "four "] {
+        h.pty.send(word.as_bytes().to_vec()).unwrap();
+        let f = h.next();
+        h.session.ack(0, f.seq);
+        fast.push(f);
+    }
+    assert_eq!(line0(fast.last().unwrap()), "one two three four");
+    let seqs: Vec<u64> = fast.iter().map(|f| f.seq).collect();
+    assert_eq!(
+        seqs,
+        (1..=5).collect::<Vec<_>>(),
+        "each view has its own seq"
+    );
+
+    // View 1 got one more frame, then missed the rest. Once it acks, it
+    // gets a full frame with everything.
+    let s2 = recv(&slow);
+    assert!(slow.recv_timeout(Duration::from_millis(100)).is_err());
+    h.session.ack(1, s2.seq);
+    let s3 = recv(&slow);
+    assert!(s3.full);
+    assert_eq!(s3.seq, s2.seq + 1);
+    assert_eq!(line0(&s3), "one two three four");
+}
+
+#[test]
+fn a_view_that_goes_stops_getting_frames() {
+    let h = harness();
+    let f = h.next();
+    h.session.ack(0, f.seq);
+    h.session.unview(0);
+    h.pty.send(b"gone".to_vec()).unwrap();
+    assert!(h.none_within(Duration::from_millis(100)));
 }

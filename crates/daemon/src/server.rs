@@ -3,12 +3,10 @@
 //!
 //! Each connection gets a reader thread (decodes requests and acts on them)
 //! and a writer thread (drains the connection's [`Outbox`]). Sessions send
-//! frames from their own threads into their viewer's outbox, so a slow client
-//! never stalls a session or other clients.
-//!
-//! A session always has a sink. With no viewer it only reports the exit;
-//! frames stop after two unacked ones (the session's own pacing), so a
-//! detached session costs nothing but its emulator keeps up with the output.
+//! frames from their own threads into the outbox of each connection viewing
+//! them (a view per connection, paced by its own acks), so a slow client
+//! never stalls a session or other clients. A session with no views builds
+//! no frames; its emulator keeps up with the output.
 //!
 //! Every session is a pane in the layout ([`crate::layout::Model`]). Actions
 //! from the app or the CLI change it, and each change goes to the
@@ -75,8 +73,6 @@ const MAX_ENDED: usize = 256;
 
 struct Entry {
     session: Arc<Session>,
-    /// The connection the frames go to.
-    viewer: Option<ConnId>,
     exited: Arc<AtomicBool>,
     /// Last size the app gave it, to size panes split from it.
     size: Resize,
@@ -250,20 +246,14 @@ fn encode(msg: &ServerMsg) -> Vec<u8> {
     buf
 }
 
-/// Where a session's events go: frames to its viewer's outbox, if any; the
-/// exit to the daemon, which closes the pane.
-fn sink(
+/// Where a session's events go: to the daemon, which closes the pane when
+/// it exits.
+fn events(
     id: SessionId,
-    out: Option<Arc<Outbox>>,
     exited: Arc<AtomicBool>,
     daemon: Weak<Daemon>,
 ) -> impl FnMut(Event) + Send + 'static {
     move |event| match event {
-        Event::Frame(frame) => {
-            if let Some(o) = &out {
-                o.push_frame(encode(&ServerMsg::Frame { session: id, frame }));
-            }
-        }
         Event::Foreground(fg) => {
             if let Some(d) = daemon.upgrade() {
                 d.foreground(id, fg);
@@ -582,28 +572,13 @@ impl Daemon {
                 drop(st);
                 Self::reply(out, req, reply);
             }
-            ClientMsg::Attach { session } => {
-                let mut st = self.lock();
-                if let Some(e) = st.sessions.get_mut(&session) {
-                    e.viewer = Some(conn);
-                    e.session.attach(sink(
-                        session,
-                        Some(out.clone()),
-                        e.exited.clone(),
-                        self.me.clone(),
-                    ));
-                }
-            }
-            ClientMsg::Detach { session } => {
-                let mut st = self.lock();
-                if let Some(e) = st.sessions.get_mut(&session)
-                    && e.viewer == Some(conn)
-                {
-                    e.viewer = None;
-                    e.session
-                        .attach(sink(session, None, e.exited.clone(), self.me.clone()));
-                }
-            }
+            ClientMsg::Attach { session } => with(session, &|s| {
+                let out = out.clone();
+                s.view(conn, move |frame| {
+                    out.push_frame(encode(&ServerMsg::Frame { session, frame }));
+                });
+            }),
+            ClientMsg::Detach { session } => with(session, &|s| s.unview(conn)),
             ClientMsg::Input { session, event } => with(session, &|s| s.input(event.clone())),
             ClientMsg::Resize { session, size } => {
                 let s = {
@@ -617,8 +592,8 @@ impl Daemon {
                     s.resize(size);
                 }
             }
-            ClientMsg::Ack { session, seq } => with(session, &|s| s.ack(seq)),
-            ClientMsg::RequestFull { session } => with(session, &|s| s.request_full()),
+            ClientMsg::Ack { session, seq } => with(session, &|s| s.ack(conn, seq)),
+            ClientMsg::RequestFull { session } => with(session, &|s| s.request_full(conn)),
             ClientMsg::Shutdown => self.shutdown(),
             ClientMsg::Restore { req } => Self::reply(out, req, self.restore()),
         }
@@ -938,7 +913,7 @@ impl Daemon {
             size,
         )?;
         let exited = Arc::new(AtomicBool::new(false));
-        session.attach(sink(id, None, exited.clone(), self.me.clone()));
+        session.on_event(events(id, exited.clone(), self.me.clone()));
         let mut st = self.lock();
         // Under the lock, so a theme set meanwhile isn't missed.
         if let Some(t) = &st.theme {
@@ -948,7 +923,6 @@ impl Daemon {
             id,
             Entry {
                 session: Arc::new(session),
-                viewer: None,
                 exited,
                 size,
             },
@@ -1115,13 +1089,8 @@ impl Daemon {
         }
         st.watchers.remove(&conn);
         st.viewers.remove(&conn);
-        let me = self.me.clone();
-        for (id, e) in st.sessions.iter_mut() {
-            if e.viewer == Some(conn) {
-                e.viewer = None;
-                e.session
-                    .attach(sink(*id, None, e.exited.clone(), me.clone()));
-            }
+        for e in st.sessions.values() {
+            e.session.unview(conn);
         }
     }
 
