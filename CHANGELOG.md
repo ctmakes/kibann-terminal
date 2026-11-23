@@ -10,6 +10,11 @@ its notes then go out with that version.
 - If the terminal service stops (it crashed, or something ended it), the
   window starts a new one and reopens your saved tabs and splits, instead
   of quitting.
+- The window no longer stops responding after many notifications pile up
+  in Notification Center. A newer notification about a pane replaces the
+  one before it.
+- Keys reach a pane at once even while it prints a lot, and `kibann pane
+  list` no longer waits on busy panes.
 - Config lines all read the same way: a value in quotes, and a `# comment`
   after it, now work for `theme` too (`theme = "Nord" # cold`).
 - `kibann pane run --wait` works in fish and PowerShell as well as in
