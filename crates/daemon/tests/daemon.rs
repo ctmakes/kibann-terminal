@@ -474,16 +474,18 @@ fn stale_sockets_are_replaced_and_live_ones_kept() {
     drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
     let (d, h) = start(&path, Duration::from_secs(60));
     // The old file was already there, so wait until the new daemon answers.
+    // Until then a connection can even succeed and then end: a `fork` in
+    // another test may have taken a copy of the old listener before it
+    // was closed.
     let deadline = Instant::now() + Duration::from_secs(2);
-    let c = loop {
+    let _c = loop {
         let (f, _rx) = events();
-        match Client::connect(&path, f) {
+        match Client::connect(&path, f).and_then(|c| c.hello().map(|_| c)) {
             Ok(c) => break c,
             Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Err(e) => panic!("{e}"),
         }
     };
-    c.hello().unwrap();
 
     // A second daemon on the same socket refuses to start.
     let other = Daemon::new("other");

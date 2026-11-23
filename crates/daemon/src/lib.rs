@@ -36,6 +36,29 @@ pub fn in_process(
     )
 }
 
+/// Close every descriptor but stdin, stdout and stderr. The daemon
+/// outlives whoever started it, so it mustn't keep their files open: on
+/// macOS a `fork` in another of the starter's threads can hand the child
+/// descriptors that weren't close-on-exec yet, like the pipe on which that
+/// thread's own `spawn` waits for its child's `exec` (which then never
+/// returns while the daemon lives).
+#[cfg(unix)]
+fn close_inherited() {
+    let Ok(dir) = std::fs::read_dir("/dev/fd") else {
+        return;
+    };
+    // Listed first, closed after: reading the directory uses a descriptor.
+    let fds: Vec<i32> = dir
+        .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|fd| *fd > 2)
+        .collect();
+    for fd in fds {
+        // SAFETY: nothing in this process uses these yet; the one that was
+        // reading /dev/fd is already closed (EBADF, ignored).
+        unsafe { libc::close(fd) };
+    }
+}
+
 /// Identifies the daemon's code: a fingerprint of the source it's built
 /// from (see `build.rs`). The app compares a running daemon's with its own,
 /// so an update that changes how the terminal behaves is noticed, and one
@@ -84,6 +107,9 @@ pub fn layout_file(own_socket: bool) -> Option<std::path::PathBuf> {
 #[cfg(unix)]
 pub fn run_daemon(args: impl Iterator<Item = std::ffi::OsString>) -> i32 {
     use std::time::Duration;
+
+    #[cfg(unix)]
+    close_inherited();
 
     let mut socket = None;
     let mut idle = 10u64;
