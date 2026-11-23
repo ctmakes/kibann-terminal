@@ -12,8 +12,6 @@
 //! in the agent's dialog area, never in what the user typed. A missed dot is
 //! better than a false "waiting for you".
 
-use std::path::Path;
-
 mod claude;
 mod codex;
 mod opencode;
@@ -43,11 +41,18 @@ pub enum State {
     Blocked,
 }
 
-fn base(s: &str) -> &str {
-    Path::new(s)
-        .file_name()
-        .and_then(|n| n.to_str())
+/// A program's name as compared: its file name (after `/` or `\\`), in
+/// lower case, without `.exe` (`C:\\bin\\Claude.EXE` is `claude`).
+fn base(s: &str) -> String {
+    let name = s
+        .rsplit(['/', '\\'])
+        .next()
         .unwrap_or(s)
+        .to_ascii_lowercase();
+    match name.strip_suffix(".exe") {
+        Some(n) => n.to_owned(),
+        None => name,
+    }
 }
 
 /// The agent a process is, from its name and arguments.
@@ -62,19 +67,20 @@ fn base(s: &str) -> &str {
 /// - For both, subcommands other than the interactive screen don't count
 ///   (`codex exec`, `opencode serve`, …).
 pub fn identify(name: &str, argv: &[String]) -> Option<Agent> {
-    let named = |s: &str| match base(s) {
+    let named = |s: &str| match base(s).as_str() {
         "claude" => Some(Agent::Claude),
         "codex" => Some(Agent::Codex),
         "opencode" => Some(Agent::OpenCode),
         _ => None,
     };
-    let runtime = argv.first().map(|a| base(a)).unwrap_or(name);
+    let runtime = base(argv.first().map_or(name, String::as_str));
     let (agent, rest) = if let Some(a) = named(name).or_else(|| argv.first().and_then(|a| named(a)))
     {
         (a, argv.get(1..).unwrap_or_default())
-    } else if matches!(runtime, "node" | "bun" | "deno") {
+    } else if matches!(runtime.as_str(), "node" | "bun" | "deno") {
         let i = argv.iter().skip(1).position(|a| !a.starts_with('-'))? + 1;
-        let script = &argv[i];
+        let script = argv[i].replace('\\', "/");
+        let script = script.as_str();
         let agent = named(script).or_else(|| {
             if script.contains("claude-code") {
                 Some(Agent::Claude)
@@ -127,6 +133,21 @@ mod tests {
             Some(Agent::Claude)
         );
         assert_eq!(identify("claude", &[]), Some(Agent::Claude));
+        // Windows: an extension, any case, backslashes.
+        assert_eq!(
+            identify("claude.exe", &args(&[r"C:\Users\x\.local\bin\Claude.EXE"])),
+            Some(Agent::Claude)
+        );
+        assert_eq!(
+            identify(
+                "node.exe",
+                &args(&[
+                    r"C:\Program Files\nodejs\node.exe",
+                    r"C:\Users\x\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"
+                ])
+            ),
+            Some(Agent::Codex)
+        );
         assert_eq!(
             identify(
                 "node",

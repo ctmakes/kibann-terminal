@@ -529,7 +529,8 @@ impl Pty {
         if let Some(pid) = self.master.process_group_leader() {
             return Some(pid);
         }
-        self.shell_pid.and_then(|p| i32::try_from(p).ok())
+        let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok())?;
+        Some(procinfo::newest_descendant(shell).unwrap_or(shell))
     }
 
     /// What runs in the foreground, and its arguments when it isn't the
@@ -538,9 +539,9 @@ impl Pty {
         let fg = self.foreground_pid();
         let shell = self.shell_pid.and_then(|p| i32::try_from(p).ok());
         let at_shell = fg.is_some() && fg == shell;
-        let argv = fg.and_then(crate::process::argv);
+        let argv = fg.and_then(procinfo::argv);
         let agent = fg.and_then(|pid| {
-            let name = crate::process::name(pid).unwrap_or_default();
+            let name = procinfo::name(pid).unwrap_or_default();
             crate::agent::identify(&name, argv.as_deref().unwrap_or_default())
         });
         let agent = agent.map(|a| {
@@ -566,9 +567,9 @@ impl Pty {
 
     fn cwd(&self) -> Option<PathBuf> {
         let fg = self.foreground_pid()?;
-        crate::process::cwd(fg).or_else(|| {
+        procinfo::cwd(fg).or_else(|| {
             let shell = i32::try_from(self.shell_pid?).ok()?;
-            crate::process::cwd(shell)
+            procinfo::cwd(shell)
         })
     }
 }
@@ -725,7 +726,7 @@ fn run(
         if p.dirty()
             && let Some(m) = &master
         {
-            emu.set_program_name(m.foreground_pid().and_then(crate::process::name));
+            emu.set_program_name(m.foreground_pid().and_then(procinfo::name));
         }
         // Paths in links are relative to the shell's directory. Only looked
         // up while hovering, and only when the shell doesn't report it.

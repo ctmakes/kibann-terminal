@@ -3279,6 +3279,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "procinfo"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "proto"
 version = "0.1.0"
 dependencies = [
@@ -4708,6 +4716,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "portable-pty",
+ "procinfo",
  "proto",
  "serde",
  "serde_json",

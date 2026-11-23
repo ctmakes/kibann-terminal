@@ -5,6 +5,7 @@ members = [
     "crates/term",
     "crates/git",
     "crates/endpoint",
+    "crates/procinfo",
     "crates/client",
     "crates/daemon",
     "crates/files",
