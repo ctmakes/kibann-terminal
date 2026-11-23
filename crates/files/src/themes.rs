@@ -1,20 +1,16 @@
-//! Themes: the bundled collection (iTerm2-Color-Schemes, Ghostty format),
-//! the user's own files, and the config file that says which one to use.
-//!
-//! - Config: `~/.config/kibann/config` (or `$XDG_CONFIG_HOME/kibann`, or
-//!   `$KIBANN_CONFIG_DIR`), Ghostty syntax; only `theme` is read for now.
-//! - The user's themes: `themes/` beside it, one file per theme, named as
-//!   the theme. They win over a bundled theme of the same name.
+//! Themes: the bundled collection (iTerm2-Color-Schemes, Ghostty format)
+//! and the user's own files, `themes/` beside the config file, one file per
+//! theme, named as the theme. They win over a bundled theme of the same
+//! name.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::SystemTime;
 
-use proto::theme::{
-    DEFAULT_DARK, DEFAULT_LIGHT, KIBANN_DARK, KIBANN_LIGHT, Theme, ThemeChoice, config_theme,
-    set_config_theme,
-};
+use proto::theme::{DEFAULT_DARK, DEFAULT_LIGHT, KIBANN_DARK, KIBANN_LIGHT, Theme};
 use serde::Serialize;
+
+use crate::config::{config_dir, config_file};
 
 /// `### NAME` then the theme's lines, for every bundled theme.
 const BUNDLE: &str = include_str!("../themes/themes.txt");
@@ -42,15 +38,6 @@ fn bundled() -> &'static [(&'static str, &'static str, bool)] {
         }
         out
     })
-}
-
-/// Where the config file and the user's themes live.
-pub fn config_dir() -> Option<PathBuf> {
-    proto::paths::config_dir()
-}
-
-pub fn config_file() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("config"))
 }
 
 fn user_dir() -> Option<PathBuf> {
@@ -132,50 +119,6 @@ pub fn load(name: &str) -> Result<(Theme, Vec<String>), String> {
         Some((_, text, _)) => Ok(Theme::parse(text, None)),
         None => Err(format!("no theme named \"{name}\"")),
     }
-}
-
-/// The config file's theme choice (the defaults without a file or a
-/// `theme` line), and its problems.
-pub fn read_choice() -> (ThemeChoice, Vec<String>) {
-    let Some(text) = config_file().and_then(|f| std::fs::read_to_string(f).ok()) else {
-        return (ThemeChoice::default(), Vec::new());
-    };
-    let (choice, errors) = config_theme(&text);
-    (choice.unwrap_or_default(), errors)
-}
-
-/// The config file's other settings (fonts, notifications), and their
-/// problems.
-pub fn read_settings() -> (proto::config::Settings, Vec<String>) {
-    let text = config_file()
-        .and_then(|f| std::fs::read_to_string(f).ok())
-        .unwrap_or_default();
-    proto::config::Settings::parse(&text)
-}
-
-/// Save `choice` to the config file, keeping its other lines.
-pub fn save_choice(choice: &ThemeChoice) -> Result<(), String> {
-    edit_config(|old| set_config_theme(old, choice))
-}
-
-/// Set `key` to `values` in the config file (Settings), keeping its other
-/// lines. Only the keys Settings shows, with values the parser takes.
-pub fn save_values(key: &str, values: &[String]) -> Result<(), String> {
-    proto::config::check_values(key, values)?;
-    edit_config(|old| proto::config::set_config_values(old, key, values))
-}
-
-/// Rewrite the config file with `change`, made if missing.
-fn edit_config(change: impl FnOnce(&str) -> String) -> Result<(), String> {
-    let file = config_file().ok_or("no home directory")?;
-    let old = std::fs::read_to_string(&file).unwrap_or_default();
-    let new = change(&old);
-    let dir = file.parent().ok_or("bad config path")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    // Write beside it and rename, so a reader never sees half a file.
-    let tmp = dir.join(".config.tmp");
-    std::fs::write(&tmp, new).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }
 
 /// Changes when the config file or a user theme changes (polled).

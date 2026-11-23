@@ -67,7 +67,7 @@ where
     let dev = cfg!(debug_assertions);
     let socket = proto::paths::socket_path(dev);
     let command = vec![std::env::current_exe()?.into_os_string(), "--daemon".into()];
-    let restores = crate::theme::read_settings().0.restore_layout;
+    let restores = files::config::read_settings().0.restore_layout;
     let mut replaced = false;
     loop {
         let client = Client::connect_or_start(&socket, &command, on_event())?;
@@ -118,7 +118,7 @@ fn what_ends(busy: &Option<Vec<String>>) -> String {
 }
 
 fn after_restart() -> &'static str {
-    if crate::theme::read_settings().0.restore_layout {
+    if files::config::read_settings().0.restore_layout {
         "your tabs and splits come back with fresh shells"
     } else {
         "the tabs close (restore-layout is off)"

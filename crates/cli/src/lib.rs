@@ -1069,31 +1069,20 @@ fn screen_check(a: &Args) -> Out {
 
 /// The config file's `screen`, or the default.
 fn current_screen() -> String {
-    proto::paths::config_dir()
-        .and_then(|d| std::fs::read_to_string(d.join("config")).ok())
-        .map(|t| proto::config::Settings::parse(&t).0.screen)
-        .unwrap_or_else(|| proto::config::DEFAULT_SCREEN.to_owned())
+    files::config::read_settings().0.screen
 }
 
 fn screen_use(a: &Args) -> Out {
     let name = one_name(a, "screen")?;
     files::screens::read(name).map_err(|e| error("invalid", e))?;
-    let file = proto::paths::config_dir()
-        .ok_or_else(|| error("no_home", "no home directory for the config file"))?
-        .join("config");
-    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let file = files::config::config_file()
+        .ok_or_else(|| error("no_home", "no home directory for the config file"))?;
     let values: Vec<String> = if name == proto::config::DEFAULT_SCREEN {
         Vec::new()
     } else {
         vec![name.to_owned()]
     };
-    if let Some(d) = file.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(
-        &file,
-        proto::config::set_config_values(&text, "screen", &values),
-    )?;
+    files::config::save_values("screen", &values).map_err(|e| error("invalid", e))?;
     Ok(Some(json!({"screen": name, "config": file})))
 }
 
@@ -1304,12 +1293,7 @@ fn workspace_save(a: &Args) -> Out {
             .map_err(|m| error("not_found", m))?
         }
     };
-    if let Some(d) = target.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(&target, &text)?;
-    // Saved by the user: opening it again needn't ask.
-    workspaces::trust(&target, &text)?;
+    workspaces::save(&target, &text)?;
     Ok(Some(json!({"saved": target, "name": name})))
 }
 

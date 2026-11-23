@@ -10,7 +10,6 @@ mod notify;
 mod open;
 mod screens;
 mod service;
-mod theme;
 #[cfg(target_os = "macos")]
 mod titlebar;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -183,40 +182,6 @@ struct Acted {
 /// Change the layout (a shortcut, a menu item, a click).
 #[tauri::command]
 async fn layout_act(state: State<'_, Term>, action: Action) -> Result<Acted, String> {
-    // KIBANN_COMMAND runs a program instead of the login shell (split on
-    // whitespace; for trying the app with vim, htop and the like).
-    let command = || {
-        std::env::var("KIBANN_COMMAND")
-            .ok()
-            .map(|c| c.split_whitespace().map(String::from).collect())
-    };
-    let action = match action {
-        Action::NewTab {
-            near,
-            cwd,
-            argv: None,
-            focus,
-        } => Action::NewTab {
-            near,
-            cwd,
-            argv: command(),
-            focus,
-        },
-        Action::Split {
-            pane,
-            dir,
-            cwd,
-            argv: None,
-            focus,
-        } => Action::Split {
-            pane,
-            dir,
-            cwd,
-            argv: command(),
-            focus,
-        },
-        other => other,
-    };
     // Dev builds log every action, to see what a shortcut or click sent.
     if cfg!(debug_assertions) {
         eprintln!("kibann: layout action {action:?}");
@@ -339,8 +304,7 @@ async fn workspace_save(
             relative_to: None,
         },
     )?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(&target, text).map_err(|e| e.to_string())?;
+    workspaces::save(&target, &text).map_err(|e| e.to_string())?;
     Ok(target.display().to_string())
 }
 
@@ -445,7 +409,7 @@ fn show_theme(app: &AppHandle) {
         // the system, which keeps switching it.
         (name, l.preview.is_some() || l.choice.light == l.choice.dark)
     };
-    let (name, theme) = match theme::load(&name) {
+    let (name, theme) = match files::themes::load(&name) {
         Ok((t, errors)) => {
             for e in errors {
                 let _ = app.emit("notice", format!("Theme \"{name}\": {e}"));
@@ -460,7 +424,7 @@ fn show_theme(app: &AppHandle) {
             } else {
                 proto::theme::DEFAULT_LIGHT
             };
-            (n.to_owned(), theme::load(n).expect("built in").0)
+            (n.to_owned(), files::themes::load(n).expect("built in").0)
         }
     };
     window_colors(app, &theme, one.then(|| theme.is_dark()));
@@ -524,8 +488,8 @@ fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<boo
 
 /// Read the config file again (it changed, or at start).
 pub(crate) fn reload_choice(app: &AppHandle) {
-    let (choice, errors) = theme::read_choice();
-    let (settings, more) = theme::read_settings();
+    let (choice, errors) = files::config::read_choice();
+    let (settings, more) = files::config::read_settings();
     let problems: Vec<String> = errors.into_iter().chain(more).collect();
     for e in &problems {
         let _ = app.emit("notice", format!("Config: {e}"));
@@ -569,7 +533,7 @@ struct ConfigInfo {
 fn config_info(app: AppHandle) -> ConfigInfo {
     let choice = app.state::<Mutex<Looks>>().lock().unwrap().choice.clone();
     ConfigInfo {
-        path: theme::config_file()
+        path: files::config::config_file()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
         problems: app.state::<Problems>().0.lock().unwrap().clone(),
@@ -582,7 +546,7 @@ fn config_info(app: AppHandle) -> ConfigInfo {
 /// watcher picks it up as it would an edit by hand.
 #[tauri::command]
 fn settings_set(key: String, values: Vec<String>) -> Result<(), String> {
-    theme::save_values(&key, &values)
+    files::config::save_values(&key, &values)
 }
 
 /// Open the config file in the text editor, or show it in the file
@@ -590,7 +554,7 @@ fn settings_set(key: String, values: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 fn config_open(app: AppHandle, reveal: bool) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let file = theme::config_file().ok_or("no home directory")?;
+    let file = files::config::config_file().ok_or("no home directory")?;
     if !file.exists() {
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -686,11 +650,11 @@ fn watch_config(app: AppHandle) {
     let _ = std::thread::Builder::new()
         .name("config-watch".into())
         .spawn(move || {
-            let mut last = theme::stamp();
+            let mut last = files::themes::stamp();
             let mut screens_last = files::screens::stamp();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
-                let now = theme::stamp();
+                let now = files::themes::stamp();
                 if now != last {
                     last = now;
                     reload_choice(&app);
@@ -710,8 +674,8 @@ fn theme_current(looks: State<'_, Mutex<Looks>>) -> ThemeNow {
 }
 
 #[tauri::command]
-async fn theme_list() -> Vec<theme::Entry> {
-    theme::list()
+async fn theme_list() -> Vec<files::themes::Entry> {
+    files::themes::list()
 }
 
 /// Show `name` for now; `None` goes back to the kept theme.
@@ -735,7 +699,7 @@ async fn theme_choose(app: AppHandle, name: String) -> Result<(), String> {
         }
         l.choice.clone()
     };
-    let saved = theme::save_choice(&choice);
+    let saved = files::config::save_choice(&choice);
     show_theme(&app);
     saved
 }

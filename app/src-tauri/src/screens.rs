@@ -165,7 +165,7 @@ pub async fn screen_choose(app: AppHandle, name: String) -> Result<(), String> {
     } else {
         vec![name]
     };
-    crate::theme::save_values("screen", &values)?;
+    files::config::save_values("screen", &values)?;
     crate::reload_choice(&app);
     let _ = app.emit("screen", current(&app));
     Ok(())

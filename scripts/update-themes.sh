@@ -1,14 +1,14 @@
 #!/bin/sh
 # Refresh the bundled color themes from iTerm2-Color-Schemes (MIT), its
 # Ghostty-format folder, into one file the app embeds:
-#   app/src-tauri/themes/themes.txt   "### NAME" then the theme's lines
-#   app/src-tauri/themes/LICENSE      the collection's license
+#   crates/files/themes/themes.txt   "### NAME" then the theme's lines
+#   crates/files/themes/LICENSE      the collection's license
 # Usage: scripts/update-themes.sh [COMMIT]   (default: the one below)
 set -eu
 COMMIT=${1:-e5964e1410f2f5092e7a0d66be91055bf9e78b14}
 REPO=https://github.com/mbadolato/iTerm2-Color-Schemes.git
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUT=$ROOT/app/src-tauri/themes
+OUT=$ROOT/crates/files/themes
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

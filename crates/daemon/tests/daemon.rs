@@ -972,6 +972,36 @@ fn a_theme_reaches_every_session_and_new_ones() {
 }
 
 #[test]
+fn the_theme_outlives_the_daemon() {
+    let path = socket();
+    let file = path.parent().unwrap().join("state").join("layout.json");
+    let (d, h) = start(&path, Duration::from_secs(60));
+    d.save_layout_to(file.clone(), Duration::from_millis(50));
+    let (f, _rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let light = proto::theme::Theme::kibann_light();
+    c.request(|req| ClientMsg::SetTheme {
+        req,
+        theme: light.clone(),
+    })
+    .unwrap();
+    c.stop(&path).unwrap();
+    h.join().unwrap().unwrap();
+    drop(d);
+
+    // The next one starts in it, before any client says.
+    let (d, h) = start(&path, Duration::from_secs(60));
+    d.save_layout_to(file, Duration::from_millis(50));
+    let (f, rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let a = sh(&c, None);
+    c.send(&ClientMsg::Attach { session: a }).unwrap();
+    frame_with_bg(&c, &rx, a, 0xffffff);
+    d.shutdown();
+    h.join().unwrap().unwrap();
+}
+
+#[test]
 fn stopping_saves_the_layout_and_says_what_was_running() {
     let path = socket();
     let file = path.parent().unwrap().join("state").join("layout.json");

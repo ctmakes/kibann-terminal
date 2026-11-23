@@ -60,6 +60,11 @@ fn pane_env(socket: &std::path::Path) -> server::PaneEnv {
         socket: Some(socket.to_owned()),
         bin,
         path_dir,
+        // Split on whitespace.
+        command: std::env::var("KIBANN_COMMAND")
+            .ok()
+            .map(|c| c.split_whitespace().map(String::from).collect::<Vec<_>>())
+            .filter(|c| !c.is_empty()),
     }
 }
 

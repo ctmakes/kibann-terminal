@@ -354,6 +354,10 @@ KIBANN_LAYOUT="right,down,tab" npm run tauri dev  # start with splits and tabs
 KIBANN_RECORD=/tmp/s.cast npm run tauri dev       # record sessions (asciicast) for debugging
 ```
 
+`KIBANN_COMMAND` and `KIBANN_RECORD` are read by the terminal service when
+it starts, so they apply once no service from an earlier run is left
+(a dev build replaces the service of any other build when it starts).
+
 On Linux you also need the WebKitGTK and GTK development packages. On Debian or Ubuntu:
 
 ```sh

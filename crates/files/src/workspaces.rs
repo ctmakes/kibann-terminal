@@ -330,6 +330,13 @@ fn needs_asking_in(f: &Found, t: &Template, store: Option<&Path>) -> bool {
 }
 
 /// Remember that `path`, as it is now (`text`), may run its commands.
+/// Write a workspace the user saved (from what is open), and trust it:
+/// opening it again needn't ask about its commands.
+pub fn save(path: &Path, text: &str) -> io::Result<()> {
+    crate::write_whole(path, text)?;
+    trust(path, text)
+}
+
 pub fn trust(path: &Path, text: &str) -> io::Result<()> {
     match proto::paths::trusted_file() {
         Some(store) => trust_in(&store, path, text),

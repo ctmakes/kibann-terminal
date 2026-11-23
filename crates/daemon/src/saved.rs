@@ -22,6 +22,10 @@ pub struct Saved {
     pub layout: Layout,
     /// Each pane's last directory, when known.
     pub dirs: BTreeMap<PaneId, String>,
+    /// The sessions' colors, last set by a client: a daemon starting again
+    /// uses them from the first pane on.
+    #[serde(default)]
+    pub theme: Option<proto::theme::Theme>,
 }
 
 impl Saved {
@@ -130,6 +134,12 @@ pub fn load(path: &Path) -> Option<Saved> {
     (s.panes() > 0).then_some(s)
 }
 
+/// The theme kept with the layout, if any (with or without panes).
+pub fn load_theme(path: &Path) -> Option<proto::theme::Theme> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Saved>(&text).ok()?.theme
+}
+
 /// `tree` with each pane replaced as `f` says.
 pub fn map_tree(tree: &Tree, f: &mut impl FnMut(PaneId) -> PaneId) -> Tree {
     match tree {
@@ -167,6 +177,7 @@ mod tests {
                 active: Some(2),
             },
             dirs: BTreeMap::from([(4, "/tmp".to_owned())]),
+            theme: None,
         }
     }
 

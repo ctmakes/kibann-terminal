@@ -89,6 +89,10 @@ pub struct PaneEnv {
     pub bin: Option<PathBuf>,
     /// A directory holding a `kibann` link, put first on `PATH`.
     pub path_dir: Option<PathBuf>,
+    /// What runs in a pane opened with no program, instead of the login
+    /// shell (`KIBANN_COMMAND`, for trying Kibann with vim, htop and the
+    /// like).
+    pub command: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -112,8 +116,9 @@ struct State {
     places: HashMap<PaneId, Place>,
     /// The git map watchers last got.
     git_sent: BTreeMap<PaneId, PaneDir>,
-    /// The app's theme; `None` until it sends one (libghostty's defaults,
-    /// the same colors as the built-in dark theme).
+    /// The sessions' colors: the last a client set, else the saved ones;
+    /// `None` until then (libghostty's defaults, the same colors as the
+    /// built-in dark theme).
     theme: Option<proto::theme::Theme>,
     shutdown: bool,
     /// Keeps the layout on disk, once [`Daemon::save_layout_to`] set a file.
@@ -149,7 +154,11 @@ impl State {
             .filter_map(|p| Some((p, self.places.get(&p)?.dir.to_str()?.to_owned())))
             .filter(|(_, d)| !d.is_empty())
             .collect();
-        let saved = crate::saved::Saved { layout, dirs };
+        let saved = crate::saved::Saved {
+            layout,
+            dirs,
+            theme: self.theme.clone(),
+        };
         if let Some(s) = &mut self.saver {
             s.offer(&saved);
         }
@@ -607,6 +616,7 @@ impl Daemon {
                     e.session.set_theme(theme.clone());
                 }
                 st.theme = Some(theme);
+                st.offer_save();
                 drop(st);
                 Self::reply(out, req, Reply::Ok);
             }
@@ -954,6 +964,7 @@ impl Daemon {
             st.next_session += 1;
             (st.next_session, st.env.clone())
         };
+        let argv = argv.or(env.command);
         let mut vars = vec![("KIBANN_PANE".to_owned(), format!("p{id}"))];
         if let Some(s) = &env.socket {
             vars.push(("KIBANN_SOCKET".into(), s.to_string_lossy().into_owned()));
@@ -1172,8 +1183,13 @@ impl Daemon {
     /// Keep the layout in `path` from now on, for [`Self::restore`],
     /// written once it stayed the same for `delay`
     /// ([`crate::saved::SAVE_DELAY`]).
+    /// The theme saved there is used until a client sets one.
     pub fn save_layout_to(&self, path: PathBuf, delay: Duration) {
+        let theme = crate::saved::load_theme(&path);
         let mut st = self.lock();
+        if st.theme.is_none() {
+            st.theme = theme;
+        }
         st.saver = Some(crate::saved::Saver::start(path, delay));
     }
 
