@@ -557,7 +557,9 @@ fn echo_latency(c: &Client, rx: &Receiver<Ev>, s: PaneId) -> Duration {
             }
         }
         let ch = char::from(b'a' + (i % 26) as u8).to_string();
-        let marker = format!("{ch}{ch}");
+        // A comment: run as a command, `cc` or `dd` would print (or read)
+        // after the next marker's echo, and its line would never end with it.
+        let marker = format!("#{ch}{ch}");
         let t = Instant::now();
         // In one input, so it echoes in one go: typed apart, the second
         // echo can wait for the next frame slot (16 ms) on a busy machine,
