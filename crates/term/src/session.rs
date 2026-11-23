@@ -146,6 +146,29 @@ pub struct Spawn {
     pub env: Vec<(String, String)>,
 }
 
+/// `argv` (the login shell when it's `None` or empty) with the environment
+/// every pane's program gets: other terminals' variables gone, and ours.
+pub fn command(argv: Option<&[String]>) -> CommandBuilder {
+    let mut cmd = match argv {
+        Some([program, args @ ..]) => {
+            let mut c = CommandBuilder::new(program);
+            c.args(args);
+            c
+        }
+        _ => CommandBuilder::new_default_prog(),
+    };
+    for (k, _) in std::env::vars_os() {
+        if k.to_str().is_some_and(is_foreign_terminal_var) {
+            cmd.env_remove(&k);
+        }
+    }
+    cmd.env("TERM", TERMINFO_NAME);
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "kibann");
+    cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    cmd
+}
+
 /// Handle to a session. Dropping it kills the shell and stops the threads.
 pub struct Session {
     tx: channel::Sender<Msg>,
@@ -162,23 +185,7 @@ impl Session {
         let pty = native_pty_system();
         let pair = pty.openpty(pty_size(size)).map_err(io::Error::other)?;
 
-        let mut cmd = match &spawn.argv {
-            Some(argv) if !argv.is_empty() => {
-                let mut c = CommandBuilder::new(&argv[0]);
-                c.args(&argv[1..]);
-                c
-            }
-            _ => CommandBuilder::new_default_prog(),
-        };
-        for (k, _) in std::env::vars_os() {
-            if k.to_str().is_some_and(is_foreign_terminal_var) {
-                cmd.env_remove(&k);
-            }
-        }
-        cmd.env("TERM", TERMINFO_NAME);
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "kibann");
-        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        let mut cmd = command(spawn.argv.as_deref());
         for (k, v) in &spawn.env {
             cmd.env(k, v);
         }

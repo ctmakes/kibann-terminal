@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{PtySize, native_pty_system};
 use proto::Resize;
 use term::Emulator;
 use term::cast::{CastWriter, Header};
@@ -151,10 +151,8 @@ fn run() -> Result<(), String> {
             pixel_height: 0,
         })
         .map_err(|e| e.to_string())?;
-    let mut cmd = CommandBuilder::new(&argv[0]);
-    cmd.args(&argv[1..]);
-    cmd.env("TERM", term::emulator::TERMINFO_NAME);
-    cmd.env("COLORTERM", "truecolor");
+    // As a pane would run it.
+    let mut cmd = term::session::command(Some(&argv));
     if std::env::var_os("LANG").is_none() {
         cmd.env("LANG", "en_US.UTF-8");
     }
