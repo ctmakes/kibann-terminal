@@ -5,25 +5,7 @@
 // set for light backgrounds.
 
 import type { Theme } from "../proto";
-
-/** How far toward the foreground each surface or text color sits. */
-const MIX = {
-  sidebar: 0.063,
-  bar: 0.067,
-  header: 0.078,
-  panel: 0.1,
-  tab: 0.114,
-  tabActive: 0.165,
-  kbd: 0.165,
-  edge: 0.165,
-  divider: 0.227,
-  muted: 0.49,
-  text: 0.604,
-  label: 0.66,
-  strong: 0.784,
-  title: 0.847,
-  bright: 0.9,
-} as const;
+import { DARK_BELOW, MIX } from "../proto/generated/constants";
 
 /** Surfaces text is drawn on, and the text colors that must read on them. */
 const SURFACES = ["sidebar", "bar", "header", "panel"] as const;
@@ -49,7 +31,7 @@ const LIGHT = {
 
 const hex = (c: number) => `#${(c & 0xffffff).toString(16).padStart(6, "0")}`;
 
-/** `a` moved toward `b` by `t` (0..1), per channel. */
+/** `a` moved toward `b` by `t` (0..1), per channel (as proto's `mix`). */
 export function mix(a: number, b: number, t: number): number {
   const ch = (s: number) =>
     Math.round(((a >> s) & 0xff) * (1 - t) + ((b >> s) & 0xff) * t);
@@ -71,7 +53,7 @@ export function contrast(a: number, b: number): number {
   return (x + 0.05) / (y + 0.05);
 }
 
-export const isDark = (t: Theme) => luminance(t.background) < 0.4;
+export const isDark = (t: Theme) => luminance(t.background) < DARK_BELOW;
 
 /** The CSS variables (`--k-…`) for `theme`. */
 export function chromeFor(t: Theme): Record<string, string> {

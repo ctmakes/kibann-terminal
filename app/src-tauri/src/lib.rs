@@ -563,8 +563,8 @@ fn window_colors(app: &AppHandle, theme: &proto::theme::Theme, force: Option<boo
             }
         }
     }
-    // The tab bar's color (`--k-bar` in app/src/workspace/theme.ts).
-    let bar = proto::theme::mix(theme.background, theme.foreground, 0.067);
+    // The tab bar's color, so a resize shows no seam.
+    let bar = proto::theme::chrome(theme, "bar").unwrap_or(theme.background);
     let [_, r, g, b] = bar.to_be_bytes();
     let _ = w.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
 }

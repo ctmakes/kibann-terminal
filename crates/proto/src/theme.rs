@@ -153,7 +153,7 @@ impl Theme {
 
     /// Whether it's a dark theme (its background is dark).
     pub fn is_dark(&self) -> bool {
-        luminance(self.background) < 0.4
+        luminance(self.background) < DARK_BELOW
     }
 }
 
@@ -190,7 +190,37 @@ fn color(s: &str) -> Option<u32> {
     }
 }
 
-/// Relative luminance, 0 (black) to 1 (white).
+/// A theme is dark when its background's luminance is below this.
+pub const DARK_BELOW: f64 = 0.4;
+
+/// How far each of the window's surfaces and text colors sits from the
+/// theme's background toward its foreground (by [`mix`]). The page builds
+/// its colors from these (`app/src/workspace/theme.ts`, generated as
+/// `MIX`); the app paints the window behind the page `bar`.
+pub const CHROME_MIX: &[(&str, f64)] = &[
+    ("sidebar", 0.063),
+    ("bar", 0.067),
+    ("header", 0.078),
+    ("panel", 0.1),
+    ("tab", 0.114),
+    ("tabActive", 0.165),
+    ("kbd", 0.165),
+    ("edge", 0.165),
+    ("divider", 0.227),
+    ("muted", 0.49),
+    ("text", 0.604),
+    ("label", 0.66),
+    ("strong", 0.784),
+    ("title", 0.847),
+    ("bright", 0.9),
+];
+
+/// `theme`'s color for the chrome surface `name` (from [`CHROME_MIX`]).
+pub fn chrome(theme: &Theme, name: &str) -> Option<u32> {
+    let (_, t) = CHROME_MIX.iter().find(|(n, _)| *n == name)?;
+    Some(mix(theme.background, theme.foreground, *t))
+}
+
 /// `a` moved toward `b` by `t` (0..1), per channel (as `mix` in the app's
 /// `workspace/theme.ts`).
 pub fn mix(a: u32, b: u32, t: f64) -> u32 {
@@ -202,6 +232,7 @@ pub fn mix(a: u32, b: u32, t: f64) -> u32 {
     ch(16) | ch(8) | ch(0)
 }
 
+/// WCAG relative luminance, 0 (black) to 1 (white).
 fn luminance(c: u32) -> f64 {
     let ch = |v: u32| {
         let v = f64::from(v & 0xff) / 255.0;

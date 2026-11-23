@@ -32,3 +32,25 @@ export const Underline = {
   DOTTED: 4,
   DASHED: 5,
 } as const;
+
+/** See `CHROME_MIX` in crates/proto/src/theme.rs. */
+export const MIX = {
+  sidebar: 0.063,
+  bar: 0.067,
+  header: 0.078,
+  panel: 0.1,
+  tab: 0.114,
+  tabActive: 0.165,
+  kbd: 0.165,
+  edge: 0.165,
+  divider: 0.227,
+  muted: 0.49,
+  text: 0.604,
+  label: 0.66,
+  strong: 0.784,
+  title: 0.847,
+  bright: 0.9,
+} as const;
+
+/** Luminance below which a theme is dark. */
+export const DARK_BELOW = 0.4;

@@ -416,18 +416,35 @@ mod tests {
     /// The constants ts-rs can't express, written next to its output.
     #[test]
     fn export_constants() {
-        let table = |name: &str, all: Vec<(&str, u16)>| {
+        let table = |name: &str, all: Vec<(&str, String)>| {
             let body: String = all.iter().map(|(k, v)| format!("  {k}: {v},\n")).collect();
             format!("export const {name} = {{\n{body}}} as const;\n")
         };
+        let ints =
+            |all: &[(&'static str, u16)]| all.iter().map(|&(k, v)| (k, v.to_string())).collect();
         let out = [
             "// Generated from crates/proto/src/lib.rs by `cargo test -p proto`. Do not edit.\n"
                 .to_string(),
-            table("Flag", flags::ALL.to_vec()),
-            table("Mods", mods::ALL.to_vec()),
+            table("Flag", ints(flags::ALL)),
+            table("Mods", ints(mods::ALL)),
             table(
                 "Underline",
-                Underline::ALL.iter().map(|&(k, u)| (k, u as u16)).collect(),
+                Underline::ALL
+                    .iter()
+                    .map(|&(k, u)| (k, (u as u16).to_string()))
+                    .collect(),
+            ),
+            "/** See `CHROME_MIX` in crates/proto/src/theme.rs. */\n".to_string()
+                + &table(
+                    "MIX",
+                    theme::CHROME_MIX
+                        .iter()
+                        .map(|&(k, v)| (k, format!("{v:?}")))
+                        .collect(),
+                ),
+            format!(
+                "/** Luminance below which a theme is dark. */\nexport const DARK_BELOW = {:?};\n",
+                theme::DARK_BELOW
             ),
         ]
         .join("\n");
