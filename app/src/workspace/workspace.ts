@@ -931,9 +931,10 @@ export class Workspace {
         return this.opts.screens.exec(part, program, args, cwd, timeout);
       },
       thumbnail: (pane, width, height) => this.thumbnail(pane, width, height),
-      key: (k) => {
+      key: (k, granted) => {
         const action = actionFor({ ...k, repeat: false, isComposing: false, keyCode: 0 }, this.platform);
-        if (action) this.runOnce(action, "key");
+        if (!action || (action.kind === "close" && !granted.type)) return;
+        this.runOnce(action, "key");
       },
       release: () => this.focusedPane?.view?.focus(),
       error: (part, message) => {

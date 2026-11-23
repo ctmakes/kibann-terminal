@@ -10,7 +10,8 @@ export type Permissions = {
  */
 read: boolean, 
 /**
- * Type into terminals and open workspaces (which run commands).
+ * Type into terminals, close them and open workspaces (which run
+ * commands).
  */
 type: boolean, 
 /**

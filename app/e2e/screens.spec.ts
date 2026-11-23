@@ -201,6 +201,28 @@ test.describe("screens", () => {
     expect(await page.evaluate(() => (window as any).__ws.execs)).toEqual([]);
     await probe.locator("#type").click();
     await expect(probe.locator("#type")).toHaveText(/denied: pane.type needs the "type" permission/);
+    await probe.locator("#close").click();
+    await expect(probe.locator("#close")).toHaveText(/denied: pane.close needs the "type" permission/);
+    expect(await page.evaluate(() => (window as any).__ws.ws.panes.size)).toBe(1);
+  });
+
+  test("a part can't press shortcuts for the user", async ({ page }) => {
+    await open(page, { screen: "probe", deny: "1" });
+    const probe = page.frameLocator('iframe[data-part="probe"]');
+    await expect(probe.locator("#result")).not.toHaveText("waiting");
+    const frame = (await page.locator('iframe[data-part="probe"]').elementHandle())!.contentFrame();
+    // Posted while the terminal has the keyboard: not the user's key.
+    await (await frame)!.evaluate(() =>
+      parent.postMessage({ kibann: 1, t: "key", key: "t", code: "KeyT", alt: false, ctrl: false, meta: true, shift: false }, "*"),
+    );
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => (window as any).__ws.ws.tabs.length)).toBe(1);
+    // Pressed in the part, but ending a pane needs "type".
+    await probe.locator("#field").click();
+    await expect(probe.locator("#field")).toBeFocused();
+    await page.keyboard.press("Meta+w");
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => (window as any).__ws.ws.panes.size)).toBe(1);
   });
 
   test("a shortcut pressed in a part still works", async ({ page }) => {

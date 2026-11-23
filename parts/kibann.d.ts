@@ -79,6 +79,7 @@ type KibannAction =
   /** A new tab beside `near` (default: the focused pane), in its directory. */
   | ["tab.new", { near?: number }]
   | ["pane.split", { pane?: number; direction: "right" | "down" }]
+  /** End the pane's program and close it. Needs `type`. */
   | ["pane.close", { pane: number }]
   /** Fill the tab with the pane, or back. */
   | ["pane.zoom", { pane?: number }]

@@ -4,6 +4,7 @@
 <pre id="result">waiting</pre>
 <button id="toggle">toggle extra</button>
 <button id="type">type</button>
+<button id="close">close</button>
 <input id="field" placeholder="a field">
 <script>
   const out = {};
@@ -27,6 +28,10 @@
   document.getElementById("type").addEventListener("click", async () => {
     const r = await settle(kibann.run("pane.type", { pane: kibann.state.focused, text: "hi", enter: true }));
     document.getElementById("type").textContent = r;
+  });
+  document.getElementById("close").addEventListener("click", async () => {
+    const r = await settle(kibann.run("pane.close", { pane: kibann.state.focused }));
+    document.getElementById("close").textContent = r;
   });
 </script>
 </body></html>

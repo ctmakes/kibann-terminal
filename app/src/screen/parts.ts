@@ -60,15 +60,20 @@ export interface PartContext {
   /** The pane `width` CSS px wide; with `height`, that tall, cropped
    * around the cursor (where the action is). */
   thumbnail(pane: number, width: number, height?: number): Promise<ImageBitmap | null>;
-  /** A key with Cmd or Ctrl pressed in a part: a shortcut, maybe. */
-  key(k: { key: string; code: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): void;
+  /** A key with Cmd or Ctrl pressed in a part: a shortcut, maybe. Ending
+   * a pane (Cmd+W) needs `granted.type`, as `pane.close` does. */
+  key(
+    k: { key: string; code: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+    granted: Permissions,
+  ): void;
   /** A part let go of the keyboard (a click that wasn't in a text field). */
   release(): void;
   error(part: string, message: string): void;
 }
 
-/** Actions that need the `type` permission: they run commands. */
-const TYPING = new Set(["pane.type", "workspace.open"]);
+/** Actions that need the `type` permission: they run commands or end them.
+ * The rest only show things or start fresh shells. */
+const TYPING = new Set(["pane.type", "pane.close", "workspace.open"]);
 /** The most a part keeps (store), as JSON. */
 const STORE_MAX = 1 << 20;
 
@@ -177,6 +182,9 @@ export class PartHost {
         void this.call(f, Number(m.id), String(m.method), (m.args ?? {}) as Record<string, unknown>);
         return;
       case "key":
+        // Only a key the user pressed in the part: one it posts while it
+        // doesn't have the keyboard isn't theirs.
+        if (document.activeElement !== f.iframe) return;
         this.ctx.key({
           key: String(m.key),
           code: String(m.code),
@@ -184,7 +192,7 @@ export class PartHost {
           ctrlKey: !!m.ctrl,
           metaKey: !!m.meta,
           shiftKey: !!m.shift,
-        });
+        }, f.part.granted);
         return;
       case "release":
         this.ctx.release();

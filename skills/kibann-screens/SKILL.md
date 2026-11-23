@@ -107,7 +107,7 @@ board). `kibann screen parts` lists them all.
 
 - **`permissions`**, each asked of the user, and nothing else is allowed:
   - `"read": true`: see what the terminals show (`kibann.thumbnail`).
-  - `"type": true`: type into terminals, open workspaces.
+  - `"type": true`: type into terminals, close them, open workspaces.
   - `"exec": ["git", "gh"]`: run these programs (by name, without a shell).
   - `"net": ["api.github.com"]`: connect to these hosts (https and wss).
 - **`focusable`:** keeps the keyboard after a click (a part with text

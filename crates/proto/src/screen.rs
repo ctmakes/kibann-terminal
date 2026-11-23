@@ -240,7 +240,8 @@ pub struct Permissions {
     /// See what the terminals show (`kibann.thumbnail`).
     #[serde(default)]
     pub read: bool,
-    /// Type into terminals and open workspaces (which run commands).
+    /// Type into terminals, close them and open workspaces (which run
+    /// commands).
     #[serde(default, rename = "type")]
     #[ts(rename = "type")]
     pub type_: bool,
@@ -264,7 +265,7 @@ impl Permissions {
             out.push("see what your terminals show".to_owned());
         }
         if self.type_ {
-            out.push("type into your terminals and open workspaces".to_owned());
+            out.push("type into your terminals, close them and open workspaces".to_owned());
         }
         if !self.exec.is_empty() {
             out.push(format!("run {}", self.exec.join(", ")));
