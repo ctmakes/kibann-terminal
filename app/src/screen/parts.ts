@@ -22,7 +22,7 @@ export interface PartContext {
   state(): PartState;
   theme(): PartTheme;
   /** Do `action` for the part `part` (already checked against what it may do). */
-  run(part: string, action: string, args: Record<string, unknown>): Promise<unknown>;
+  run(part: string, action: PartAction, args: Record<string, unknown>): Promise<unknown>;
   exec(part: string, program: string, args: string[], cwd: string | null, timeout: number | null): Promise<ExecResult>;
   /** The pane `width` CSS px wide; with `height`, that tall, cropped
    * around the cursor (where the action is). */
@@ -38,9 +38,36 @@ export interface PartContext {
   error(part: string, message: string): void;
 }
 
+/** What `kibann.run` can do (parts/kibann.d.ts: KibannAction, checked
+ * against this by parts-api.check.ts). */
+export const PART_ACTIONS = [
+  "pane.focus",
+  "tab.activate",
+  "tab.new",
+  "pane.split",
+  "pane.close",
+  "pane.zoom",
+  "pane.type",
+  "workspace.open",
+  "diff",
+  "screen.switch",
+  "node.show",
+  "node.hide",
+  "node.toggle",
+  "notify",
+  "settings",
+  "themes",
+  "shortcuts",
+  "workspaces",
+  "screens",
+] as const;
+export type PartAction = (typeof PART_ACTIONS)[number];
+
+const isPartAction = (a: string): a is PartAction => (PART_ACTIONS as readonly string[]).includes(a);
+
 /** Actions that need the `type` permission: they run commands or end them.
  * The rest only show things or start fresh shells. */
-const TYPING = new Set(["pane.type", "pane.close", "workspace.open"]);
+const TYPING: ReadonlySet<PartAction> = new Set(["pane.type", "pane.close", "workspace.open"]);
 /** The most a part keeps (store), as JSON. */
 const STORE_MAX = 1 << 20;
 
@@ -179,6 +206,7 @@ export class PartHost {
       switch (method) {
         case "run": {
           const action = String(args.action);
+          if (!isPartAction(action)) throw new Error(`no action ${action}`);
           if (TYPING.has(action) && !granted.type) throw new Error(`${action} needs the "type" permission`);
           value = await this.ctx.run(f.name, action, (args.args ?? {}) as Record<string, unknown>);
           break;

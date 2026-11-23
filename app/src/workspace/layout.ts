@@ -4,11 +4,10 @@
 // bottom). "row" puts them side by side (split right); "column" stacks them
 // (split down). Trees are immutable: every change returns a new tree.
 
-import type { Dir, Step, Tree } from "../proto";
+import type { Dir, Direction, Step, Tree } from "../proto";
 
-export type { Dir, Tree };
+export type { Dir, Direction, Tree };
 export type PaneId = number;
-export type Direction = "left" | "right" | "up" | "down";
 
 /** Steps from the root to a node. */
 export type Path = Step[];

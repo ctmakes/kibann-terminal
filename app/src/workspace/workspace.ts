@@ -25,7 +25,7 @@ import { FindBar } from "./find";
 import { applyChrome, chromeFor, isDark, KIBANN_DARK, type ThemeApi } from "./theme";
 import type { ScreenNow, Theme } from "../proto";
 import { ScreenView, type BlockSlot } from "../screen/engine";
-import { PartHost, type PartState, type PartTheme } from "../screen/parts";
+import { PartHost, type PartAction, type PartState, type PartTheme } from "../screen/parts";
 import { ScreenPicker, type ScreenApi } from "../screen/picker";
 import { DEFAULT_SCREEN } from "../screen/default";
 import { Sidebar } from "./sidebar";
@@ -1033,7 +1033,7 @@ export class Workspace {
     };
   }
 
-  private async partRun(part: string, action: string, a: Record<string, unknown>): Promise<unknown> {
+  private async partRun(part: string, action: PartAction, a: Record<string, unknown>): Promise<unknown> {
     const num = (k: string): number => {
       const v = a[k];
       if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${action}: ${k} must be a pane or tab id`);
@@ -1120,8 +1120,10 @@ export class Workspace {
       case "screens":
         this.run({ kind: action });
         return null;
-      default:
-        throw new Error(`no action ${action}`);
+      default: {
+        const never: never = action;
+        throw new Error(`no action ${String(never)}`);
+      }
     }
   }
 

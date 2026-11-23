@@ -6,6 +6,7 @@
 import type { AgentState as ProtoAgentState, PartState, PartTheme } from "../proto";
 import type { PartPane } from "../proto/generated/PartPane";
 import type { PartTab } from "../proto/generated/PartTab";
+import type { PartAction } from "./parts";
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
@@ -15,5 +16,6 @@ const checks: [
   Same<KibannTab, PartTab>,
   Same<KibannState, PartState>,
   Same<KibannTheme, PartTheme>,
-] = [true, true, true, true, true];
+  Same<KibannAction[0], PartAction>,
+] = [true, true, true, true, true, true];
 export default checks;

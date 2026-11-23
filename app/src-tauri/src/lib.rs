@@ -857,19 +857,22 @@ const CHECK_UPDATES: &str = "check-updates";
 const WHATS_NEW: &str = "whats-new";
 
 /// The macOS menu bar: the standard menus plus the workspace actions with
-/// their shortcuts. An item's id is the frontend action as JSON.
+/// their shortcuts. An item's id is its `Command` as JSON.
 #[cfg(target_os = "macos")]
 fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use proto::command::Command;
+    use proto::layout::Dir;
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-    let item = |action: &str, text: &str, accel: &str| {
-        MenuItemBuilder::with_id(action, text)
+    let item = |id: &str, text: &str, accel: &str| {
+        MenuItemBuilder::with_id(id, text)
             .accelerator(accel)
             .build(app)
     };
+    let cmd = |c: Command, text: &str, accel: &str| item(&c.id(), text, accel);
     let app_menu = SubmenuBuilder::new(app, "Kibann Terminal")
         .about(None)
         .separator()
-        .item(&item(r#"{"kind":"settings"}"#, "Settings…", "Cmd+Comma")?)
+        .item(&cmd(Command::Settings, "Settings…", "Cmd+Comma")?)
         .separator()
         .services()
         .separator()
@@ -885,89 +888,70 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .item(&item(QUIT_KEY, quit_labels(true)[0].1, "Cmd+Q")?)
         .build()?;
     let shell = SubmenuBuilder::new(app, "Shell")
-        .item(&item(r#"{"kind":"newTab"}"#, "New Tab", "Cmd+T")?)
+        .item(&cmd(Command::NewTab, "New Tab", "Cmd+T")?)
         .separator()
-        .item(&item(
-            r#"{"kind":"split","dir":"row"}"#,
+        .item(&cmd(
+            Command::Split { dir: Dir::Row },
             "Split Right",
             "Cmd+D",
         )?)
-        .item(&item(
-            r#"{"kind":"split","dir":"column"}"#,
+        .item(&cmd(
+            Command::Split { dir: Dir::Column },
             "Split Down",
             "Shift+Cmd+D",
         )?)
         .separator()
-        .item(&item(r#"{"kind":"close"}"#, "Close", "Cmd+W")?)
+        .item(&cmd(Command::Close, "Close", "Cmd+W")?)
         .build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .copy()
         .paste()
         .separator()
-        .item(&item(r#"{"kind":"find"}"#, "Find…", "Cmd+F")?)
-        .item(&item(
-            r#"{"kind":"findStep","older":true}"#,
+        .item(&cmd(Command::Find, "Find…", "Cmd+F")?)
+        .item(&cmd(
+            Command::FindStep { older: true },
             "Find Next",
             "Cmd+G",
         )?)
-        .item(&item(
-            r#"{"kind":"findStep","older":false}"#,
+        .item(&cmd(
+            Command::FindStep { older: false },
             "Find Previous",
             "Shift+Cmd+G",
         )?)
         .build()?;
     let view = SubmenuBuilder::new(app, "View")
-        .item(&item(
-            r#"{"kind":"sidebar"}"#,
-            "Toggle Sidebar",
-            "Shift+Cmd+B",
-        )?)
-        .item(&MenuItemBuilder::with_id(r#"{"kind":"themes"}"#, "Theme…").build(app)?)
+        .item(&cmd(Command::Sidebar, "Toggle Sidebar", "Shift+Cmd+B")?)
+        .item(&MenuItemBuilder::with_id(Command::Themes.id(), "Theme…").build(app)?)
         .separator()
-        .item(&MenuItemBuilder::with_id(r#"{"kind":"workspaces"}"#, "Open Workspace…").build(app)?)
-        .item(
-            &MenuItemBuilder::with_id(r#"{"kind":"saveWorkspace"}"#, "Save Workspace…")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id(Command::Workspaces.id(), "Open Workspace…").build(app)?)
+        .item(&MenuItemBuilder::with_id(Command::SaveWorkspace.id(), "Save Workspace…").build(app)?)
         .separator()
-        .item(&MenuItemBuilder::with_id(r#"{"kind":"screens"}"#, "Screen…").build(app)?)
-        .item(&item(
-            r#"{"kind":"screenCycle","step":1}"#,
+        .item(&MenuItemBuilder::with_id(Command::Screens.id(), "Screen…").build(app)?)
+        .item(&cmd(
+            Command::ScreenCycle { step: 1 },
             "Next Screen",
             "Shift+Cmd+L",
         )?)
-        .item(&item(
-            r#"{"kind":"screenCycle","step":-1}"#,
+        .item(&cmd(
+            Command::ScreenCycle { step: -1 },
             "Previous Screen",
             "Shift+Cmd+K",
         )?)
         .separator()
-        .item(&item(
-            r#"{"kind":"fontSize","step":1}"#,
-            "Bigger",
-            "Cmd+Equal",
-        )?)
-        .item(&item(
-            r#"{"kind":"fontSize","step":-1}"#,
+        .item(&cmd(Command::FontSize { step: 1 }, "Bigger", "Cmd+Equal")?)
+        .item(&cmd(
+            Command::FontSize { step: -1 },
             "Smaller",
             "Cmd+Minus",
         )?)
-        .item(&item(
-            r#"{"kind":"fontSize","step":0}"#,
+        .item(&cmd(
+            Command::FontSize { step: 0 },
             "Actual Size",
             "Cmd+Digit0",
         )?)
         .separator()
-        .item(&item(
-            r#"{"kind":"zoom"}"#,
-            "Zoom Split",
-            "Shift+Cmd+Enter",
-        )?)
-        .item(&item(
-            r#"{"kind":"equalize"}"#,
-            "Equalize Splits",
-            "Ctrl+Cmd+=",
-        )?)
+        .item(&cmd(Command::Zoom, "Zoom Split", "Shift+Cmd+Enter")?)
+        .item(&cmd(Command::Equalize, "Equalize Splits", "Ctrl+Cmd+=")?)
         .separator()
         .fullscreen()
         .build()?;
@@ -975,34 +959,30 @@ fn menu_bar(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .minimize()
         .maximize()
         .separator()
-        .item(&item(
-            r#"{"kind":"tabCycle","step":-1}"#,
+        .item(&cmd(
+            Command::TabCycle { step: -1 },
             "Show Previous Tab",
             "Shift+Cmd+[",
         )?)
-        .item(&item(
-            r#"{"kind":"tabCycle","step":1}"#,
+        .item(&cmd(
+            Command::TabCycle { step: 1 },
             "Show Next Tab",
             "Shift+Cmd+]",
         )?)
         .separator()
-        .item(&item(
-            r#"{"kind":"focusCycle","step":-1}"#,
+        .item(&cmd(
+            Command::FocusCycle { step: -1 },
             "Select Previous Split",
             "Cmd+[",
         )?)
-        .item(&item(
-            r#"{"kind":"focusCycle","step":1}"#,
+        .item(&cmd(
+            Command::FocusCycle { step: 1 },
             "Select Next Split",
             "Cmd+]",
         )?)
         .build()?;
     let help = SubmenuBuilder::new(app, "Help")
-        .item(&item(
-            r#"{"kind":"shortcuts"}"#,
-            "Keyboard Shortcuts",
-            "Cmd+/",
-        )?)
+        .item(&cmd(Command::Shortcuts, "Keyboard Shortcuts", "Cmd+/")?)
         .item(&MenuItemBuilder::with_id(WHATS_NEW, "What's New").build(app)?)
         .build()?;
     MenuBuilder::new(app)

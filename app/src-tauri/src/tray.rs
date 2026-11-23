@@ -304,7 +304,10 @@ pub fn on_menu(app: &AppHandle, id: &str) {
         SHOW => show_window(app),
         NEW_TAB => {
             show_window(app);
-            let _ = app.emit(crate::event::MENU_ACTION, r#"{"kind":"newTab"}"#);
+            let _ = app.emit(
+                crate::event::MENU_ACTION,
+                proto::command::Command::NewTab.id(),
+            );
         }
         WAITING => {
             show_window(app);
@@ -328,7 +331,10 @@ pub fn on_menu(app: &AppHandle, id: &str) {
         }
         SETTINGS => {
             show_window(app);
-            let _ = app.emit(crate::event::MENU_ACTION, r#"{"kind":"settings"}"#);
+            let _ = app.emit(
+                crate::event::MENU_ACTION,
+                proto::command::Command::Settings.id(),
+            );
         }
         QUIT => quit(app),
         _ => {}

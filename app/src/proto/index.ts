@@ -26,6 +26,8 @@ export type { TemplateTree } from "./generated/TemplateTree";
 export type { Tree } from "./generated/Tree";
 export type { Dir } from "./generated/Dir";
 export type { Step } from "./generated/Step";
+export type { Command } from "./generated/Command";
+export type { Direction } from "./generated/Direction";
 export type { TemplateRun } from "./generated/TemplateRun";
 export type { AgentState } from "./generated/AgentState";
 export type { PaneStatus } from "./generated/PaneStatus";

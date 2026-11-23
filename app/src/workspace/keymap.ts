@@ -2,44 +2,13 @@
 // They are taken before the terminal sees the key.
 
 import type { KeyLike, Platform } from "../input/keyboard";
+import type { Command } from "../proto";
 import type { Dir, Direction } from "./layout";
 import { applyKeybinds } from "./keybinds";
 import { keyName, keyText } from "./shortcuts";
 
-export type Action =
-  | { kind: "newTab" }
-  | { kind: "close" }
-  | { kind: "split"; dir: Dir }
-  | { kind: "focusCycle"; step: 1 | -1 }
-  | { kind: "focus"; toward: Direction }
-  | { kind: "resize"; toward: Direction }
-  | { kind: "equalize" }
-  | { kind: "zoom" }
-  | { kind: "tabCycle"; step: 1 | -1 }
-  /** 0-based; -1 is the last tab. */
-  | { kind: "goToTab"; index: number }
-  | { kind: "sidebar" }
-  | { kind: "shortcuts" }
-  /** Bigger (1), smaller (-1), or back to the config's size (0). */
-  | { kind: "fontSize"; step: 1 | -1 | 0 }
-  /** Settings (Cmd+,). */
-  | { kind: "settings" }
-  /** The theme picker (no key; View → Theme…). */
-  | { kind: "themes" }
-  /** The workspace picker (no key; View → Open Workspace…). */
-  | { kind: "workspaces" }
-  /** Save the window as a workspace (no key; View → Save Workspace…). */
-  | { kind: "saveWorkspace" }
-  /** The screen picker (View → Screen…). */
-  | { kind: "screens" }
-  /** The next or previous screen. */
-  | { kind: "screenCycle"; step: 1 | -1 }
-  /** Back to the default screen, for one that hides everything. */
-  | { kind: "screenReset" }
-  /** The find bar on the focused pane. */
-  | { kind: "find" }
-  /** The next match up the scrollback (older), or back down. */
-  | { kind: "findStep"; older: boolean };
+/** What a shortcut or menu item does (proto's `Command`). */
+export type Action = Command;
 
 /** Modifiers as a string of letters: c(trl) a(lt) s(hift) m(eta: Cmd/Super). */
 type Mods = string;
