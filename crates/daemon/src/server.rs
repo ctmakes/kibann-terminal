@@ -57,13 +57,13 @@ struct Place {
 
 /// `dir` with the home directory shown as `~`.
 fn shown(dir: &std::path::Path) -> String {
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+    if let Some(home) = proto::paths::home_dir()
         && let Ok(rest) = dir.strip_prefix(&home)
     {
         return if rest.as_os_str().is_empty() {
             "~".into()
         } else {
-            format!("~/{}", rest.display())
+            format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
         };
     }
     dir.display().to_string()

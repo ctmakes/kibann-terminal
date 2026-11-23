@@ -1,7 +1,7 @@
 //! Where the daemon's socket, lock and log live: a directory only the user
 //! can open.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The socket file name. Dev builds use their own, so `tauri dev` never
 /// touches the sessions of an installed copy.
@@ -59,13 +59,12 @@ pub fn layout_file(dev: bool) -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("KIBANN_STATE_DIR") {
         return Some(PathBuf::from(d).join(name));
     }
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
     #[cfg(target_os = "macos")]
-    let dir = home().map(|h| h.join("Library/Application Support/kibann"));
+    let dir = home_dir().map(|h| h.join("Library/Application Support/kibann"));
     #[cfg(all(unix, not(target_os = "macos")))]
     let dir = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .or_else(|| home().map(|h| h.join(".local/state")))
+        .or_else(|| home_dir().map(|h| h.join(".local/state")))
         .map(|d| d.join("kibann"));
     #[cfg(windows)]
     let dir = std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("kibann"));
@@ -73,11 +72,46 @@ pub fn layout_file(dev: bool) -> Option<PathBuf> {
 }
 
 /// The user's home directory.
+///
+/// `HOME` on Unix. On Windows `USERPROFILE` first: a `HOME` there is often
+/// a Unix-style one (`/c/Users/me`) that Git Bash or MSYS set.
 pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|h| !h.is_empty())
+    let vars: &[&str] = if cfg!(windows) {
+        &["USERPROFILE", "HOME"]
+    } else {
+        &["HOME"]
+    };
+    vars.iter()
+        .find_map(|v| std::env::var_os(v).filter(|h| !h.is_empty()))
         .map(PathBuf::from)
+}
+
+/// What follows `~/` in `raw` (also `~\\` on Windows): a path under the
+/// home directory.
+pub fn under_home(raw: &str) -> Option<&str> {
+    raw.strip_prefix("~/")
+        .or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows)))
+}
+
+/// Where `program` is on `PATH`, if it's there. On Windows a name without
+/// an extension also matches with each one in `PATHEXT` (`.EXE`, `.CMD`…).
+pub fn on_path(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let exts: Vec<String> = if cfg!(windows) && Path::new(program).extension().is_none() {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(str::to_owned)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    std::env::split_paths(&path).find_map(|dir| {
+        exts.iter()
+            .map(|e| dir.join(format!("{program}{e}")))
+            .find(|p| p.is_file())
+    })
 }
 
 /// Where the config file, the user's themes, workspaces, screens and parts live:

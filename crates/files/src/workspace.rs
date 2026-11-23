@@ -430,13 +430,7 @@ fn chain(dir: Dir, mut kids: Vec<WorkspaceTree>, shares: &[f64]) -> WorkspaceTre
 pub fn resolve_path(raw: &str, base: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let p = if raw == "~" {
         home?.to_path_buf()
-    } else if let Some(rest) = raw.strip_prefix("~/").or_else(|| {
-        if cfg!(windows) {
-            raw.strip_prefix("~\\")
-        } else {
-            None
-        }
-    }) {
+    } else if let Some(rest) = proto::paths::under_home(raw) {
         home?.join(rest)
     } else if Path::new(raw).is_absolute() {
         PathBuf::from(raw)

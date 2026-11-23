@@ -180,7 +180,7 @@ impl Session {
         for (k, v) in &spawn.env {
             cmd.env(k, v);
         }
-        let dir = spawn.cwd.clone().or_else(home_dir);
+        let dir = spawn.cwd.clone().or_else(proto::paths::home_dir);
         if let Some(dir) = &dir {
             cmd.cwd(dir);
         }
@@ -401,10 +401,6 @@ pub fn is_foreign_terminal_var(name: &str) -> bool {
         "KIBANN_",
     ];
     NAMES.contains(&name) || PREFIXES.iter().any(|p| name.starts_with(p))
-}
-
-fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(Into::into)
 }
 
 fn pty_size(s: Resize) -> PtySize {

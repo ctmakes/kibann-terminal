@@ -158,7 +158,7 @@ pub fn find(cells: &[String], at: usize) -> Option<(Range<usize>, Found)> {
 /// The absolute path a printed path names, if it exists. `~` is the home
 /// directory; relative paths are taken from `cwd`.
 pub fn resolve_path(path: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-    let p = if let Some(rest) = path.strip_prefix("~/") {
+    let p = if let Some(rest) = proto::paths::under_home(path) {
         home?.join(rest)
     } else if Path::new(path).is_absolute() {
         PathBuf::from(path)
@@ -166,13 +166,6 @@ pub fn resolve_path(path: &str, cwd: Option<&Path>, home: Option<&Path>) -> Opti
         cwd?.join(path)
     };
     p.exists().then_some(p)
-}
-
-/// The home directory, from `HOME` (`USERPROFILE` on Windows).
-pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
 }
 
 /// A cell of a logical line: its text and where it sits on the screen.
@@ -328,7 +321,7 @@ pub fn at(
     let (uri, target) = match found {
         Found::Url(u) => (u.clone(), u),
         Found::Path { text, path } => {
-            let p = resolve_path(&path, cwd, home_dir().as_deref())?;
+            let p = resolve_path(&path, cwd, proto::paths::home_dir().as_deref())?;
             (text, p.to_string_lossy().into_owned())
         }
     };

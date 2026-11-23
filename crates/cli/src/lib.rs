@@ -997,15 +997,14 @@ fn skill_targets(a: &Args, has_codex: bool) -> Vec<&'static str> {
     want
 }
 
-/// Is `program` on `$PATH`?
+/// Is `program` on `PATH`?
 fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+    proto::paths::on_path(program).is_some()
 }
 
 fn skill_install(a: &Args) -> Out {
-    let home = std::env::var_os("HOME").ok_or_else(|| error("no_home", "$HOME is not set"))?;
-    let home = PathBuf::from(home);
+    let home =
+        proto::paths::home_dir().ok_or_else(|| error("no_home", "the home directory isn't set"))?;
     let has_codex = on_path("codex") || home.join(".codex").is_dir();
     let mut installed = Vec::new();
     for key in skill_targets(a, has_codex) {
