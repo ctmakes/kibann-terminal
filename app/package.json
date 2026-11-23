@@ -17,8 +17,8 @@
     "check:proto": "npm run gen:proto && git diff --exit-code -- src/proto/generated",
     "gen:recordings": "cd .. && UPDATE_RECORDINGS=1 cargo test -q -p term --test recordings",
     "check:recordings": "cd .. && cargo test -q -p term --test recordings",
-    "gen:paint": "UPDATE_PAINT=1 vitest run src/painter/fixtures.test.ts",
-    "check:paint": "vitest run src/painter/fixtures.test.ts"
+    "gen:paint": "cd .. && UPDATE_PAINT=1 cargo test -q -p term --test paint && cd app && UPDATE_PAINT=1 vitest run src/painter/fixtures.test.ts",
+    "check:paint": "cd .. && cargo test -q -p term --test paint && cd app && vitest run src/painter/fixtures.test.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

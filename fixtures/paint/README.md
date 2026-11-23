@@ -5,7 +5,7 @@ the web painter (`app/src/painter/plan.ts`) makes for each. Any other
 painter (the phone app's) must make the same lists from the same inputs.
 
 **Don't edit by hand.** `npm run gen:paint` (in `app/`) rewrites
-everything here; `npm run check:paint`, and plain `npm test`, fail when
+everything here (the emulator's inputs first, `crates/term/tests/paint.rs`); `npm run check:paint`, and plain `npm test`, fail when
 the web painter draws something these files don't say. So a painter
 change that alters what's drawn shows up in the diff of `expected/`.
 
@@ -18,6 +18,9 @@ change that alters what's drawn shows up in the diff of `expected/`.
   - `odd`: 13px at scale 1.5, where cells and lines don't divide evenly.
 - `inputs/<name>.jsonl`: one frame per line, in the wire format
   (`crates/proto`, `Frame`), in order. Later frames may be partial.
+  `box`, `styles` and `wide` are drawn by the emulator from escape
+  sequences, so their widths and styles are a real program's; `cursor` is
+  made by the painter's test, since it has cursors no program can ask for.
   - `box`: every box-drawing, block, braille and Powerline character.
   - `styles`: colors, bold/italic, faint, invisible, every decoration.
   - `wide`: wide and composed graphemes, one that doesn't fit at the edge.

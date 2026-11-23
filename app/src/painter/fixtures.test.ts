@@ -7,7 +7,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { Flag, Underline, withUnderline, type Frame } from "../proto";
+import { Flag, type Frame } from "../proto";
 import { Grid } from "../grid";
 import { computeMetrics, type Metrics } from "../metrics";
 import { buildFrame, Screen, style } from "../dev/screen";
@@ -33,72 +33,6 @@ const METRICS: Record<string, Metrics> = {
 // ---- synthetic inputs ----
 
 const FG = 0xd8d8d8;
-const PALETTE = [
-  0x000000, 0xcd3131, 0x0dbc79, 0xe5e510, 0x2472c8, 0xbc3fbc, 0x11a8cd, 0xe5e5e5,
-  0x666666, 0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6, 0x29b8db, 0xffffff,
-];
-
-/** Every box-drawing, block, braille and Powerline character, 64 a row;
- * odd rows on a background (double lines show it in their gaps). */
-function boxScreen(): Frame[] {
-  const cps: number[] = [];
-  for (let cp = 0x2500; cp <= 0x259f; cp++) cps.push(cp);
-  for (let cp = 0x2800; cp <= 0x28ff; cp++) cps.push(cp);
-  for (let cp = 0xe0b0; cp <= 0xe0b3; cp++) cps.push(cp);
-  const cols = 64;
-  const s = new Screen(cols, Math.ceil(cps.length / cols));
-  cps.forEach((cp, i) => {
-    const y = Math.floor(i / cols);
-    s.write(i % cols, y, String.fromCodePoint(cp), y % 2 ? style(0x0dbc79, 0x202040) : style(FG));
-  });
-  s.cursor = { ...s.cursor, visible: false };
-  return [buildFrame(1, s, null)];
-}
-
-/** Colors, fonts, faint, invisible and every decoration. */
-function stylesScreen(): Frame[] {
-  const s = new Screen(48, 12);
-  PALETTE.forEach((c, i) => {
-    s.write(i * 3, 0, "Ab", style(c));
-    s.write(i * 3, 1, "Ab", style(FG, c));
-  });
-  s.write(0, 2, "regular", style(FG));
-  s.write(8, 2, "bold", style(FG, null, Flag.BOLD));
-  s.write(13, 2, "italic", style(FG, null, Flag.ITALIC));
-  s.write(20, 2, "both", style(FG, null, Flag.BOLD | Flag.ITALIC));
-  s.write(25, 2, "faint", style(FG, null, Flag.FAINT));
-  s.write(31, 2, "hidden", style(FG, 0x333333, Flag.INVISIBLE | Flag.STRIKE));
-  const uls = [Underline.SINGLE, Underline.DOUBLE, Underline.CURLY, Underline.DOTTED, Underline.DASHED];
-  uls.forEach((ul, i) => {
-    s.write(0, 3 + i, `underline ${ul}`, style(FG, null, withUnderline(0, ul)));
-    s.write(16, 3 + i, `colored ${ul}`, style(FG, null, withUnderline(0, ul), 0xf14c4c));
-    s.write(32, 3 + i, `faint ${ul}`, style(FG, 0x202040, withUnderline(Flag.FAINT, ul), 0x3b8eea));
-  });
-  s.write(0, 8, "strike", style(FG, null, Flag.STRIKE));
-  s.write(8, 8, "overline", style(FG, null, Flag.OVERLINE));
-  s.write(18, 8, "all", style(0xe5e510, null, withUnderline(Flag.STRIKE | Flag.OVERLINE, Underline.DOUBLE), 0x23d18b));
-  // A decorated run that starts mid-cell-pattern and ends at the edge.
-  s.write(45, 9, "end", style(FG, null, withUnderline(0, Underline.CURLY)));
-  s.write(0, 10, "mixed ", style(FG));
-  s.write(6, 10, "runs", style(0xcd3131, 0x101010, Flag.BOLD));
-  s.write(10, 10, " in a row", style(FG, null, withUnderline(0, Underline.DASHED)));
-  s.cursor = { ...s.cursor, visible: false };
-  return [buildFrame(1, s, null)];
-}
-
-/** Wide and composed graphemes, including one that doesn't fit at the edge. */
-function wideScreen(): Frame[] {
-  const s = new Screen(20, 6);
-  s.write(0, 0, "日本語のテキスト");
-  s.write(0, 1, "a😀b👩‍💻c🇯🇵d");
-  s.write(0, 2, "é ñ ä", style(0xe5e510));
-  s.write(0, 3, "x日y本z", style(FG, 0x202040));
-  // Column 19 is the last: a wide character there leaves a blank spacer.
-  s.write(19, 4, "日");
-  s.write(0, 5, "wide bold 太字", style(FG, null, Flag.BOLD));
-  s.cursor = { ...s.cursor, visible: false };
-  return [buildFrame(1, s, null)];
-}
 
 /** One full frame, then cursor-only changes: every shape, on wide heads
  * and tails, on box characters, at the edge, hidden and out of view. */
@@ -133,6 +67,16 @@ function cursorScreen(): Frame[] {
   return frames;
 }
 
+/** An input the emulator drew from escape sequences, as saved by
+ * `crates/term/tests/paint.rs`: the cells, widths and styles a program's
+ * output really gives. */
+function emulated(name: string): Frame[] {
+  return readFileSync(`${ROOT}inputs/${name}.jsonl`, "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as Frame);
+}
+
 /** A recording from `dev/recordings`, the frames only. */
 function recording(name: string): Frame[] {
   return readFileSync(`${RECORDINGS}${name}.jsonl`, "utf8")
@@ -143,11 +87,14 @@ function recording(name: string): Frame[] {
 
 /** Each input and the metric sets it's answered at. The recordings are
  * real programs with partial frames (the frame → grid step); the metric
- * sets matter for geometry, which the synthetic screens cover. */
-const INPUTS: Array<{ name: string; frames: () => Frame[]; metrics: string[] }> = [
-  { name: "box", frames: boxScreen, metrics: ["1x", "2x", "odd"] },
-  { name: "styles", frames: stylesScreen, metrics: ["1x", "2x", "odd"] },
-  { name: "wide", frames: wideScreen, metrics: ["1x", "2x", "odd"] },
+ * sets matter for geometry, which the synthetic screens cover. Every input
+ * is saved with the answers here, except the emulator's (`emulator`),
+ * which it saves itself. The cursor screen is made here: it has cursors no
+ * program can ask for (wide in the last column). */
+const INPUTS: Array<{ name: string; frames: () => Frame[]; metrics: string[]; emulator?: boolean }> = [
+  { name: "box", frames: () => emulated("box"), metrics: ["1x", "2x", "odd"], emulator: true },
+  { name: "styles", frames: () => emulated("styles"), metrics: ["1x", "2x", "odd"], emulator: true },
+  { name: "wide", frames: () => emulated("wide"), metrics: ["1x", "2x", "odd"], emulator: true },
   { name: "cursor", frames: cursorScreen, metrics: ["1x", "2x", "odd"] },
   { name: "man", frames: () => recording("man"), metrics: ["1x"] },
   { name: "sync", frames: () => recording("sync"), metrics: ["1x"] },
@@ -189,7 +136,7 @@ function build(): Map<string, string> {
   files.set("metrics.json", JSON.stringify(METRICS, null, 2) + "\n");
   for (const input of INPUTS) {
     const frames = input.frames();
-    files.set(`inputs/${input.name}.jsonl`, frames.map((f) => JSON.stringify(f)).join("\n") + "\n");
+    if (!input.emulator) files.set(`inputs/${input.name}.jsonl`, frames.map((f) => JSON.stringify(f)).join("\n") + "\n");
     for (const name of input.metrics) {
       files.set(`expected/${input.name}.${name}.jsonl`, answer(frames, METRICS[name]));
     }
@@ -240,7 +187,8 @@ describe("paint fixtures (fixtures/paint)", () => {
 
   if (UPDATE) {
     it("rewrites them", () => {
-      for (const dir of ["inputs", "expected"]) rmSync(ROOT + dir, { recursive: true, force: true });
+      rmSync(ROOT + "expected", { recursive: true, force: true });
+      for (const i of INPUTS) if (!i.emulator) rmSync(`${ROOT}inputs/${i.name}.jsonl`, { force: true });
       for (const [path, text] of files) {
         mkdirSync(ROOT + path.slice(0, path.lastIndexOf("/") + 1), { recursive: true });
         writeFileSync(ROOT + path, text);
@@ -250,7 +198,8 @@ describe("paint fixtures (fixtures/paint)", () => {
   }
 
   it("has no files the painter doesn't make", () => {
-    const stale = [...listed("inputs"), ...listed("expected")].filter((p) => !files.has(p));
+    const theirs = new Set(INPUTS.filter((i) => i.emulator).map((i) => `inputs/${i.name}.jsonl`));
+    const stale = [...listed("inputs"), ...listed("expected")].filter((p) => !files.has(p) && !theirs.has(p));
     expect(stale, "stale fixture files: run `npm run gen:paint`").toEqual([]);
   });
 
