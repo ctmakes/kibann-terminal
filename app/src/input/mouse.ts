@@ -70,7 +70,8 @@ export interface MouseHooks {
 }
 
 /**
- * Pointer and wheel events on the grid, sent in device px from the grid origin.
+ * Pointer and wheel events on the grid, sent in cells (fractional) from the
+ * grid origin, so every viewer means the same place whatever its pixel size.
  * Positions are not clamped: a selection drag past an edge autoscrolls, and
  * the backend clamps what it reports to programs.
  */
@@ -78,7 +79,7 @@ export class MouseInput {
   private wheel = new WheelAccumulator();
   private lastCell = -1;
   private readonly offs: Array<() => void> = [];
-  /** Last pointer position over the grid (device px), or null when outside. */
+  /** Last pointer position over the grid (cells), or null when outside. */
   private at: { x: number; y: number } | null = null;
   /** A hover with the link modifier was sent and not yet turned off. */
   private hovering = false;
@@ -147,8 +148,8 @@ export class MouseInput {
   private hover(on: boolean): void {
     const at = this.at;
     if (on && at) {
-      const { m, cols } = this.state();
-      const cell = Math.floor(at.y / m.cellH) * cols + Math.floor(at.x / m.cellW);
+      const { cols } = this.state();
+      const cell = Math.floor(at.y) * cols + Math.floor(at.x);
       if (this.hovering && cell === this.lastHoverCell) return;
       this.hovering = true;
       this.lastHoverCell = cell;
@@ -160,17 +161,18 @@ export class MouseInput {
     }
   }
 
-  /** The shown link, if the pointer at `x`, `y` (device px) is on it. */
+  /** The shown link, if the pointer at `x`, `y` (cells) is on it. */
   private linkAt(x: number, y: number): Link | null {
-    const { m, link } = this.state();
+    const { link } = this.state();
     if (!link) return null;
-    return linkCovers(link, Math.floor(x / m.cellW), Math.floor(y / m.cellH)) ? link : null;
+    return linkCovers(link, Math.floor(x), Math.floor(y)) ? link : null;
   }
 
+  /** Where `e` is, in cells from the grid's top-left corner. */
   private pos(e: MouseEvent): { x: number; y: number } {
     const { m } = this.state();
     const rect = this.target.getBoundingClientRect();
-    return { x: (e.clientX - rect.left) * m.dpr, y: (e.clientY - rect.top) * m.dpr };
+    return { x: ((e.clientX - rect.left) * m.dpr) / m.cellW, y: ((e.clientY - rect.top) * m.dpr) / m.cellH };
   }
 
   /** Shift+right-click opens the menu instead of reaching the program. */
@@ -213,7 +215,7 @@ export class MouseInput {
   private onMove(e: PointerEvent): void {
     this.at = this.pos(e);
     this.hover(linkModifier(e, this.platform) && e.buttons === 0);
-    const { tracking, m, cols } = this.state();
+    const { tracking, cols } = this.state();
     // A drag the backend turns into a selection: every move counts, since
     // the selection's end depends on where in the cell the pointer is.
     const selecting = e.buttons & 1 && (tracking === "none" || e.shiftKey);
@@ -223,7 +225,7 @@ export class MouseInput {
     const { x, y } = this.pos(e);
     if (!selecting) {
       // Programs only see cells; skip moves within one.
-      const cell = Math.floor(y / m.cellH) * cols + Math.floor(x / m.cellW);
+      const cell = Math.floor(y) * cols + Math.floor(x);
       if (cell === this.lastCell) return;
       this.lastCell = cell;
     }

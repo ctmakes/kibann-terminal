@@ -396,6 +396,16 @@ impl Emulator {
         Ok(())
     }
 
+    /// A position in cells (as clients send it) in this grid's pixels, as
+    /// the encoders, selection and links take it.
+    fn px(&self, x: f32, y: f32) -> (f32, f32) {
+        let s = self.size;
+        (
+            x * f32::from(s.cell_w.max(1)),
+            y * f32::from(s.cell_h.max(1)),
+        )
+    }
+
     /// Position clamped to the grid, for the mouse encoder.
     fn clamp_to_grid(&self, x: f32, y: f32) -> (f32, f32) {
         let s = self.size;
@@ -507,6 +517,7 @@ impl Emulator {
             } => {
                 // Left-button gestures select text unless a program tracks
                 // the mouse; Shift takes the mouse back from the program.
+                let (x, y) = self.px(*x, *y);
                 let m = mods(*m);
                 let tracking = self.term.is_mouse_tracking()?;
                 match action {
@@ -516,15 +527,15 @@ impl Emulator {
                         // Shift extends a selection, unless it's what takes the
                         // mouse back from a program.
                         let extend = !tracking && m.contains(Mods::SHIFT);
-                        return self.sel.press(&self.term, self.size, *x, *y, extend);
+                        return self.sel.press(&self.term, self.size, x, y, extend);
                     }
                     MouseAction::Motion if self.sel.active() => {
                         return self
                             .sel
-                            .drag(&self.term, self.size, *x, *y, m.contains(Mods::ALT));
+                            .drag(&self.term, self.size, x, y, m.contains(Mods::ALT));
                     }
                     MouseAction::Release if *button == Some(1) && self.sel.active() => {
-                        return self.sel.release(&self.term, self.size, *x, *y);
+                        return self.sel.release(&self.term, self.size, x, y);
                     }
                     _ if !tracking => return Ok(()),
                     MouseAction::Press => self.sel.cancel(),
@@ -535,7 +546,7 @@ impl Emulator {
                     MouseAction::Release => mouse::Action::Release,
                     MouseAction::Motion => mouse::Action::Motion,
                 };
-                let (x, y) = self.clamp_to_grid(*x, *y);
+                let (x, y) = self.clamp_to_grid(x, y);
                 if let Some(b) = button {
                     let bit = 1u32 << (*b).min(31);
                     match action {
@@ -558,7 +569,10 @@ impl Emulator {
                 x,
                 y,
                 mods: m,
-            } => self.wheel(*dx_rows, *dy_rows, *x, *y, mods(*m), out),
+            } => {
+                let (x, y) = self.px(*x, *y);
+                self.wheel(*dx_rows, *dy_rows, x, y, mods(*m), out)
+            }
             InputEvent::Scroll { by, n } => {
                 let rows = isize::try_from(*n).unwrap_or(0);
                 self.term.scroll_viewport(match by {
@@ -593,7 +607,7 @@ impl Emulator {
                 Ok(())
             }
             InputEvent::Hover { x, y, on } => {
-                self.hover = on.then_some((*x, *y));
+                self.hover = on.then_some(self.px(*x, *y));
                 Ok(())
             }
             InputEvent::Focus { focused } => {

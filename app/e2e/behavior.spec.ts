@@ -86,7 +86,7 @@ test.describe("text input", () => {
 });
 
 test.describe("mouse", () => {
-  test("clicks send press and release in device pixels from the grid origin", async ({ page }) => {
+  test("clicks send press and release in cells from the grid origin", async ({ page }) => {
     await openFixture(page, "cursor", { mouse: "normal" });
     const m = await metrics(page);
     const box = (await page.locator(".term-overlay").boundingBox())!;
@@ -95,8 +95,10 @@ test.describe("mouse", () => {
     await page.mouse.click(box.x + cx, box.y + cy);
     const mouse = (await inputs(page)).filter((e) => e.kind === "mouse");
     expect(mouse.map((e) => [e.action, e.button])).toEqual([["press", 1], ["release", 1]]);
-    expect(Math.floor(mouse[0].x / m.cellW)).toBe(5);
-    expect(Math.floor(mouse[0].y / m.cellH)).toBe(3);
+    // Fractional: where in the cell (Playwright clicks on whole CSS px).
+    expect(Math.floor(mouse[0].x)).toBe(5);
+    expect(Math.floor(mouse[0].y)).toBe(3);
+    expect(mouse[0].x % 1).toBeGreaterThan(0.2);
   });
 
   test("motion is only sent while tracking asks for it", async ({ page }) => {
@@ -127,7 +129,7 @@ test.describe("mouse", () => {
     const motion = (await inputs(page)).filter((e) => e.action === "motion");
     expect(motion.length).toBe(3);
     expect(motion.every((e) => e.button === 1)).toBe(true);
-    expect(Math.floor(motion[0].x / m.cellW)).toBe(Math.floor(motion[1].x / m.cellW));
+    expect(Math.floor(motion[0].x)).toBe(Math.floor(motion[1].x));
     expect(motion[2].y).toBeLessThan(0);
   });
 

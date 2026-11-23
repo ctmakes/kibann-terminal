@@ -396,7 +396,9 @@ pub enum InputEvent {
         action: MouseAction,
         /// libghostty mouse button number (1 left, 2 right, 3 middle, 8 back, 9 forward).
         button: Option<u8>,
-        /// Device pixels from the grid's top-left corner.
+        /// Cells from the grid's top-left corner, fractional: where in a
+        /// cell matters to a selection, and pixel-reporting programs get
+        /// the daemon's pixels. Not clamped to the grid.
         x: f32,
         y: f32,
         mods: u16,
@@ -405,6 +407,7 @@ pub enum InputEvent {
         /// Whole rows scrolled; positive is right / down.
         dx_rows: i16,
         dy_rows: i16,
+        /// In cells, as for [`InputEvent::Mouse`].
         x: f32,
         y: f32,
         mods: u16,
@@ -412,7 +415,7 @@ pub enum InputEvent {
     Focus {
         focused: bool,
     },
-    /// The pointer is at `x`, `y` with the link modifier held (`on`), or the
+    /// The pointer is at `x`, `y` (cells) with the link modifier held (`on`), or the
     /// modifier was released or the pointer left (`!on`). Never reaches the
     /// program; it drives [`Frame::link`].
     Hover {

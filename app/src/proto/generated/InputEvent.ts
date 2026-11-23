@@ -28,10 +28,16 @@ mods: number, composing: boolean, } | { "kind": "text", data: string, } | { "kin
  */
 button: number | null, 
 /**
- * Device pixels from the grid's top-left corner.
+ * Cells from the grid's top-left corner, fractional: where in a
+ * cell matters to a selection, and pixel-reporting programs get
+ * the daemon's pixels. Not clamped to the grid.
  */
 x: number, y: number, mods: number, } | { "kind": "wheel", 
 /**
  * Whole rows scrolled; positive is right / down.
  */
-dx_rows: number, dy_rows: number, x: number, y: number, mods: number, } | { "kind": "focus", focused: boolean, } | { "kind": "hover", x: number, y: number, on: boolean, } | { "kind": "scroll", by: ScrollBy, n: number, } | { "kind": "find", needle: string, } | { "kind": "find_step", older: boolean, } | { "kind": "find_end" };
+dx_rows: number, dy_rows: number, 
+/**
+ * In cells, as for [`InputEvent::Mouse`].
+ */
+x: number, y: number, mods: number, } | { "kind": "focus", focused: boolean, } | { "kind": "hover", x: number, y: number, on: boolean, } | { "kind": "scroll", by: ScrollBy, n: number, } | { "kind": "find", needle: string, } | { "kind": "find_step", older: boolean, } | { "kind": "find_end" };

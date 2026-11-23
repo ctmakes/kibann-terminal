@@ -356,18 +356,18 @@ fn mouse_sgr() {
         mods: 0,
     };
     assert_eq!(
-        encode(&mut e, press(15.0, 45.0)),
+        encode(&mut e, press(1.5, 2.25)),
         b"",
         "no tracking, no report"
     );
     e.write(b"\x1b[?1000h\x1b[?1006h");
     // Cell (1, 2) zero-based is reported as 2;3.
-    assert_eq!(encode(&mut e, press(15.0, 45.0)), b"\x1b[<0;2;3M");
+    assert_eq!(encode(&mut e, press(1.5, 2.25)), b"\x1b[<0;2;3M");
     let release = InputEvent::Mouse {
         action: MouseAction::Release,
         button: Some(1),
-        x: 15.0,
-        y: 45.0,
+        x: 1.5,
+        y: 2.25,
         mods: 0,
     };
     assert_eq!(encode(&mut e, release), b"\x1b[<0;2;3m");
@@ -379,8 +379,8 @@ fn wheel_by_mode() {
     let wheel = |dy| InputEvent::Wheel {
         dx_rows: 0,
         dy_rows: dy,
-        x: 5.0,
-        y: 5.0,
+        x: 0.5,
+        y: 0.25,
         mods: 0,
     };
     assert_eq!(
@@ -406,12 +406,12 @@ fn wheel_by_mode() {
 // ---- selection and scrollback -------------------------------------------
 
 fn mouse(action: MouseAction, col: f32, row: f32, mods: u16) -> InputEvent {
-    // Middle of the cell, with SIZE's 10×20 px cells.
+    // The middle of the cell.
     InputEvent::Mouse {
         action,
         button: Some(1),
-        x: col * 10.0 + 5.0,
-        y: row * 20.0 + 10.0,
+        x: col + 0.5,
+        y: row + 0.5,
         mods,
     }
 }
@@ -635,8 +635,8 @@ fn wheel_and_scroll_move_through_scrollback() {
     let wheel = InputEvent::Wheel {
         dx_rows: 0,
         dy_rows: -3,
-        x: 5.0,
-        y: 5.0,
+        x: 0.5,
+        y: 0.25,
         mods: 0,
     };
     assert_eq!(encode(&mut e, wheel), b"");
@@ -705,8 +705,8 @@ fn dragging_past_the_top_autoscrolls() {
     e.input(&InputEvent::Mouse {
         action: MouseAction::Motion,
         button: Some(1),
-        x: 30.0,
-        y: -15.0,
+        x: 3.0,
+        y: -0.75,
         mods: 0,
     })
     .unwrap();
@@ -718,8 +718,8 @@ fn dragging_past_the_top_autoscrolls() {
     e.input(&InputEvent::Mouse {
         action: MouseAction::Release,
         button: Some(1),
-        x: 30.0,
-        y: -15.0,
+        x: 3.0,
+        y: -0.75,
         mods: 0,
     })
     .unwrap();
@@ -733,8 +733,8 @@ fn dragging_past_the_top_autoscrolls() {
 
 fn hover(e: &mut Emulator, col: f32, row: f32, on: bool) -> Option<proto::Link> {
     e.input(&InputEvent::Hover {
-        x: col * 10.0 + 5.0,
-        y: row * 20.0 + 10.0,
+        x: col + 0.5,
+        y: row + 0.5,
         on,
     })
     .unwrap();
@@ -832,8 +832,8 @@ fn hovering_never_reaches_the_program() {
     let out = encode(
         &mut e,
         InputEvent::Hover {
-            x: 15.0,
-            y: 10.0,
+            x: 1.5,
+            y: 0.5,
             on: true,
         },
     );
@@ -921,15 +921,15 @@ fn a_theme_colors_the_selection() {
         action: MouseAction::Press,
         button: Some(1),
         x,
-        y: 5.0,
+        y: 0.25,
         mods: 0,
     };
-    e.input(&at(1.0)).unwrap();
+    e.input(&at(0.1)).unwrap();
     e.input(&InputEvent::Mouse {
         action: MouseAction::Motion,
         button: Some(1),
-        x: 29.0,
-        y: 5.0,
+        x: 2.9,
+        y: 0.25,
         mods: 0,
     })
     .unwrap();

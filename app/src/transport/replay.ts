@@ -68,8 +68,8 @@ export class ReplayTransport implements Transport {
     this.onInput?.(e);
     this.onFind(e);
     if (e.kind === "hover") {
-      const x = Math.floor(e.x / this.size.cell_w);
-      const y = Math.floor(e.y / this.size.cell_h);
+      const x = Math.floor(e.x);
+      const y = Math.floor(e.y);
       const link = (e.on && this.links.find((l) => linkCovers(l, x, y))) || null;
       if (link !== this.sentLink) {
         this.sentLink = link;
