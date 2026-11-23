@@ -87,6 +87,27 @@ export async function loadFonts(fontSize = DEFAULT_FONT_SIZE): Promise<void> {
     ...families.map((f) => `${s} ${fontSize}px "${f}"`),
   ]);
   await Promise.all(specs.map((s) => document.fonts.load(s, "MgÅ█")));
+  await untilCanvasHasFont(fontSize);
+}
+
+/**
+ * WebKit's canvas can still measure the fallback for a moment after the
+ * faces load, with no `loadingdone` to say when it stops: cells measured
+ * then stayed 32 px tall where the font makes 36. Wait (up to a second)
+ * until a canvas measures the bundled font. Its height, not its width, as
+ * JetBrains Mono and Courier are both 0.6 em wide.
+ */
+async function untilCanvasHasFont(fontSize: number): Promise<void> {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return;
+  const height = (family: string) => {
+    ctx.font = `400 ${fontSize}px ${family}`;
+    const m = ctx.measureText("M");
+    return m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+  };
+  for (let i = 0; i < 20 && height(`${FONT_FAMILY}, monospace`) === height("monospace"); i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 export function measureFont(fontSize: number): RawFontMetrics {

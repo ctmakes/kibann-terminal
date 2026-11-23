@@ -190,12 +190,17 @@ test.describe("frames", () => {
         const c = (window as any).__harness.view.gridCanvas as HTMLCanvasElement;
         c.width = c.width;
       });
-    // A face that loads late repaints the pane (a cold cache, as in CI):
-    // start from the picture after that.
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    });
+    // A face that loads late repaints the pane (a cold cache, as in CI; a
+    // face loads when text first uses it, so even after fonts.ready): start
+    // from the picture once every face is in and it holds still.
+    await expect
+      .poll(async () => {
+        const before = await snapshot();
+        await page.waitForTimeout(100);
+        const loaded = await page.evaluate(() => document.fonts.status === "loaded");
+        return loaded && before === (await snapshot());
+      })
+      .toBe(true);
     const painted = await snapshot();
     const signals: Array<[string, () => void]> = [
       ["contextrestored", () => (window as any).__harness.view.gridCanvas.dispatchEvent(new Event("contextrestored"))],

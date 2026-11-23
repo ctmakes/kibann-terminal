@@ -5,6 +5,13 @@ in-app update notice links to. Newest first. A version that's never
 released on its own can be marked `## [x.y.z] - Included in <version>`;
 its notes then go out with that version.
 
+## [0.8.3] - Unreleased
+
+- Panes measure the terminal font, not its fallback, when the app starts
+  with its fonts not yet cached: rows could come out shorter than the font
+  needs until you changed the font size. Characters from the font's other
+  scripts (Cyrillic, Greek…) are drawn in it as soon as they load.
+
 ## [0.8.2] - 2026-11-23
 
 - A shortcut pressed while Settings or a picker is open does nothing. On

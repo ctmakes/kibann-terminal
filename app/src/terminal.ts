@@ -225,13 +225,30 @@ export class TerminalView {
   private watchFonts(): () => void {
     const fonts = typeof document !== "undefined" ? document.fonts : undefined;
     if (!fonts) return () => {};
+    // Always measured afresh: the cells may keep their size while the text
+    // widths cached with the fallback (a face for other characters, loaded
+    // when first drawn) would still place and clip glyphs by its widths.
+    // Faces loading together measure once.
+    let due = 0;
+    let gone = false;
     const onLoaded = () => {
-      const m = this.measure();
-      if (m.cellW !== this.m.cellW || m.cellH !== this.m.cellH || m.baseline !== this.m.baseline) this.remeasure();
-      this.repaint();
+      if (gone || due) return;
+      due = window.setTimeout(() => {
+        due = 0;
+        if (!gone) this.remeasure();
+      });
     };
     fonts.addEventListener("loadingdone", onLoaded);
-    return () => fonts.removeEventListener("loadingdone", onLoaded);
+    // WebKit fires no `loadingdone` for a face a canvas starts loading by
+    // drawing with it; each face's own promise still says.
+    for (const face of fonts) {
+      if (face.status !== "loaded") face.loaded.then(onLoaded, () => {});
+    }
+    return () => {
+      gone = true;
+      window.clearTimeout(due);
+      fonts.removeEventListener("loadingdone", onLoaded);
+    };
   }
 
   /**
