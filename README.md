@@ -8,7 +8,7 @@ A terminal for working alongside coding agents, built on libghostty-vt (Ghostty'
 - **Shells outlive the window.** A background process keeps your shells running when the app closes. Tabs and splits come back after a restart.
 - **A real terminal.** Ghostty's emulation, about 900 themes, your own fonts, and Ghostty's shortcuts and config syntax.
 
-Kibann is at its first release (0.1.0). See [CHANGELOG.md](CHANGELOG.md) for what each version brings.
+See [CHANGELOG.md](CHANGELOG.md) for what each version brings.
 
 ## Install
 
