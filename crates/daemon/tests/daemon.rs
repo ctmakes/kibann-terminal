@@ -15,7 +15,7 @@ use daemon::server::{Daemon, SocketConfig, serve_socket};
 use proto::git::PaneDir;
 use proto::layout::{Action, Dir, Layout};
 use proto::status::{AgentState, PaneStatus};
-use proto::wire::{ClientMsg, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
+use proto::wire::{ClientMsg, ErrorCode, PROTOCOL_VERSION, ReadSource, Reply, SessionId};
 use proto::{Frame, InputEvent, Resize};
 
 const SIZE: Resize = Resize {
@@ -210,7 +210,12 @@ fn spawn_type_and_see_the_output() {
     let (d, h) = start(&path, Duration::from_secs(60));
     let (f, rx) = events();
     let c = Client::connect(&path, f).unwrap();
-    assert_eq!(c.hello().unwrap(), (PROTOCOL_VERSION, "test-build".into()));
+    let hello = c.hello().unwrap();
+    assert_eq!(
+        (hello.version, hello.build.as_str()),
+        (PROTOCOL_VERSION, "test-build")
+    );
+    assert_eq!(hello.busy, Some(vec![]), "no panes, nothing running");
     let s = sh(&c, None);
     c.send(&ClientMsg::Attach { session: s }).unwrap();
     type_text(&c, s, "echo hi-$((40+2))\r");
@@ -492,7 +497,7 @@ fn clients_racing_to_start_share_one_daemon() {
         })
         .collect();
     let clients: Vec<_> = clients.into_iter().map(|t| t.join().unwrap()).collect();
-    let builds: Vec<_> = clients.iter().map(|(c, _)| c.hello().unwrap().1).collect();
+    let builds: Vec<_> = clients.iter().map(|(c, _)| c.hello().unwrap().build).collect();
     assert_eq!(builds[0], daemon::BUILD);
     assert!(builds.iter().all(|b| *b == builds[0]));
 
@@ -942,6 +947,29 @@ fn a_theme_reaches_every_session_and_new_ones() {
 }
 
 #[test]
+fn stopping_saves_the_layout_and_says_what_was_running() {
+    let path = socket();
+    let file = path.parent().unwrap().join("state").join("layout.json");
+    let (d, h) = start(&path, Duration::from_secs(60));
+    // A delay no test waits out: only the stop writes the file.
+    d.save_layout_to(file.clone(), Duration::from_secs(600));
+    let (f, _rx) = events();
+    let c = Client::connect(&path, f).unwrap();
+    let first = sh(&c, None);
+    // The shell's own child, in front: what a stop would end.
+    type_text(&c, first, "set -m; sleep 30\r");
+    eventually("sleep counts as busy", || {
+        c.hello().unwrap().busy == Some(vec!["sleep".to_owned()])
+    });
+    assert!(client::lock_held(&path));
+    c.stop(&path).unwrap();
+    assert!(!client::lock_held(&path), "gone once stop returns");
+    h.join().unwrap().unwrap();
+    assert!(d.is_shut_down());
+    assert_eq!(daemon::saved::load(&file).map(|s| s.panes()), Some(1));
+}
+
+#[test]
 fn the_layout_comes_back_after_the_sessions_ended() {
     let path = socket();
     let dir = path.parent().unwrap().join("work");
@@ -1139,7 +1167,7 @@ fn an_unknown_request_is_answered_not_fatal() {
     let (req, reply) = next_reply(&mut r);
     assert_eq!(req, 7);
     assert!(
-        matches!(&reply, Reply::Error { message } if message.contains("restart it")),
+        matches!(&reply, Reply::Error { code: ErrorCode::Unsupported, message } if message.contains("restart it")),
         "{reply:?}"
     );
     // Still connected: the next request is answered.

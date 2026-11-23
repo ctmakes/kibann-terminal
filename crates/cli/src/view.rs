@@ -431,7 +431,7 @@ mod term {
             if fetch && view.note.is_none() {
                 match client.request(|req| ClientMsg::Diff { req, pane }) {
                     Ok(Reply::Diff { diff }) => view.set_diff(diff),
-                    Ok(Reply::Error { message }) => view.note = Some(message),
+                    Ok(Reply::Error { message, .. }) => view.note = Some(message),
                     Ok(_) => {}
                     Err(e) => view.note = Some(format!("lost the daemon: {e}")),
                 }

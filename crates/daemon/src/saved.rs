@@ -34,34 +34,67 @@ impl Saved {
 /// `delay`, on a thread of its own.
 pub struct Saver {
     path: PathBuf,
-    tx: Sender<String>,
+    tx: Sender<Msg>,
     /// What was last offered, to skip offering it again.
     last: String,
 }
 
+enum Msg {
+    Offer(String),
+    /// Write what's pending now, then answer.
+    Flush(Sender<()>),
+}
+
 impl Saver {
     pub fn start(path: PathBuf, delay: Duration) -> Self {
-        let (tx, rx) = mpsc::channel::<String>();
+        let (tx, rx) = mpsc::channel::<Msg>();
         let to = path.clone();
+        let write_to = move |text: &str| {
+            if let Err(e) = write(&to, text) {
+                eprintln!("kibannd: saving the layout to {}: {e}", to.display());
+            }
+        };
         let _ = std::thread::Builder::new()
             .name("layout-saver".into())
             .spawn(move || {
-                while let Ok(mut latest) = rx.recv() {
+                while let Ok(msg) = rx.recv() {
+                    let mut latest = match msg {
+                        Msg::Offer(s) => s,
+                        Msg::Flush(done) => {
+                            let _ = done.send(());
+                            continue;
+                        }
+                    };
                     loop {
                         match rx.recv_timeout(delay) {
-                            Ok(s) => latest = s,
-                            Err(RecvTimeoutError::Timeout) => break,
-                            // Ending (on purpose): a pending change is dropped.
+                            Ok(Msg::Offer(s)) => latest = s,
+                            Ok(Msg::Flush(done)) => {
+                                write_to(&latest);
+                                let _ = done.send(());
+                                break;
+                            }
+                            Err(RecvTimeoutError::Timeout) => {
+                                write_to(&latest);
+                                break;
+                            }
+                            // Ending without a flush: a pending change is
+                            // dropped.
                             Err(RecvTimeoutError::Disconnected) => return,
                         }
-                    }
-                    if let Err(e) = write(&to, &latest) {
-                        eprintln!("kibannd: saving the layout to {}: {e}", to.display());
                     }
                 }
             });
         let last = std::fs::read_to_string(&path).unwrap_or_default();
         Self { path, tx, last }
+    }
+
+    /// Write the change waiting for its delay, if any, and return once it's
+    /// on disk (or after `timeout`).
+    pub fn flush(&self, timeout: Duration) {
+        let (done, wait) = mpsc::channel();
+        if self.tx.send(Msg::Flush(done)).is_ok() {
+            let _ = wait.recv_timeout(timeout);
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -75,16 +108,9 @@ impl Saver {
         };
         if text != self.last {
             self.last.clone_from(&text);
-            let _ = self.tx.send(text);
+            let _ = self.tx.send(Msg::Offer(text));
         }
     }
-}
-
-/// Write `s` to `path` now, for a client saving the layout of a daemon that
-/// can't save it itself (one from before layouts were saved).
-pub fn save(path: &Path, s: &Saved) -> std::io::Result<()> {
-    let text = serde_json::to_string_pretty(s).map_err(std::io::Error::other)?;
-    write(path, &text)
 }
 
 /// Write through a temporary file, so a crash never leaves half a file.
@@ -161,6 +187,20 @@ mod tests {
         s.offer(&empty);
         std::thread::sleep(Duration::from_millis(400));
         assert_eq!(load(&path), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_flush_writes_the_pending_change_now() {
+        let dir = std::env::temp_dir().join(format!("kibann-flush-{}", std::process::id()));
+        let path = dir.join("layout.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Saver::start(path.clone(), Duration::from_secs(60));
+        s.offer(&sample());
+        s.flush(Duration::from_secs(5));
+        assert_eq!(load(&path), Some(sample()));
+        // Nothing pending: it returns at once.
+        s.flush(Duration::from_secs(5));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

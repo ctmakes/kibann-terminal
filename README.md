@@ -21,7 +21,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what each version brings.
 - **Tray icon:** it keeps running in the tray when you close the window, on desktops that show tray icons: KDE, Cinnamon, XFCE, and GNOME with the AppIndicator extension (Ubuntu has it on). Without a tray, closing the window quits the app, and your shells keep running for next time.
 - **Checked on:** Ubuntu 24.04 in a container. If the window is blank on an NVIDIA GPU, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
-**Windows** doesn't work yet: sessions there run inside the app and end with it.
+**Windows** doesn't work yet.
 
 ## Using it
 

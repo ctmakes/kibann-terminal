@@ -1,182 +1,232 @@
-//! An update replaces the app, but the terminal service (the daemon) from
-//! the earlier version keeps running so that its shells survive. Terminal
-//! behaviour lives in the service, so the update's terminal changes only
-//! take effect once the service restarts.
+//! The terminal service (the daemon): finding it, starting it, and
+//! replacing one from another version.
 //!
-//! When the app starts and finds an older service, it restarts it on its
-//! own if every shell sits at its prompt: the tabs and splits come back
-//! with fresh shells in the same directories. If a program is running in a
-//! pane, the app asks first instead.
+//! An update replaces the app but leaves the running service alone, so its
+//! shells survive. Terminal behaviour lives in the service, so an update's
+//! terminal changes only take effect once it's replaced. What the app does
+//! with the service it finds ([`plan`]):
+//! - **Built from the same code:** uses it.
+//! - **Another build, same protocol:** replaces it on its own when every
+//!   shell is at its prompt (the tabs come back with fresh shells in the
+//!   same directories); otherwise keeps using it and asks.
+//! - **Another protocol:** this app can't show its sessions. Replaces it on
+//!   its own when idle; otherwise asks to restart it or quit.
 //!
-//! The check must work with services from earlier versions, so it reads
-//! the process table rather than asking the service.
+//! Dev builds replace any other build at once: their sessions are
+//! disposable. The service saves the layout itself before it exits.
 
-use std::path::Path;
+use std::io;
 
-use client::Client;
-use daemon::saved::Saved;
-use proto::wire::{ClientMsg, Reply};
+use client::{Client, ClientEvent, Fit, Hello};
+use tauri::AppHandle;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-/// One row of `ps -A -o pid=,ppid=,pgid=,tpgid=,args=`.
-#[derive(Debug, PartialEq)]
-struct Proc<'a> {
-    pid: i32,
-    ppid: i32,
-    pgid: i32,
-    /// The foreground process group of its terminal (0 or less: none).
-    tpgid: i32,
-    args: &'a str,
+/// What [`connect`] found.
+pub enum Connected {
+    /// A service this app can use as it is.
+    Ready(Client),
+    /// Another build's, with programs running in it (so it wasn't replaced
+    /// on its own). It works; the update's terminal changes wait.
+    Older(Client, Option<Vec<String>>),
+    /// Another protocol's, with programs running in it: unusable until
+    /// it's replaced.
+    Unusable(Option<Vec<String>>),
 }
 
-fn parse_row(line: &str) -> Option<Proc<'_>> {
-    let mut rest = line.trim_start();
-    let mut num = || -> Option<i32> {
-        let end = rest.find(char::is_whitespace)?;
-        let n = rest[..end].parse().ok()?;
-        rest = rest[end..].trim_start();
-        Some(n)
-    };
-    let (pid, ppid, pgid, tpgid) = (num()?, num()?, num()?, num()?);
-    Some(Proc {
-        pid,
-        ppid,
-        pgid,
-        tpgid,
-        args: rest.trim_end(),
-    })
+/// What to do with a service, from how it [`Fit`]s.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Use,
+    /// End it (it saves its layout first) and start this build's.
+    Replace,
+    /// Use it, and ask whether to replace it.
+    UseAndAsk,
+    /// Ask whether to replace it or quit.
+    Ask,
 }
 
-/// A program's name from its command line: `/usr/bin/vim x` → `vim`.
-fn name(args: &str) -> String {
-    let first = args.split_whitespace().next().unwrap_or("");
-    first.rsplit('/').next().unwrap_or(first).to_owned()
-}
-
-/// The programs running in the shells of the service on `socket`, from
-/// `ps` output: for each shell not at its prompt, the program in front.
-/// Empty when every shell is at its prompt; `None` when the service isn't
-/// in the table, so it can't tell.
-fn running_in(ps: &str, socket: &Path) -> Option<Vec<String>> {
-    let procs: Vec<Proc> = ps.lines().filter_map(parse_row).collect();
-    let tail = format!("--daemon --socket {}", socket.display());
-    let service = procs.iter().find(|p| p.args.ends_with(&tail))?;
-    let mut running = Vec::new();
-    for shell in procs.iter().filter(|p| p.ppid == service.pid) {
-        if shell.tpgid <= 0 || shell.tpgid == shell.pgid {
-            continue;
-        }
-        let front = procs
-            .iter()
-            .find(|p| p.pid == shell.tpgid)
-            .or_else(|| procs.iter().find(|p| p.pgid == shell.tpgid));
-        running.push(front.map_or_else(|| "a program".to_owned(), |p| name(p.args)));
+/// `replaced`: this run already replaced one, so whatever runs now is used
+/// if it can be (it would only be replaced again).
+fn plan(fit: &Fit, dev: bool, idle: bool, restores: bool, replaced: bool) -> Step {
+    match fit {
+        Fit::Same => Step::Use,
+        Fit::OtherBuild if replaced => Step::Use,
+        _ if dev || (idle && restores && !replaced) => Step::Replace,
+        Fit::OtherBuild => Step::UseAndAsk,
+        Fit::OtherProtocol => Step::Ask,
     }
-    Some(running)
 }
 
-/// What runs in the service's shells now; see [`running_in`].
-pub fn running_programs(socket: &Path) -> Option<Vec<String>> {
-    let out = std::process::Command::new("ps")
-        .args(["-A", "-o", "pid=,ppid=,pgid=,tpgid=,args="])
-        .output()
-        .ok()?;
-    running_in(&String::from_utf8_lossy(&out.stdout), socket)
-}
-
-/// Save the tabs, splits and each pane's directory, as the service would
-/// itself, so they come back after the restart even when the old service
-/// never saved them. Nothing is written for no panes.
-pub fn save_layout(client: &Client) -> std::io::Result<()> {
-    let Some(file) = daemon::layout_file(std::env::var_os("KIBANN_SOCKET").is_some()) else {
-        return Ok(());
-    };
-    let layout = client.layout()?;
-    let panes = match client.request(|req| ClientMsg::Panes { req })? {
-        Reply::Panes { panes } => panes,
-        _ => Vec::new(),
-    };
-    let saved = Saved {
-        layout,
-        dirs: panes
-            .into_iter()
-            .filter_map(|p| Some((p.id, p.cwd?)))
-            .collect(),
-    };
-    if saved.panes() == 0 {
-        return Ok(());
-    }
-    daemon::saved::save(&file, &saved)
-}
-
-/// "claude, vim and 2 more", for the question.
-pub fn list(programs: &[String]) -> String {
-    let mut names: Vec<&str> = Vec::new();
-    for p in programs {
-        if !names.contains(&p.as_str()) {
-            names.push(p);
+/// Connect to the service, starting it if needed, and replace it when
+/// [`plan`] says so. `on_event` makes the event handler for each
+/// connection. The service is this same executable run with `--daemon`.
+#[cfg(unix)]
+pub fn connect<F>(on_event: impl Fn() -> F) -> io::Result<Connected>
+where
+    F: FnMut(ClientEvent<'_>) + Send + 'static,
+{
+    let dev = cfg!(debug_assertions);
+    let socket = proto::paths::socket_path(dev);
+    let command = vec![std::env::current_exe()?.into_os_string(), "--daemon".into()];
+    let restores = crate::theme::read_settings().0.restore_layout;
+    let mut replaced = false;
+    loop {
+        let client = Client::connect_or_start(&socket, &command, on_event())?;
+        let hello = client.hello()?;
+        let fit = hello.fit(daemon::BUILD);
+        let (idle, Hello { build, busy, .. }) = (hello.idle(), hello);
+        match plan(&fit, dev, idle, restores, replaced) {
+            Step::Use => return Ok(Connected::Ready(client)),
+            Step::UseAndAsk => return Ok(Connected::Older(client, busy)),
+            Step::Ask => return Ok(Connected::Unusable(busy)),
+            Step::Replace if replaced => {
+                return Err(io::Error::other(
+                    "the terminal service is still another version's after restarting it",
+                ));
+            }
+            Step::Replace => {
+                eprintln!(
+                    "kibann: replacing the terminal service of build {build} with {}",
+                    daemon::BUILD
+                );
+                client.stop(&socket)?;
+                replaced = true;
+            }
         }
     }
-    match names.as_slice() {
-        [] => "a program".to_owned(),
-        [one] => (*one).to_owned(),
-        [a, b] => format!("{a} and {b}"),
-        [a, b, rest @ ..] => format!("{a}, {b} and {} more", rest.len()),
+}
+
+#[cfg(not(unix))]
+pub fn connect<F>(_on_event: impl Fn() -> F) -> io::Result<Connected>
+where
+    F: FnMut(ClientEvent<'_>) + Send + 'static,
+{
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "the terminal service doesn't run on this platform yet",
+    ))
+}
+
+/// Replace the running service, then start the app again on the new one.
+fn replace_and_restart(app: &AppHandle) {
+    #[cfg(unix)]
+    {
+        let socket = proto::paths::socket_path(cfg!(debug_assertions));
+        if let Ok(old) = Client::connect(&socket, |_| {})
+            && let Err(e) = old.stop(&socket)
+        {
+            eprintln!("kibann: stopping the terminal service: {e}");
+        }
     }
+    app.restart();
+}
+
+/// "Restarting ends what runs in them (claude and vim)".
+fn what_ends(busy: &Option<Vec<String>>) -> String {
+    match busy {
+        Some(b) if !b.is_empty() => format!(
+            "Restarting ends what runs in them ({})",
+            client::list_programs(b)
+        ),
+        _ => "Restarting ends the open terminals".to_owned(),
+    }
+}
+
+fn after_restart() -> &'static str {
+    if crate::theme::read_settings().0.restore_layout {
+        "your tabs and splits come back with fresh shells"
+    } else {
+        "the tabs close (restore-layout is off)"
+    }
+}
+
+/// The service from an earlier version still runs programs in its shells:
+/// ask before replacing it, which ends them.
+pub fn offer_update_restart(app: &AppHandle, busy: &Option<Vec<String>>) {
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "This update changes how the terminal behaves, but the terminal service \
+             from the earlier version is still running your shells.\n\n\
+             {}; {}. Until then the earlier behaviour stays. \
+             Next time every shell is at its prompt, the restart happens on its own.",
+            what_ends(busy),
+            after_restart()
+        ))
+        .title("Restart the terminal service?")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Restart Now".into(),
+            "Later".into(),
+        ))
+        .show(move |restart| {
+            if restart {
+                replace_and_restart(&handle);
+            }
+        });
+}
+
+/// The running service is from a version this one can't talk to: restart
+/// it, or quit and leave it running.
+pub fn offer_restart(app: &AppHandle, busy: &Option<Vec<String>>) {
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "The terminal service from another version of Kibann Terminal is running \
+             your shells, and this version can't show them.\n\n\
+             {}; {}. Quitting leaves them running.",
+            what_ends(busy),
+            after_restart()
+        ))
+        .title("Restart the terminal service?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Restart Service".into(),
+            "Quit".into(),
+        ))
+        .show(move |restart| {
+            if restart {
+                replace_and_restart(&handle);
+            } else {
+                handle.exit(0);
+            }
+        });
+}
+
+/// The service couldn't be reached or started.
+pub fn no_service(app: &AppHandle, e: &io::Error) {
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "Kibann Terminal couldn't start its terminal service: {e}"
+        ))
+        .title("No terminal service")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::OkCustom("Quit".into()))
+        .show(move |_| handle.exit(1));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SOCKET: &str = "/var/folders/T/kibann/daemon.sock";
-
-    fn ps(rows: &[&str]) -> String {
-        rows.join("\n")
-    }
-
     #[test]
-    fn shells_at_their_prompt_run_nothing() {
-        let table = ps(&[
-            "  100     1   100     0 /Applications/Kibann Terminal.app/Contents/MacOS/kibann --daemon --socket /var/folders/T/kibann/daemon.sock",
-            "  101   100   101   101 -zsh",
-            "  102   100   102   102 -zsh",
-            "  103   101   103   101 gitstatusd -s -1",
-        ]);
-        assert_eq!(running_in(&table, Path::new(SOCKET)), Some(vec![]));
-    }
-
-    #[test]
-    fn a_program_in_front_is_running() {
-        let table = ps(&[
-            "  100     1   100     0 /Applications/Kibann Terminal.app/Contents/MacOS/kibann --daemon --socket /var/folders/T/kibann/daemon.sock",
-            "  101   100   101   200 -zsh",
-            "  200   101   200   200 /opt/homebrew/bin/claude --resume",
-            "  102   100   102   102 -zsh",
-            "  300     1   300   300 /usr/bin/vim not-ours",
-        ]);
-        assert_eq!(
-            running_in(&table, Path::new(SOCKET)),
-            Some(vec!["claude".to_owned()])
-        );
-    }
-
-    #[test]
-    fn another_service_is_not_ours() {
-        let table = ps(&[
-            "  100     1   100     0 /x/kibann --daemon --socket /var/folders/T/kibann/daemon-dev.sock",
-            "  101   100   101   200 -zsh",
-        ]);
-        assert_eq!(running_in(&table, Path::new(SOCKET)), None);
-    }
-
-    #[test]
-    fn programs_are_listed_once_each() {
-        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(list(&v(&["claude"])), "claude");
-        assert_eq!(list(&v(&["claude", "claude", "vim"])), "claude and vim");
-        assert_eq!(
-            list(&v(&["claude", "vim", "htop", "npm"])),
-            "claude, vim and 2 more"
-        );
+    fn what_happens_to_the_service_found() {
+        use Step::*;
+        let p = |fit, dev, idle, restores, replaced| plan(&fit, dev, idle, restores, replaced);
+        // Release: the same build is used; another is replaced while idle.
+        assert_eq!(p(Fit::Same, false, false, true, false), Use);
+        assert_eq!(p(Fit::OtherBuild, false, true, true, false), Replace);
+        assert_eq!(p(Fit::OtherProtocol, false, true, true, false), Replace);
+        // Busy, or the tabs wouldn't come back: ask.
+        assert_eq!(p(Fit::OtherBuild, false, false, true, false), UseAndAsk);
+        assert_eq!(p(Fit::OtherBuild, false, true, false, false), UseAndAsk);
+        assert_eq!(p(Fit::OtherProtocol, false, false, true, false), Ask);
+        // After a replacement, a usable one is used.
+        assert_eq!(p(Fit::OtherBuild, false, true, true, true), Use);
+        // Dev: any other build is replaced.
+        assert_eq!(p(Fit::OtherBuild, true, false, true, false), Replace);
+        assert_eq!(p(Fit::OtherProtocol, true, false, false, false), Replace);
+        assert_eq!(p(Fit::Same, true, false, true, false), Use);
     }
 }

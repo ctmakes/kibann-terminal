@@ -16,7 +16,7 @@ use proto::layout::{Action, Dir, Layout, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
 #[cfg(unix)]
 use proto::wire::PROTOCOL_VERSION;
-use proto::wire::{ClientMsg, ReadSource, Reply};
+use proto::wire::{ClientMsg, ErrorCode, ReadSource, Reply};
 use proto::{InputEvent, KeyAction, mods};
 use serde_json::{Value, json};
 
@@ -307,12 +307,13 @@ fn connect() -> Result<Client, Fail> {
             ),
         )
     })?;
-    let (version, _) = client.hello()?;
+    let version = client.hello()?.version;
     if version != PROTOCOL_VERSION {
         return Err(error(
             "version",
             format!(
-                "the running kibann speaks protocol {version}, this command {PROTOCOL_VERSION}"
+                "the terminal service is from another version of Kibann (protocol {version}, \
+                 this command {PROTOCOL_VERSION}); open Kibann to restart it"
             ),
         ));
     }
@@ -519,10 +520,11 @@ fn dispatch(args: &[String]) -> Out {
                 seq,
             })? {
                 Reply::Ok => Ok(Some(json!({"ok": true}))),
-                Reply::Error { message } if message == "stale seq" => {
-                    Err(error("stale", "a report with a higher --seq came first"))
-                }
-                Reply::Error { message } => Err(error("not_found", message)),
+                Reply::Error {
+                    code: ErrorCode::Stale,
+                    ..
+                } => Err(error("stale", "a report with a higher --seq came first")),
+                Reply::Error { code, message } => Err(error(code.as_str(), message)),
                 other => Err(unexpected(other).into()),
             }
         }
@@ -531,7 +533,7 @@ fn dispatch(args: &[String]) -> Out {
             let pane = take_pane(&mut a, true)?;
             match connect()?.request(|req| ClientMsg::Release { req, pane })? {
                 Reply::Ok => Ok(Some(json!({"ok": true}))),
-                Reply::Error { message } => Err(error("not_found", message)),
+                Reply::Error { code, message } => Err(error(code.as_str(), message)),
                 other => Err(unexpected(other).into()),
             }
         }
@@ -663,10 +665,7 @@ fn pane_list(c: &Client, only: Option<PaneId>) -> Out {
 fn diff(c: &Client, pane: PaneId) -> Result<proto::git::Diff, Fail> {
     match c.request(|req| ClientMsg::Diff { req, pane })? {
         Reply::Diff { diff } => Ok(diff),
-        Reply::Error { message } if message.starts_with("no pane") => {
-            Err(error("not_found", message))
-        }
-        Reply::Error { message } => Err(error("no_repo", message)),
+        Reply::Error { code, message } => Err(error(code.as_str(), message)),
         other => Err(unexpected(other).into()),
     }
 }
@@ -706,7 +705,7 @@ fn read(c: &Client, pane: PaneId, source: ReadSource, lines: Option<u32>) -> Res
         lines,
     })? {
         Reply::Text { text } => Ok(text),
-        Reply::Error { message } => Err(error("not_found", message)),
+        Reply::Error { code, message } => Err(error(code.as_str(), message)),
         other => Err(unexpected(other).into()),
     }
 }
@@ -764,7 +763,7 @@ fn status(c: &Client, pane: PaneId, mark: Option<&str>) -> Result<Status, Fail> 
             mark,
             agent,
         }),
-        Reply::Error { message } => Err(error("not_found", message)),
+        Reply::Error { code, message } => Err(error(code.as_str(), message)),
         other => Err(unexpected(other).into()),
     }
 }

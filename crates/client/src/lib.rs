@@ -14,8 +14,7 @@ use proto::git::PaneDir;
 use proto::layout::{Action, Layout, PaneId, TabId};
 use proto::status::PaneStatus;
 use proto::wire::{
-    ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, SessionId, read_msg,
-    write_msg,
+    ClientMsg, PROTOCOL_VERSION, RawServerMsg, Reply, ReqId, ServerMsg, SessionId, write_msg,
 };
 
 /// How long a request may take. Spawning looks up a directory, which can
@@ -72,7 +71,12 @@ impl Client {
             thread::Builder::new()
                 .name("daemon-client".into())
                 .spawn(move || {
-                    while let Ok(Some(msg)) = read_msg::<_, RawServerMsg>(&mut reader) {
+                    while let Ok(Some(body)) = proto::wire::read_raw(&mut reader) {
+                        // A message this build doesn't know (from a newer
+                        // daemon) is skipped, not taken as the end.
+                        let Ok(msg) = serde_json::from_slice::<RawServerMsg>(&body) else {
+                            continue;
+                        };
                         match msg {
                             ServerMsg::Reply { req, reply } => {
                                 if let Some(tx) = pending.lock().unwrap().remove(&req) {
@@ -132,13 +136,21 @@ impl Client {
         })
     }
 
-    /// The daemon's protocol version and build id.
-    pub fn hello(&self) -> io::Result<(u32, String)> {
+    /// Who the daemon is: works with a daemon of any version.
+    pub fn hello(&self) -> io::Result<Hello> {
         match self.request(|req| ClientMsg::Hello {
             req,
             version: PROTOCOL_VERSION,
         })? {
-            Reply::Hello { version, build } => Ok((version, build)),
+            Reply::Hello {
+                version,
+                build,
+                busy,
+            } => Ok(Hello {
+                version,
+                build,
+                busy,
+            }),
             other => Err(unexpected(other)),
         }
     }
@@ -192,8 +204,66 @@ impl Client {
 /// A reply that isn't the one asked for, as an error.
 pub fn unexpected(reply: Reply) -> io::Error {
     match reply {
-        Reply::Error { message } => io::Error::other(message),
+        Reply::Error { message, .. } => io::Error::other(message),
         other => io::Error::other(format!("unexpected reply: {other:?}")),
+    }
+}
+
+/// A daemon's answer to [`Client::hello`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hello {
+    pub version: u32,
+    /// Its fingerprint (`daemon::BUILD` where it was built).
+    pub build: String,
+    /// What runs in its panes besides their shells, one name a pane
+    /// (`None`: a daemon too old to say).
+    pub busy: Option<Vec<String>>,
+}
+
+/// How a running daemon compares with the one this program comes with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fit {
+    /// Built from the same code.
+    Same,
+    /// Speaks this protocol but its terminal code is another build's: it
+    /// works, with the earlier terminal behaviour, until it's replaced.
+    OtherBuild,
+    /// Speaks another protocol: only [`Client::hello`] and
+    /// [`Client::stop`] work with it.
+    OtherProtocol,
+}
+
+impl Hello {
+    /// How this daemon fits a program whose own daemon is `build`.
+    pub fn fit(&self, build: &str) -> Fit {
+        if self.version != PROTOCOL_VERSION {
+            Fit::OtherProtocol
+        } else if self.build != build {
+            Fit::OtherBuild
+        } else {
+            Fit::Same
+        }
+    }
+
+    /// Ending it ends no program: every shell is at its prompt.
+    pub fn idle(&self) -> bool {
+        self.busy.as_ref().is_some_and(|b| b.is_empty())
+    }
+}
+
+/// "claude, vim and 2 more", for saying what ending the daemon would end.
+pub fn list_programs(programs: &[String]) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for p in programs {
+        if !names.contains(&p.as_str()) {
+            names.push(p);
+        }
+    }
+    match names.as_slice() {
+        [] => "a program".to_owned(),
+        [one] => (*one).to_owned(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, rest @ ..] => format!("{a}, {b} and {} more", rest.len()),
     }
 }
 
@@ -224,6 +294,45 @@ mod unix {
 
     /// How long to wait for a daemon we started to start listening.
     const START_TIMEOUT: Duration = Duration::from_secs(3);
+    /// How long a daemon may take to end its sessions and exit.
+    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
+    /// The lock a daemon holds for as long as it runs (`<socket>.lock`).
+    fn lock_path(socket: &Path) -> std::path::PathBuf {
+        let mut p = socket.as_os_str().to_owned();
+        p.push(".lock");
+        p.into()
+    }
+
+    /// Whether a daemon for `socket` is running, or still ending: it holds
+    /// the lock until its process is gone.
+    pub fn lock_held(socket: &Path) -> bool {
+        use std::os::fd::AsRawFd;
+        let Ok(f) = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(lock_path(socket))
+        else {
+            return false;
+        };
+        // SAFETY: a valid open file descriptor; the lock goes with the file.
+        unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 }
+    }
+
+    /// Wait until no daemon holds `socket`'s lock.
+    fn wait_for_exit(socket: &Path, timeout: Duration) -> io::Result<()> {
+        let deadline = Instant::now() + timeout;
+        while lock_held(socket) {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the terminal service didn't exit",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    }
 
     impl Client {
         /// Connect to a running daemon.
@@ -247,6 +356,9 @@ mod unix {
             if let Ok(s) = UnixStream::connect(socket) {
                 return over(s, on_event);
             }
+            // One that's ending still holds the lock, and a new one would
+            // find it taken and give up.
+            wait_for_exit(socket, STOP_TIMEOUT)?;
             start_daemon(socket, command)?;
             let deadline = Instant::now() + START_TIMEOUT;
             loop {
@@ -256,6 +368,16 @@ mod unix {
                     Err(_) => std::thread::sleep(Duration::from_millis(20)),
                 }
             }
+        }
+    }
+
+    impl Client {
+        /// Ask the daemon on `socket` (of any version) to save its layout,
+        /// end its sessions and exit, and wait until it has.
+        pub fn stop(self, socket: &Path) -> io::Result<()> {
+            self.send(&super::ClientMsg::Shutdown)?;
+            drop(self);
+            wait_for_exit(socket, STOP_TIMEOUT)
         }
     }
 
@@ -305,4 +427,4 @@ mod unix {
 }
 
 #[cfg(unix)]
-pub use unix::start_daemon;
+pub use unix::{lock_held, start_daemon};

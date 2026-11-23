@@ -341,7 +341,7 @@ pub fn quit(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let open = app
         .try_state::<crate::Term>()
-        .and_then(|t| t.client.layout().ok())
+        .and_then(|t| t.client().ok()?.layout().ok())
         .map_or(0, |l| l.panes().len());
     if open == 0 {
         crate::quit_ending_sessions(app);

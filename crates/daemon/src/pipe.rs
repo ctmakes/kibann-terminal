@@ -1,5 +1,5 @@
-//! An in-memory byte pipe, for running the daemon core inside the app (and
-//! in tests) with the same code path as a socket.
+//! An in-memory byte pipe, for running the daemon core in a test's own
+//! process with the same code path as a socket.
 
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{Receiver, Sender, channel};

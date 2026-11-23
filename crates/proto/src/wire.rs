@@ -15,11 +15,13 @@ use crate::layout::{Action, Layout, PaneId, TabId};
 use crate::status::{AgentState, PaneStatus};
 use crate::{Frame, InputEvent, Resize};
 
-/// Bumped whenever a message changes shape. A client and daemon with
-/// different versions can't talk, except for [`ClientMsg::Hello`], its
-/// reply, and [`ClientMsg::Shutdown`], which must never change: they are how
-/// an app finds an older daemon and replaces it.
-pub const PROTOCOL_VERSION: u32 = 8;
+/// Bumped whenever a message is added or changes shape. A client and daemon
+/// with different versions can't talk, except for [`ClientMsg::Hello`], its
+/// reply, and [`ClientMsg::Shutdown`], which keep working across versions:
+/// they are how an app finds an older daemon and replaces it. Their fields
+/// never change; new ones may be added to [`Reply::Hello`], with defaults,
+/// since an older daemon leaves them out.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -134,7 +136,8 @@ pub enum ClientMsg {
     Restore {
         req: ReqId,
     },
-    /// End every session and exit.
+    /// Save the layout (any change not yet written), end every session and
+    /// exit. The daemon holds its lock (`<socket>.lock`) until it's gone.
     Shutdown,
 }
 
@@ -175,6 +178,11 @@ pub enum Reply {
     Hello {
         version: u32,
         build: String,
+        /// What runs in the panes besides their shells: one program name for
+        /// each pane not at its prompt. Ending the daemon would end them.
+        /// `None` from a daemon that doesn't say (before protocol 9).
+        #[serde(default)]
+        busy: Option<Vec<String>>,
     },
     Layout {
         layout: Layout,
@@ -209,8 +217,48 @@ pub enum Reply {
         diff: Diff,
     },
     Error {
+        code: ErrorCode,
         message: String,
     },
+}
+
+/// Why a request failed, for a program to act on; [`Reply::Error`]'s
+/// message is for people.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// No such pane, tab or split.
+    NotFound,
+    /// Not something that can be done as asked (a bad value, a workspace
+    /// with no tabs).
+    Invalid,
+    /// A report older than one already taken (its `seq`).
+    Stale,
+    /// The pane isn't in a git checkout.
+    NoRepo,
+    /// It was tried and didn't work: a shell that couldn't start, git
+    /// failing.
+    Failed,
+    /// This daemon doesn't know the request: it's older than the client.
+    Unsupported,
+    /// A code this build doesn't know, from a newer daemon.
+    #[serde(other)]
+    Other,
+}
+
+impl ErrorCode {
+    /// The code as it's written on the wire (`not_found`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::Invalid => "invalid",
+            Self::Stale => "stale",
+            Self::NoRepo => "no_repo",
+            Self::Failed => "failed",
+            Self::Unsupported => "unsupported",
+            Self::Other => "other",
+        }
+    }
 }
 
 /// From the daemon. `F` is [`Frame`] when sending; a client that only passes
@@ -432,6 +480,47 @@ mod tests {
                 reply: Reply::Acted { pane: Some(2), .. }
             }
         ));
+    }
+
+    /// What lets any app replace any daemon: these shapes never change.
+    #[test]
+    fn hello_and_shutdown_keep_their_shape() {
+        let hello = serde_json::to_value(ClientMsg::Hello { req: 1, version: 3 }).unwrap();
+        assert_eq!(
+            hello,
+            serde_json::json!({"t": "hello", "req": 1, "version": 3})
+        );
+        let shutdown = serde_json::to_value(ClientMsg::Shutdown).unwrap();
+        assert_eq!(shutdown, serde_json::json!({"t": "shutdown"}));
+        // An older daemon's reply, without the fields added since.
+        let old: Reply = serde_json::from_str(r#"{"t":"hello","version":7,"build":"x"}"#).unwrap();
+        assert_eq!(
+            old,
+            Reply::Hello {
+                version: 7,
+                build: "x".into(),
+                busy: None
+            }
+        );
+    }
+
+    #[test]
+    fn an_unknown_error_code_is_still_an_error() {
+        let r: Reply =
+            serde_json::from_str(r#"{"t":"error","code":"too_tired","message":"later"}"#).unwrap();
+        assert_eq!(
+            r,
+            Reply::Error {
+                code: ErrorCode::Other,
+                message: "later".into()
+            }
+        );
+        let known = serde_json::to_value(Reply::Error {
+            code: ErrorCode::NoRepo,
+            message: String::new(),
+        })
+        .unwrap();
+        assert_eq!(known["code"], ErrorCode::NoRepo.as_str());
     }
 
     #[test]

@@ -4,9 +4,8 @@
 //! ends every shell. Programs talk to it with the `client` crate.
 //!
 //! The server core ([`server::Daemon`]) serves any byte stream. On Unix it
-//! listens on a socket ([`server::serve_socket`]); where there is no socket
-//! support yet (Windows), the app runs the same core in its own process over
-//! in-memory pipes ([`in_process`]).
+//! listens on a socket ([`server::serve_socket`]); tests also run it in
+//! their own process over in-memory pipes ([`in_process`]).
 
 pub mod installed;
 pub mod layout;
@@ -18,8 +17,8 @@ pub mod status;
 
 use proto::paths;
 
-/// Run the daemon inside this process (where there is no socket support
-/// yet). Its sessions end with the process, as before the daemon existed.
+/// Run the daemon inside this process, over in-memory pipes (for tests).
+/// Its sessions end with the client.
 pub fn in_process(
     on_event: impl FnMut(client::ClientEvent<'_>) + Send + 'static,
 ) -> std::io::Result<client::Client> {

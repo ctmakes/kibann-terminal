@@ -31,18 +31,29 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// Where each attached session's frames go.
 type Channels = Arc<Mutex<HashMap<SessionId, Channel>>>;
 
-/// The connection to the daemon, which owns the sessions.
+/// The connection to the daemon, which owns the sessions. None while there
+/// is no service to use (see [`service`]).
+#[derive(Default)]
 struct Term {
-    client: Client,
+    link: std::sync::RwLock<Option<Arc<Client>>>,
     channels: Channels,
-    /// The daemon is from an earlier build (see [`connect`]): requests new
-    /// in this one, like opening a layout, would fail there.
-    older: bool,
 }
 
 impl Term {
+    fn client(&self) -> Result<Arc<Client>, String> {
+        self.link
+            .read()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "no terminal service".to_owned())
+    }
+
+    fn set(&self, client: Client) {
+        *self.link.write().unwrap() = Some(Arc::new(client));
+    }
+
     fn send(&self, msg: ClientMsg) -> Result<(), String> {
-        self.client.send(&msg).map_err(|e| e.to_string())
+        self.client()?.send(&msg).map_err(|e| e.to_string())
     }
 }
 
@@ -79,45 +90,6 @@ fn on_event(app: AppHandle, channels: Channels) -> impl FnMut(ClientEvent<'_>) +
     }
 }
 
-/// The daemon [`connect`] found or started.
-#[cfg(unix)]
-enum Connected {
-    /// This build's.
-    Current(Client),
-    /// An earlier version's, with programs running in its shells (so it
-    /// wasn't restarted on its own; see [`service`]). The update's terminal
-    /// changes wait for it to restart.
-    Older(Client, Vec<String>),
-    /// An earlier version's that this build can't talk to (another
-    /// protocol).
-    Outdated,
-}
-
-/// What to do with the daemon found on the socket.
-#[derive(Debug, PartialEq, Eq)]
-enum Found {
-    Use,
-    /// End it and start ours (dev builds only: it ends the sessions).
-    Restart,
-    /// An earlier release's: usable, but its terminal behaviour is old
-    /// (release builds, same protocol).
-    Older,
-    /// Ask the user (release builds, protocol changed).
-    Outdated,
-}
-
-fn decide(dev: bool, same_protocol: bool, same_build: bool, restarted: bool) -> Found {
-    if restarted || (same_protocol && same_build) {
-        Found::Use
-    } else if same_protocol && !dev {
-        Found::Older
-    } else if dev {
-        Found::Restart
-    } else {
-        Found::Outdated
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,168 +102,6 @@ mod tests {
         assert_eq!(quit_labels(false)[0].1, "Quit Kibann Terminal");
         assert_eq!(quit_labels(false)[1].1, "Quit and End Sessions…");
     }
-
-    #[test]
-    fn which_daemons_are_kept() {
-        // Release: an upgrade keeps the sessions unless the protocol changed.
-        assert_eq!(decide(false, true, true, false), Found::Use);
-        assert_eq!(decide(false, true, false, false), Found::Older);
-        assert_eq!(decide(false, true, false, true), Found::Use);
-        assert_eq!(decide(false, false, false, false), Found::Outdated);
-        // Dev: any other build is replaced, once.
-        assert_eq!(decide(true, true, true, false), Found::Use);
-        assert_eq!(decide(true, true, false, false), Found::Restart);
-        assert_eq!(decide(true, false, false, false), Found::Restart);
-        assert_eq!(decide(true, true, false, true), Found::Use);
-    }
-}
-
-/// Ask a daemon to end its sessions and exit, and wait until it has.
-/// `Hello` and `Shutdown` keep their shape across protocol versions, so
-/// this works on any daemon.
-#[cfg(unix)]
-fn stop_daemon(client: Client, socket: &std::path::Path) -> std::io::Result<()> {
-    client.send(&ClientMsg::Shutdown)?;
-    drop(client);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while socket.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    Ok(())
-}
-
-/// Connect to the daemon, starting it if needed. The daemon is this same
-/// executable run with `--daemon` (it costs about 1 MB more than a separate
-/// binary, and nothing extra has to be packaged).
-///
-/// A daemon built from other terminal code ([`daemon::BUILD`]; an update
-/// that leaves that code alone keeps it): a dev build restarts it, so new terminal
-/// code takes effect (ending dev sessions). A release build restarts it too
-/// when the protocol matches and every shell is at its prompt, keeping the
-/// layout; with programs running it keeps using it ([`Connected::Older`])
-/// and asks. Another protocol is [`Connected::Outdated`], for the user to
-/// decide.
-#[cfg(unix)]
-fn connect(app: &AppHandle, channels: &Channels) -> std::io::Result<Connected> {
-    use proto::wire::PROTOCOL_VERSION;
-
-    let dev = cfg!(debug_assertions);
-    let socket = proto::paths::socket_path(dev);
-    let exe = std::env::current_exe()?;
-    let command = vec![exe.into_os_string(), "--daemon".into()];
-
-    let mut restarted = false;
-    loop {
-        let client =
-            Client::connect_or_start(&socket, &command, on_event(app.clone(), channels.clone()))?;
-        let (version, build) = client.hello()?;
-        let same_build = build == daemon::BUILD;
-        match decide(dev, version == PROTOCOL_VERSION, same_build, restarted) {
-            Found::Use => return Ok(Connected::Current(client)),
-            Found::Outdated => return Ok(Connected::Outdated),
-            Found::Older => {
-                let running = service::running_programs(&socket);
-                let keeps_layout = theme::read_settings().0.restore_layout;
-                if running.as_ref().is_none_or(|r| !r.is_empty()) || !keeps_layout {
-                    return Ok(Connected::Older(client, running.unwrap_or_default()));
-                }
-                eprintln!("kibann: restarting the idle daemon of build {build}");
-                if let Err(e) = service::save_layout(&client) {
-                    eprintln!("kibann: saving the layout: {e}");
-                    return Ok(Connected::Older(client, Vec::new()));
-                }
-                stop_daemon(client, &socket)?;
-                restarted = true;
-            }
-            Found::Restart => {
-                eprintln!(
-                    "kibann: restarting the daemon (build {build}, want {})",
-                    daemon::BUILD
-                );
-                stop_daemon(client, &socket)?;
-                restarted = true;
-            }
-        }
-    }
-}
-
-/// An older daemon holds sessions this version can't show. Offer to end
-/// them; meanwhile this run keeps its own sessions in the app.
-#[cfg(unix)]
-fn offer_restart(app: &AppHandle) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    let handle = app.clone();
-    app.dialog()
-        .message(
-            "The terminal service from an earlier version of Kibann Terminal is still \
-             running your previous sessions, and this version can't show them.\n\n\
-             Restart the service? This ends those sessions. Until then, new shells \
-             end when you quit.",
-        )
-        .title("Restart the terminal service?")
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Restart Service".into(),
-            "Not Now".into(),
-        ))
-        .show(move |restart| {
-            if !restart {
-                return;
-            }
-            let socket = proto::paths::socket_path(cfg!(debug_assertions));
-            if let Ok(old) = Client::connect(&socket, |_| {}) {
-                let _ = stop_daemon(old, &socket);
-            }
-            handle.restart();
-        });
-}
-
-/// The service from an earlier version still runs programs in its shells:
-/// ask before restarting it, which ends them.
-#[cfg(unix)]
-fn offer_update_restart(app: &AppHandle, running: &[String]) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    let keeps_layout = theme::read_settings().0.restore_layout;
-    let ends = if running.is_empty() {
-        "Restarting ends the open terminals".to_owned()
-    } else {
-        format!(
-            "Restarting ends what runs in them ({})",
-            service::list(running)
-        )
-    };
-    let after = if keeps_layout {
-        "your tabs and splits come back with fresh shells"
-    } else {
-        "the tabs close (restore-layout is off)"
-    };
-    let handle = app.clone();
-    app.dialog()
-        .message(format!(
-            "This update changes how the terminal behaves, but the terminal service \
-             from the earlier version is still running your shells.\n\n\
-             {ends}; {after}. Until then the earlier behaviour stays. \
-             Next time every shell is at its prompt, the restart happens on its own."
-        ))
-        .title("Restart the terminal service?")
-        .kind(MessageDialogKind::Info)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Restart Now".into(),
-            "Later".into(),
-        ))
-        .show(move |restart| {
-            if !restart {
-                return;
-            }
-            let socket = proto::paths::socket_path(cfg!(debug_assertions));
-            if let Ok(old) = Client::connect(&socket, |_| {}) {
-                if keeps_layout && let Err(e) = service::save_layout(&old) {
-                    eprintln!("kibann: saving the layout: {e}");
-                }
-                let _ = stop_daemon(old, &socket);
-            }
-            handle.restart();
-        });
 }
 
 /// Send `id`'s frames to `channel`, starting with a full frame.
@@ -340,7 +150,7 @@ async fn term_request_full(state: State<'_, Term>, id: SessionId) -> Result<(), 
 /// change after it.
 #[tauri::command]
 async fn layout_watch(state: State<'_, Term>) -> Result<Layout, String> {
-    state.client.watch().map_err(|e| e.to_string())
+    state.client()?.watch().map_err(|e| e.to_string())
 }
 
 /// With no panes open: reopen the saved tabs and splits, with fresh shells.
@@ -348,7 +158,7 @@ async fn layout_watch(state: State<'_, Term>) -> Result<Layout, String> {
 #[tauri::command]
 async fn layout_restore(state: State<'_, Term>) -> Result<u32, String> {
     state
-        .client
+        .client()?
         .restore()
         .map(|(_, panes)| panes)
         .map_err(|e| e.to_string())
@@ -401,7 +211,7 @@ async fn layout_act(state: State<'_, Term>, action: Action) -> Result<Acted, Str
     if cfg!(debug_assertions) {
         eprintln!("kibann: layout action {action:?}");
     }
-    let (pane, tab) = state.client.act(action).map_err(|e| e.to_string())?;
+    let (pane, tab) = state.client()?.act(action).map_err(|e| e.to_string())?;
     Ok(Acted { pane, tab })
 }
 
@@ -425,7 +235,10 @@ async fn workspaces_list(
     state: State<'_, Term>,
     pane: Option<PaneId>,
 ) -> Result<Vec<files::workspaces::Listed>, String> {
-    Ok(files::workspaces::list(&opened_from(&state.client, pane)))
+    Ok(files::workspaces::list(&opened_from(
+        &*state.client()?,
+        pane,
+    )))
 }
 
 /// Open a workspace: a built-in one by `name`, a file by `path`. A file that
@@ -440,21 +253,7 @@ async fn workspace_open(
 ) -> Result<bool, String> {
     use files::workspaces;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    // The service from an earlier version can't open workspaces; offer to
-    // restart it rather than send what it can't read.
-    if state.older {
-        #[cfg(unix)]
-        {
-            let socket = proto::paths::socket_path(cfg!(debug_assertions));
-            let running = service::running_programs(&socket).unwrap_or_default();
-            offer_update_restart(&app, &running);
-        }
-        return Err(
-            "the terminal service is still the one from before the update; restart it to open workspaces"
-                .into(),
-        );
-    }
-    let here = opened_from(&state.client, pane);
+    let here = opened_from(&*state.client()?, pane);
     let f = workspaces::find(Some(path.as_deref().unwrap_or(&name)), &here)?;
     let t = workspaces::parse(&f, &here).map_err(|p| {
         p.0.iter()
@@ -492,7 +291,7 @@ async fn workspace_open(
         }
     }
     state
-        .client
+        .client()?
         .act(Action::OpenWorkspace { template: t })
         .map_err(|e| e.to_string())?;
     Ok(true)
@@ -515,8 +314,8 @@ async fn workspace_save(
     if target.exists() && !force {
         return Err(format!("{} exists", target.display()));
     }
-    let layout = state.client.layout().map_err(|e| e.to_string())?;
-    let panes = match state.client.request(|req| ClientMsg::Panes { req }) {
+    let layout = state.client()?.layout().map_err(|e| e.to_string())?;
+    let panes = match state.client()?.request(|req| ClientMsg::Panes { req }) {
         Ok(proto::wire::Reply::Panes { panes }) => panes,
         Ok(other) => return Err(format!("unexpected reply: {other:?}")),
         Err(e) => return Err(e.to_string()),
@@ -663,8 +462,10 @@ fn show_theme(app: &AppHandle) {
         l.name.clone_from(&name);
         l.theme = theme.clone();
     }
-    if let Some(term) = app.try_state::<Term>() {
-        let _ = term.client.request(|req| ClientMsg::SetTheme {
+    if let Some(term) = app.try_state::<Term>()
+        && let Ok(c) = term.client()
+    {
+        let _ = c.request(|req| ClientMsg::SetTheme {
             req,
             theme: theme.clone(),
         });
@@ -1199,34 +1000,22 @@ pub fn run() {
             std::thread::spawn(move || responder.respond(screens::respond(&request)));
         })
         .setup(|app| {
-            let channels = Channels::default();
             let handle = app.handle();
-            // Without the daemon the app still works; sessions just end with
-            // it, as before.
-            let local = || daemon::in_process(on_event(handle.clone(), channels.clone()));
-            #[cfg(unix)]
-            let (client, older) = match connect(handle, &channels) {
-                Ok(Connected::Current(client)) => (client, false),
-                Ok(Connected::Older(client, running)) => {
-                    offer_update_restart(handle, &running);
-                    (client, true)
+            app.manage(Term::default());
+            let term = app.state::<Term>();
+            let made = |h: AppHandle, c: Channels| move || on_event(h.clone(), c.clone());
+            match service::connect(made(handle.clone(), term.channels.clone())) {
+                Ok(service::Connected::Ready(c)) => term.set(c),
+                Ok(service::Connected::Older(c, busy)) => {
+                    term.set(c);
+                    service::offer_update_restart(handle, &busy);
                 }
-                Ok(Connected::Outdated) => {
-                    offer_restart(handle);
-                    (local()?, false)
-                }
+                Ok(service::Connected::Unusable(busy)) => service::offer_restart(handle, &busy),
                 Err(e) => {
-                    eprintln!("kibann: no daemon ({e}); running sessions in the app");
-                    (local()?, false)
+                    eprintln!("kibann: no terminal service: {e}");
+                    service::no_service(handle, &e);
                 }
-            };
-            #[cfg(not(unix))]
-            let (client, older) = (local()?, false);
-            app.manage(Term {
-                client,
-                channels,
-                older,
-            });
+            }
 
             #[cfg(target_os = "macos")]
             if let Some(w) = app.get_webview_window("main") {

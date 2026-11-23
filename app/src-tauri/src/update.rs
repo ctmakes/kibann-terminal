@@ -3,7 +3,7 @@
 //! with a Restart button, or Kibann Terminal → Check for Updates…).
 //!
 //! Restarting keeps the shells: the daemon carries on, and the new app uses
-//! it when it speaks the same protocol (see `decide` in lib.rs).
+//! it when it speaks the same protocol (see `service`).
 
 use std::sync::Mutex;
 use std::time::Duration;

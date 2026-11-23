@@ -25,7 +25,7 @@ use proto::git::PaneDir;
 use proto::layout::{Action, Dir, PaneId, TabId};
 use proto::status::{AgentState, PaneStatus};
 use proto::wire::{
-    ClientMsg, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, write_msg,
+    ClientMsg, ErrorCode, PROTOCOL_VERSION, PaneInfo, Reply, ReqId, ServerMsg, SessionId, write_msg,
 };
 use proto::{Frame, Resize};
 use term::{Event, Foreground, Session, Spawn};
@@ -300,8 +300,9 @@ fn half(size: Resize, dir: Dir) -> Resize {
     }
 }
 
-fn err(message: impl Into<String>) -> Reply {
+fn err(code: ErrorCode, message: impl Into<String>) -> Reply {
     Reply::Error {
+        code,
         message: message.into(),
     }
 }
@@ -389,7 +390,9 @@ impl Daemon {
                                 Self::reply(
                                     &out,
                                     req,
-                                    err(format!(
+                                    err(
+                                        ErrorCode::Unsupported,
+                                        format!(
                                         "this terminal service (build {}) can't do that; restart it to use the newer version",
                                         me.build
                                     )),
@@ -425,6 +428,7 @@ impl Daemon {
                 Reply::Hello {
                     version: PROTOCOL_VERSION,
                     build: self.build.clone(),
+                    busy: Some(self.busy()),
                 },
             ),
             ClientMsg::Watch { req, shows } => {
@@ -470,7 +474,7 @@ impl Daemon {
                     Some(s) => Reply::Text {
                         text: s.read(source, lines.map(|n| n as usize)),
                     },
-                    None => err(format!("no pane p{pane}")),
+                    None => err(ErrorCode::NotFound, format!("no pane p{pane}")),
                 };
                 Self::reply(out, req, reply);
             }
@@ -489,7 +493,7 @@ impl Daemon {
                             mark: None,
                             agent: None,
                         },
-                        None => err(format!("no pane p{pane}")),
+                        None => err(ErrorCode::NotFound, format!("no pane p{pane}")),
                     },
                 };
                 Self::reply(out, req, reply);
@@ -503,18 +507,21 @@ impl Daemon {
             } => {
                 let mut st = self.lock();
                 let reply = if !st.sessions.contains_key(&pane) {
-                    err(format!("no pane p{pane}"))
+                    err(ErrorCode::NotFound, format!("no pane p{pane}"))
                 } else if state == AgentState::Done {
-                    err("report idle; done is worked out from it")
+                    err(
+                        ErrorCode::Invalid,
+                        "report idle; done is worked out from it",
+                    )
                 } else if agent.is_empty() {
-                    err("no agent name")
+                    err(ErrorCode::Invalid, "no agent name")
                 } else {
                     let seen = st.is_seen(pane);
                     if st.status.report(pane, agent, state, seq, seen) {
                         st.status_changed();
                         Reply::Ok
                     } else {
-                        err("stale seq")
+                        err(ErrorCode::Stale, "stale seq")
                     }
                 };
                 drop(st);
@@ -526,7 +533,7 @@ impl Daemon {
                     if st.sessions.contains_key(&pane) {
                         Ok(st.places.get(&pane).and_then(|p| p.root.clone()))
                     } else {
-                        Err(err(format!("no pane p{pane}")))
+                        Err(err(ErrorCode::NotFound, format!("no pane p{pane}")))
                     }
                 };
                 // Git can take a while; this thread also carries the
@@ -537,12 +544,13 @@ impl Daemon {
                     .spawn(move || {
                         let reply = match root {
                             Err(e) => e,
-                            Ok(None) => err("not in a git checkout"),
+                            Ok(None) => err(ErrorCode::NoRepo, "not in a git checkout"),
                             Ok(Some(root)) => match git::Checkout::discover(&root)
-                                .ok_or_else(|| err("not in a git checkout"))
+                                .ok_or_else(|| err(ErrorCode::NoRepo, "not in a git checkout"))
                                 .and_then(|c| {
-                                    c.diff(git::Limits::default())
-                                        .map_err(|e| err(format!("git diff: {e}")))
+                                    c.diff(git::Limits::default()).map_err(|e| {
+                                        err(ErrorCode::Failed, format!("git diff: {e}"))
+                                    })
                                 }) {
                                 Ok(diff) => Reply::Diff { diff },
                                 Err(e) => e,
@@ -568,7 +576,7 @@ impl Daemon {
                     st.status_changed();
                     Reply::Ok
                 } else {
-                    err(format!("no pane p{pane}"))
+                    err(ErrorCode::NotFound, format!("no pane p{pane}"))
                 };
                 drop(st);
                 Self::reply(out, req, reply);
@@ -617,8 +625,8 @@ impl Daemon {
 
     /// Apply a layout action. Returns the pane and tab it made or acted on.
     fn act(&self, conn: ConnId, action: Action) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
-        let no_pane = |p: PaneId| err(format!("no pane p{p}"));
-        let no_tab = |t: TabId| err(format!("no tab t{t}"));
+        let no_pane = |p: PaneId| err(ErrorCode::NotFound, format!("no pane p{p}"));
+        let no_tab = |t: TabId| err(ErrorCode::NotFound, format!("no tab t{t}"));
         match action {
             Action::NewTab {
                 near,
@@ -711,7 +719,7 @@ impl Daemon {
             Action::SetRatio { tab, path, ratio } => {
                 let mut st = self.lock();
                 if !st.model.set_ratio(tab, &path, ratio) {
-                    return Err(err("no such split"));
+                    return Err(err(ErrorCode::NotFound, "no such split"));
                 }
                 st.broadcast(None);
                 Ok((None, Some(tab)))
@@ -728,7 +736,7 @@ impl Daemon {
             Action::Zoom { tab, pane } => {
                 let mut st = self.lock();
                 if !st.model.zoom(tab, pane) {
-                    return Err(err("no such tab or pane"));
+                    return Err(err(ErrorCode::NotFound, "no such tab or pane"));
                 }
                 st.broadcast(None);
                 Ok((pane, Some(tab)))
@@ -745,7 +753,7 @@ impl Daemon {
     ) -> Result<(Option<PaneId>, Option<TabId>), Reply> {
         use proto::layout::{Run, TemplateTree};
         if template.tabs.is_empty() {
-            return Err(err("the layout has no tabs"));
+            return Err(err(ErrorCode::Invalid, "the layout has no tabs"));
         }
         // Which programs are installed, for commands with alternatives (or
         // a note for when none is): asked once, before anything starts.
@@ -874,7 +882,10 @@ impl Daemon {
             .map(|t| t.tree.leaves().len())
             .sum::<usize>();
         if failed.len() == opened {
-            return Err(err("none of the workspace's panes could start"));
+            return Err(err(
+                ErrorCode::Failed,
+                "none of the workspace's panes could start",
+            ));
         }
         for (session, typed, note) in sessions {
             if let Some(n) = note {
@@ -1204,8 +1215,35 @@ impl Daemon {
         Reply::Restored { tabs, panes }
     }
 
-    /// End every session; [`serve_socket`] then exits.
+    /// What runs in the panes besides their shells: a program name for each
+    /// pane not at its prompt.
+    fn busy(&self) -> Vec<String> {
+        let sessions: Vec<Arc<Session>> = {
+            let st = self.lock();
+            st.sessions
+                .iter()
+                .filter(|(id, _)| st.places.get(id).is_some_and(|p| !p.at_shell))
+                .map(|(_, e)| e.session.clone())
+                .collect()
+        };
+        sessions
+            .iter()
+            .map(|s| {
+                s.program()
+                    .and_then(|argv| argv.into_iter().next())
+                    .map(|p| p.rsplit(['/', '\\']).next().unwrap_or(&p).to_owned())
+                    .unwrap_or_else(|| "a program".to_owned())
+            })
+            .collect()
+    }
+
+    /// Save the layout, then end every session; [`serve_socket`] then exits.
     pub fn shutdown(&self) {
+        // Outside the lock: the saver writes on its own thread.
+        let saver = self.lock().saver.take();
+        if let Some(s) = &saver {
+            s.flush(std::time::Duration::from_secs(2));
+        }
         let sessions = {
             let mut st = self.lock();
             st.shutdown = true;
@@ -1257,7 +1295,7 @@ fn type_when_ready(session: &Session, cmd: &str) {
 }
 
 fn spawn_error(e: io::Error) -> Reply {
-    err(format!("could not start the shell: {e}"))
+    err(ErrorCode::Failed, format!("could not start the shell: {e}"))
 }
 
 #[cfg(unix)]
