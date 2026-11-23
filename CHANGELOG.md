@@ -12,6 +12,8 @@ its notes then go out with that version.
   width until you showed the window.
 - A `kibann` command started just as the terminal service starts no longer
   waits several seconds and starts a second one that gives up.
+- This update restarts the terminal service once (it asks first when
+  something is running in a pane).
 
 ## [0.8.0] - 2026-11-23
 
