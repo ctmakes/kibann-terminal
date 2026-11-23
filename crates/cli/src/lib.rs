@@ -764,6 +764,33 @@ fn timed_out(what: &str, timeout: Duration) -> Fail {
     )
 }
 
+/// What to type after a command so the shell prints `mark` and the
+/// command's exit code when it finishes ([`proto::wire::MARK_OSC`]), in the
+/// language of `shell` (a POSIX shell unless it's fish or PowerShell).
+/// `None` for cmd, which can't print the escape.
+fn mark_suffix(shell: Option<&str>, mark: &str) -> Option<String> {
+    let osc = proto::wire::MARK_OSC;
+    let name = shell
+        .map(|s| {
+            s.rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(s)
+                .to_ascii_lowercase()
+        })
+        .unwrap_or_default();
+    let name = name.strip_suffix(".exe").unwrap_or(&name);
+    Some(match name {
+        "fish" => format!("; printf '\\e]{osc};{mark};%d\\a' $status"),
+        // $? is whether the command worked; $LASTEXITCODE the code of the
+        // last program (stale after a failing cmdlet, hence 1 then).
+        "pwsh" | "powershell" => format!(
+            "; $k=$?; $c=$LASTEXITCODE; [Console]::Write(\"$([char]27)]{osc};{mark};$(if ($k) {{0}} elseif ($c) {{$c}} else {{1}})$([char]7)\")"
+        ),
+        "cmd" => return None,
+        _ => format!("; printf '\\033]{osc};{mark};%d\\007' $?"),
+    })
+}
+
 /// Type the command with a suffix that prints a mark and its exit code
 /// when it finishes, and wait for the mark.
 fn run_and_wait(c: &Client, pane: PaneId, text: &str, timeout: Duration) -> Out {
@@ -772,8 +799,20 @@ fn run_and_wait(c: &Client, pane: PaneId, text: &str, timeout: Duration) -> Out 
         .unwrap_or_default()
         .subsec_nanos();
     let mark = format!("k{}x{nanos:x}", std::process::id());
-    let osc = proto::wire::MARK_OSC;
-    let line = format!("{text}; printf '\\033]{osc};{mark};%d\\007' $?");
+    let shell = match c.request(|req| ClientMsg::Panes { req })? {
+        Reply::Panes { panes } => panes
+            .into_iter()
+            .find(|p| p.id == pane)
+            .and_then(|p| p.shell),
+        _ => None,
+    };
+    let suffix = mark_suffix(shell.as_deref(), &mark).ok_or_else(|| {
+        error(
+            "unsupported",
+            "--wait needs a POSIX shell, fish or PowerShell in the pane, not cmd",
+        )
+    })?;
+    let line = format!("{text}{suffix}");
     type_text(c, pane, &line, true)?;
     let deadline = Instant::now() + timeout;
     loop {
@@ -1349,6 +1388,21 @@ fn watch(args: &[String]) -> Out {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marks_in_each_shell() {
+        let m = |sh| mark_suffix(sh, "M").unwrap();
+        let posix = "; printf '\\033]7770;M;%d\\007' $?";
+        assert_eq!(m(None), posix);
+        assert_eq!(m(Some("zsh")), posix);
+        assert_eq!(m(Some("-bash")), posix);
+        assert_eq!(m(Some("fish")), "; printf '\\e]7770;M;%d\\a' $status");
+        let pwsh = m(Some(r"C:\Program Files\PowerShell\7\PWSH.EXE"));
+        assert!(pwsh.starts_with("; $k=$?; $c=$LASTEXITCODE; [Console]::Write("));
+        assert!(pwsh.contains("]7770;M;"));
+        assert_eq!(m(Some("powershell")), pwsh);
+        assert_eq!(mark_suffix(Some("cmd.exe"), "M"), None);
+    }
 
     #[test]
     fn skill_folders() {

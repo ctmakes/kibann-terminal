@@ -1149,6 +1149,7 @@ impl Daemon {
                 state: status.map(|a| a.state),
                 title: s.as_ref().map(|s| s.title()).unwrap_or_default(),
                 program: s.as_ref().and_then(|s| s.program()),
+                shell: s.as_ref().and_then(|s| s.shell().map(str::to_owned)),
                 cwd: s
                     .and_then(|s| s.cwd())
                     .map(|d| d.to_string_lossy().into_owned()),

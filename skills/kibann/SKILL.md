@@ -133,7 +133,7 @@ scrollback, including the command line you typed: `run P "make; echo
 built"` then `wait P --match built` matches at once. Wait for something
 only the output has (`--regex '^built$'`), or use `run --wait`.
 
-`run --wait` appends `; printf ...` to the command to learn its exit code,
-so give it one command line for a POSIX shell (zsh, bash); a trailing `&`
-or comment breaks it. Interactive programs that never return need `run`
+`run --wait` appends `; printf ...` to the command to learn its exit code
+(in the pane's shell's language: POSIX shells, fish and PowerShell; not
+cmd), so give it one command line; a trailing `&` or comment breaks it. Interactive programs that never return need `run`
 without `--wait`, then `wait --match` or `read`.

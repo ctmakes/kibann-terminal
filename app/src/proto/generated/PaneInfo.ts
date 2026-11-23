@@ -14,4 +14,8 @@ git: GitInfo | null,
 /**
  * The program running in it, `argv[0]` first, when it isn't the shell.
  */
-program?: Array<string>, };
+program?: Array<string>, 
+/**
+ * The program the pane started with, its shell (`zsh`, `pwsh`).
+ */
+shell?: string, };

@@ -647,6 +647,7 @@ mod tests {
             state: None,
             git: None,
             program: program.map(|p| p.iter().map(|s| (*s).to_owned()).collect()),
+            shell: None,
         }
     }
 

@@ -209,6 +209,10 @@ pub struct PaneInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub program: Option<Vec<String>>,
+    /// The program the pane started with, its shell (`zsh`, `pwsh`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shell: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

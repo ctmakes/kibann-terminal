@@ -152,6 +152,8 @@ pub struct Session {
     seen: Shared,
     thread: Option<JoinHandle<()>>,
     killer: Option<Box<dyn ChildKiller + Send + Sync>>,
+    /// The name of the program the session started (its shell).
+    shell: Option<String>,
 }
 
 impl Session {
@@ -190,6 +192,8 @@ impl Session {
         drop(pair.slave);
         let killer = child.clone_killer();
         let shell_pid = child.process_id();
+        // Started (exec'd) by now.
+        let shell = shell_pid.and_then(|p| procinfo::name(i32::try_from(p).ok()?));
         let reader = pair.master.try_clone_reader().map_err(io::Error::other)?;
         let writer = pair.master.take_writer().map_err(io::Error::other)?;
 
@@ -231,6 +235,7 @@ impl Session {
             seen,
             thread: Some(thread),
             killer: Some(killer),
+            shell,
         })
     }
 
@@ -264,6 +269,7 @@ impl Session {
             seen,
             thread: Some(thread),
             killer: None,
+            shell: None,
         })
     }
 
@@ -317,6 +323,12 @@ impl Session {
     /// The title the tab shows: the program's own, else its name.
     pub fn title(&self) -> String {
         seen(&self.seen).title.clone()
+    }
+
+    /// The name of the program the session started, its shell (`zsh`,
+    /// `pwsh`), when known.
+    pub fn shell(&self) -> Option<&str> {
+        self.shell.as_deref()
     }
 
     /// The program running in the foreground, `argv[0]` first, when it
