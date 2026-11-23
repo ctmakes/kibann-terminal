@@ -106,17 +106,15 @@ impl Theme {
             None => dark_base(),
         };
         let mut errors = Vec::new();
-        for (n, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((key, value)) = line.split_once('=') else {
-                errors.push(format!("line {}: expected `key = value`", n + 1));
-                continue;
+        for entry in crate::config::entries(text) {
+            let (n, key, value) = match entry {
+                Ok(e) => e,
+                Err(n) => {
+                    errors.push(format!("line {n}: expected `key = value`"));
+                    continue;
+                }
             };
-            let (key, value) = (key.trim(), value.trim());
-            let bad = |what: &str| format!("line {}: {what}: {value}", n + 1);
+            let bad = |what: &str| format!("line {n}: {what}: {value}");
             match key {
                 "palette" => {
                     let parsed = value.split_once('=').and_then(|(i, c)| {
@@ -280,17 +278,11 @@ impl ThemeChoice {
 pub fn config_theme(text: &str) -> (Option<ThemeChoice>, Vec<String>) {
     let mut choice = None;
     let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=')
-            && k.trim() == "theme"
-        {
+    for (n, k, v) in crate::config::entries(text).flatten() {
+        if k == "theme" {
             match ThemeChoice::parse(v) {
                 Some(c) => choice = Some(c),
-                None => errors.push(format!("line {}: bad theme: {}", n + 1, v.trim())),
+                None => errors.push(format!("line {n}: bad theme: {v}")),
             }
         }
     }
@@ -311,7 +303,7 @@ mod tests {
     fn parses_a_theme_file() {
         let (t, errors) = Theme::parse(
             "# Dracula\npalette = 1=#ff5555\npalette = 200=#000000\nbackground = #282a36\n\
-             foreground=f8f8f2\ncursor-color = #fff\nselection-background = #44475a\n\
+             foreground=f8f8f2\ncursor-color = #fff\nselection-background = #44475a # soft\n\
              font-size = 14\npalette = 3=nope\nbackground #123456\n",
             None,
         );
@@ -363,6 +355,10 @@ mod tests {
         assert!(e.is_empty());
         let (_, e) = config_theme("theme = dark:X,purple:Y\n");
         assert_eq!(e.len(), 1);
+        // Read as every other key is: quotes and a comment after the value.
+        let (c, e) = config_theme("theme = \"Nord\" # cold\n");
+        assert_eq!(c.unwrap().dark, "Nord");
+        assert!(e.is_empty());
 
         let choice = ThemeChoice {
             light: "A".into(),

@@ -82,22 +82,9 @@ impl Settings {
     pub fn parse(text: &str) -> (Self, Vec<String>) {
         let mut s = Self::default();
         let mut errors = Vec::new();
-        for (n, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.starts_with('#') {
-                continue;
-            }
-            let Some((k, v)) = line.split_once('=') else {
-                continue;
-            };
-            // A comment after the value, as in Ghostty.
-            let v = v.split(" #").next().unwrap_or("").trim();
-            let v = v
-                .strip_prefix('"')
-                .and_then(|x| x.strip_suffix('"'))
-                .unwrap_or(v);
-            let bad = |what: &str| format!("line {}: bad {what}: {v}", n + 1);
-            match k.trim() {
+        for (n, k, v) in entries(text).flatten() {
+            let bad = |what: &str| format!("line {n}: bad {what}: {v}");
+            match k {
                 // An empty value clears the list, as in Ghostty.
                 "font-family" if v.is_empty() => s.font_family.clear(),
                 "font-family" => {
@@ -139,6 +126,31 @@ impl Settings {
         }
         (s, errors)
     }
+}
+
+/// The `key = value` lines of a config or theme file, in Ghostty's syntax,
+/// each with its line number (from 1). Blank lines and `#` comments are
+/// skipped. A value is trimmed, a comment after it (` # ...`) is dropped and
+/// so are quotes around it; a value that starts with `#` (a color) stays.
+/// `Err(n)`: line `n` is none of those. Every reader of these files goes
+/// through here, so they all agree on what a line says.
+pub fn entries(text: &str) -> impl Iterator<Item = Result<(usize, &str, &str), usize>> {
+    text.lines().enumerate().filter_map(|(i, line)| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            return Some(Err(i + 1));
+        };
+        let v = v.trim();
+        let v = v.split(" #").next().unwrap_or("").trim_end();
+        let v = v
+            .strip_prefix('"')
+            .and_then(|x| x.strip_suffix('"'))
+            .unwrap_or(v);
+        Some(Ok((i + 1, k.trim(), v)))
+    })
 }
 
 /// The keys Settings (the app's modal) may write. `theme` has its own
