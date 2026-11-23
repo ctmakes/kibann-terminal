@@ -2,13 +2,12 @@ import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../ipc";
 import type { Frame, InputEvent, Resize } from "../proto";
 import { decodeFrame } from "../proto/decode";
+import type { PaneId } from "../workspace/layout";
 import type { Transport } from "./types";
 
 export function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
-
-export type SessionId = number;
 
 /**
  * One session (pane) over Tauri: frames over a Channel, input as commands.
@@ -19,7 +18,7 @@ export class TauriTransport implements Transport {
   private onFrame: ((frame: Frame) => void) | null = null;
   private channel: Channel<unknown> | null = null;
 
-  constructor(readonly id: SessionId) {}
+  constructor(readonly id: PaneId) {}
 
   async attach(onFrame: (frame: Frame) => void): Promise<void> {
     this.onFrame = onFrame;
