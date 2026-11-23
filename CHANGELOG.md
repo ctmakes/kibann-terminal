@@ -19,6 +19,8 @@ its notes then go out with that version.
   after it, now work for `theme` too (`theme = "Nord" # cold`).
 - `kibann pane run --wait` works in fish and PowerShell as well as in
   POSIX shells.
+- A pane opened for a command that ends at once closes with it, instead
+  of sometimes staying open and empty.
 - An agent that finishes in a pane you aren't looking at is marked done
   even while `kibann pane diff --view` is open.
 - Panels in a screen need the "type" permission to close a pane, and can't

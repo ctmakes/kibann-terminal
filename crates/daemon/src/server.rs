@@ -979,8 +979,8 @@ impl Daemon {
             },
             size,
         )?;
+        let session = Arc::new(session);
         let exited = Arc::new(AtomicBool::new(false));
-        session.on_event(events(id, exited.clone(), self.me.clone()));
         let mut st = self.lock();
         // Under the lock, so a theme set meanwhile isn't missed.
         if let Some(t) = &st.theme {
@@ -989,11 +989,15 @@ impl Daemon {
         st.sessions.insert(
             id,
             Entry {
-                session: Arc::new(session),
-                exited,
+                session: session.clone(),
+                exited: exited.clone(),
                 size,
             },
         );
+        // Only now: a program that ends at once must find its session to
+        // take with it (an exit before this waits for it). Sending it is
+        // a message to the session's thread, safe under the lock.
+        session.on_event(events(id, exited, self.me.clone()));
         Ok(id)
     }
 
