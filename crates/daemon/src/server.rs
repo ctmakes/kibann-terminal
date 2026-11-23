@@ -98,8 +98,9 @@ struct State {
     next_conn: ConnId,
     /// Connections that get every layout change.
     watchers: HashSet<ConnId>,
-    /// The watchers that show the panes to someone (see [`ClientMsg::Watch`]).
-    viewers: HashSet<ConnId>,
+    /// The pane each connection's user is looking at (see
+    /// [`ClientMsg::Looking`]).
+    looking: HashMap<ConnId, PaneId>,
     model: Model,
     /// Panes whose shell ended, with the exit code, newest last.
     ended: VecDeque<(PaneId, Option<u32>)>,
@@ -163,25 +164,15 @@ impl State {
         }
     }
 
-    /// The pane the user is looking at: the focused pane of the shown tab,
-    /// while an app shows it.
-    fn seen_pane(&self) -> Option<PaneId> {
-        if self.viewers.is_empty() {
-            return None;
-        }
-        let layout = self.model.layout();
-        let tab = layout.tabs.iter().find(|t| Some(t.id) == layout.active)?;
-        Some(tab.zoomed.unwrap_or(tab.focused))
-    }
-
+    /// Someone is looking at `pane`, through any client.
     fn is_seen(&self, pane: PaneId) -> bool {
-        self.seen_pane() == Some(pane)
+        self.looking.values().any(|&p| p == pane)
     }
 
     /// After anything that may change agent status (or what is seen): clear
-    /// done on the seen pane, and send the map if it changed.
+    /// done on the panes looked at, and send the map if it changed.
     fn status_changed(&mut self) {
-        if let Some(p) = self.seen_pane() {
+        for &p in self.looking.values() {
             self.status.seen(p);
         }
         if let Some(panes) = self.status.changed() {
@@ -474,12 +465,9 @@ impl Daemon {
                     busy: Some(self.busy()),
                 },
             ),
-            ClientMsg::Watch { req, shows } => {
+            ClientMsg::Watch { req } => {
                 let mut st = self.lock();
                 st.watchers.insert(conn);
-                if shows {
-                    st.viewers.insert(conn);
-                }
                 let layout = st.model.layout().clone();
                 // Also as the first event, so a client can take every
                 // layout from one ordered stream.
@@ -633,6 +621,14 @@ impl Daemon {
                 };
                 drop(st);
                 Self::reply(out, req, reply);
+            }
+            ClientMsg::Looking { pane } => {
+                let mut st = self.lock();
+                match pane {
+                    Some(p) => st.looking.insert(conn, p),
+                    None => st.looking.remove(&conn),
+                };
+                st.status_changed();
             }
             ClientMsg::Attach { session } => with(session, &|s| {
                 let out = out.clone();
@@ -1165,7 +1161,8 @@ impl Daemon {
             out.close();
         }
         st.watchers.remove(&conn);
-        st.viewers.remove(&conn);
+        st.looking.remove(&conn);
+        st.status_changed();
         for e in st.sessions.values() {
             e.session.unview(conn);
         }

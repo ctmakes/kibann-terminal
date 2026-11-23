@@ -17,6 +17,10 @@ export interface Acted {
 
 export interface LayoutBackend {
   act(action: LayoutAction): Promise<Acted>;
+  /** The pane the user is looking at (the focused pane of the shown tab,
+   * while the window has focus), or null: agents finishing there aren't
+   * "done". */
+  looking?(pane: PaneId | null): void;
 }
 
 /** Focus changes the app makes itself aren't sent back to it (as the daemon
@@ -75,13 +79,19 @@ export class FakeBackend implements LayoutBackend {
     this.deliverStatus();
   }
 
-  private seen(pane: PaneId): boolean {
-    const l = this.model.layout;
-    const tab = l.tabs.find((t) => t.id === l.active);
-    return !!tab && (tab.zoomed ?? tab.focused) === pane;
+  /** The pane the workspace says the user looks at. */
+  private lookingAt: PaneId | null = null;
+
+  looking(pane: PaneId | null): void {
+    this.lookingAt = pane;
+    this.clearSeen();
   }
 
-  /** After a layout change: the seen pane's done becomes idle. */
+  private seen(pane: PaneId): boolean {
+    return this.lookingAt === pane;
+  }
+
+  /** After a change: the seen pane's done becomes idle. */
   private clearSeen(): void {
     for (const [key, s] of Object.entries(this.status)) {
       if (s.state === "done" && this.seen(Number(key))) {

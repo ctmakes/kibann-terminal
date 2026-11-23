@@ -652,7 +652,7 @@ fn next_status(rx: &Receiver<Ev>, pane: SessionId, state: Option<AgentState>) {
 }
 
 #[test]
-fn a_tool_that_follows_the_panes_doesnt_see_them() {
+fn a_client_that_says_nothing_looks_at_nothing() {
     let path = socket();
     let dir = path.parent().unwrap().join("bin");
     std::fs::create_dir_all(&dir).unwrap();
@@ -668,7 +668,7 @@ fn a_tool_that_follows_the_panes_doesnt_see_them() {
     // The diff viewer, say, with the app closed.
     let tool = Client::connect(&path, f).unwrap();
     let first = sh(&tool, None);
-    tool.follow().unwrap();
+    tool.watch().unwrap();
     let script = format!(
         "set -m; {0}/claude {0}/agent.sh; exec /bin/sh",
         dir.display()
@@ -687,6 +687,9 @@ fn a_tool_that_follows_the_panes_doesnt_see_them() {
     // It finishes in the focused pane, but nobody is looking: done.
     type_text(&tool, p, "\r");
     next_status(&rx, p, Some(AgentState::Done));
+    // Until someone does (the app's window coming back, say).
+    tool.looking(Some(p)).unwrap();
+    next_status(&rx, p, Some(AgentState::Idle));
     d.shutdown();
     h.join().unwrap().unwrap();
 }
@@ -710,6 +713,7 @@ fn agents_are_detected_and_done_while_unseen() {
     let app = Client::connect(&path, f).unwrap();
     let first = sh(&app, None);
     app.watch().unwrap();
+    app.looking(Some(first)).unwrap();
 
     let script = format!(
         "set -m; {0}/claude {0}/agent.sh; exec /bin/sh",
@@ -740,6 +744,7 @@ fn agents_are_detected_and_done_while_unseen() {
     type_text(&app, p, "\r");
     next_status(&rx, p, Some(AgentState::Done));
     app.act(Action::Focus { pane: p }).unwrap();
+    app.looking(Some(p)).unwrap();
     next_status(&rx, p, Some(AgentState::Idle));
 
     // A report beats the screen; an older one is dropped; release undoes it.

@@ -153,6 +153,16 @@ async fn layout_watch(state: State<'_, Term>) -> Result<Layout, String> {
     state.client()?.watch().map_err(|e| e.to_string())
 }
 
+/// The pane the user is looking at in this window, or none (it doesn't
+/// have focus): agents finishing there aren't "done".
+#[tauri::command]
+fn layout_looking(
+    state: State<'_, Term>,
+    pane: Option<proto::layout::PaneId>,
+) -> Result<(), String> {
+    state.client()?.looking(pane).map_err(|e| e.to_string())
+}
+
 /// With no panes open: reopen the saved tabs and splits, with fresh shells.
 /// Returns how many panes came back (0: none).
 #[tauri::command]
@@ -1107,6 +1117,7 @@ pub fn run() {
             layout_watch,
             layout_restore,
             layout_act,
+            layout_looking,
             workspaces_list,
             workspace_open,
             workspace_save,

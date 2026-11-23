@@ -39,6 +39,7 @@ async function start(): Promise<void> {
   const win = getCurrentWindow();
   const backend: LayoutBackend = {
     act: (action: LayoutAction) => invoke<Acted>("layout_act", { action }),
+    looking: (pane) => void invoke("layout_looking", { pane }).catch(() => {}),
   };
   // ●N opens the diff viewer (`kibann pane diff P --view`, run by this
   // executable) in a split beside the pane; again, it focuses that split.

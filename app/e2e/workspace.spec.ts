@@ -1259,6 +1259,12 @@ test.describe("notifications", () => {
     await agent(page, 2, "idle"); // finished, unseen: done
     await settle(page);
     expect((await notes(page)).at(-1)).toMatchObject({ pane: 2, title: "Claude Code finished" });
+    // Done, in the focused pane, until the window comes back.
+    const dot = () => page.evaluate(() => (window as any).__ws.dots().panes[2]);
+    expect(await dot()).toBe("done");
+    await page.evaluate(() => (window as any).__ws.setWindowFocused(true));
+    await settle(page);
+    expect(await dot()).toBeNull(); // idle: no dot
 
     // Turned off in the config.
     const n = (await notes(page)).length;

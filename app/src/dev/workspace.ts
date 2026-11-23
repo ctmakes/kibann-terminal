@@ -332,6 +332,7 @@ const api = {
   /** The window gains or loses focus (as far as notifications care). */
   setWindowFocused(on: boolean) {
     windowFocused = on;
+    window.dispatchEvent(new Event(on ? "focus" : "blur"));
   },
   /** The config file's settings changed. */
   setSettings(s: Partial<Settings>) {

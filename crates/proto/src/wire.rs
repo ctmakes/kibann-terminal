@@ -21,7 +21,7 @@ use crate::{Frame, InputEvent, Resize};
 /// they are how an app finds an older daemon and replaces it. Their fields
 /// never change; new ones may be added to [`Reply::Hello`], with defaults,
 /// since an older daemon leaves them out.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Largest message accepted, so a bad length can't make us allocate gigabytes.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -46,11 +46,14 @@ pub enum ClientMsg {
     /// [`ServerMsg::Git`].
     Watch {
         req: ReqId,
-        /// This connection shows the panes to someone (the app's window), so
-        /// its focused pane counts as looked at: an agent finishing there
-        /// isn't "done". A tool that only follows changes (the diff viewer)
-        /// says false.
-        shows: bool,
+    },
+    /// The pane the user is looking at through this connection, if any:
+    /// the focused pane of the shown tab while its window has focus. An
+    /// agent finishing in a pane someone looks at isn't "done", and a done
+    /// one turns idle once someone does. A connection that never says
+    /// shows nothing (a tool that follows the panes).
+    Looking {
+        pane: Option<PaneId>,
     },
     /// Replied with [`Reply::Layout`].
     GetLayout {
@@ -158,7 +161,8 @@ impl ClientMsg {
             | Release { req, .. }
             | SetTheme { req, .. }
             | Restore { req } => Some(*req),
-            Attach { .. }
+            Looking { .. }
+            | Attach { .. }
             | Detach { .. }
             | Input { .. }
             | Resize { .. }
@@ -430,10 +434,8 @@ mod tests {
                 req: 1,
                 version: PROTOCOL_VERSION,
             },
-            ClientMsg::Watch {
-                req: 2,
-                shows: true,
-            },
+            ClientMsg::Watch { req: 2 },
+            ClientMsg::Looking { pane: Some(4) },
             ClientMsg::Act {
                 req: 3,
                 action: Action::Split {

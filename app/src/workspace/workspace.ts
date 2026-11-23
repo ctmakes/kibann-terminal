@@ -322,6 +322,16 @@ export class Workspace {
     document.addEventListener("visibilitychange", onVisible);
     this.cleanups.push(() => document.removeEventListener("visibilitychange", onVisible));
 
+    // What the user looks at changes with the window's focus too. After
+    // the event: focus moving into a part's frame blurs the window first.
+    const onWindowFocus = () => setTimeout(() => this.reportLooking(), 0);
+    window.addEventListener("focus", onWindowFocus);
+    window.addEventListener("blur", onWindowFocus);
+    this.cleanups.push(
+      () => window.removeEventListener("focus", onWindowFocus),
+      () => window.removeEventListener("blur", onWindowFocus),
+    );
+
     const ro = new ResizeObserver(() => this.active && this.layout(this.active));
     ro.observe(this.stage);
     const onKey = (e: KeyboardEvent) => this.onKeyDown(e);
@@ -629,7 +639,22 @@ export class Workspace {
     }
     this.updateBar();
     this.emitTitle();
+    this.reportLooking();
     if (hadTabs && next.length === 0) this.opts.onEmpty?.();
+  }
+
+  /** What the backend was last told the user looks at. */
+  private lookingSent: PaneId | null | undefined = undefined;
+
+  /** Tell the backend which pane the user looks at, when that changed:
+   * the focused one of the shown tab, while the window has focus. */
+  private reportLooking(): void {
+    const focused = this.opts.windowFocused?.() ?? document.hasFocus();
+    const tab = this.active;
+    const pane = focused && tab ? (tab.zoomed ?? tab.focused) : null;
+    if (pane === this.lookingSent) return;
+    this.lookingSent = pane;
+    this.opts.backend.looking?.(pane);
   }
 
   /** Show the daemon's agent status: pane dots, tab dots, the badge. */
@@ -1264,6 +1289,7 @@ export class Workspace {
     if (tab === this.active) {
       this.updateBar();
       this.emitTitle();
+      this.reportLooking();
     }
   }
 
